@@ -1,0 +1,32 @@
+{
+  "name": "imparatorluk",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "dev": "vite",
+    "dev:mock": "vite --mode mock",
+    "build": "tsc -p . && vite build && npm run build:edge",
+    "build:edge": "esbuild src/server/core.ts --bundle --format=esm --platform=neutral --outfile=supabase/functions/game/core.js",
+    "test": "vitest run",
+    "sim": "tsx scripts/simulate.ts",
+    "smoke": "node scripts/smoke.mjs",
+    "typecheck": "tsc -p ."
+  },
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "puppeteer-core": "^24.43.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^4.1.12",
+    "ws": "^8.22.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.109.0"
+  },
+  "private": true
+}
