@@ -1,3 +1,4 @@
+import { enactLaw, lawTitle, validateLaw, type LawSpec } from './laws';
 /**
  * Meclis: seats by district and profession, factions, bills with debate → vote → (Kayzer sanction) → effect.
  * The Kayzer's veto is final – there is no override of any kind.
@@ -27,6 +28,7 @@ export const SEATS: Omit<Seat, 'holder'>[] = [
   { id: 'emekci', label: 'Emekçiler', kind: 'meslek', key: 'emekci' },
 ];
 export const BILL_LABEL: Record<BillKind, string> = {
+  ozel: 'Özel kanun (serbest)',
   vergi: 'Vergi', fiyat: 'Narh (fiyat)', maas: 'Maaş', butce: 'Bütçe', kanun: 'Kanun', insaat: 'İnşaat', af: 'Genel af',
   gensoru: 'Gensoru', sorusturma: 'Soruşturma komisyonu', dokunulmazlik: 'Dokunulmazlığın kaldırılması', azil: 'Başkan’ın azli',
 };
@@ -102,8 +104,9 @@ export function electLeaders(w: World): void {
   }
 }
 
-export function validateBill(w: World, kind: BillKind, value: number, target: string): string | null {
+export function validateBill(w: World, kind: BillKind, value: number, target: string, law?: LawSpec): string | null {
   switch (kind) {
+    case 'ozel': return law ? validateLaw(law) : 'Kanun metni yok.';
     case 'vergi': return value >= 0 && value <= 40 ? null : 'Vergi 0–40 arası olmalı.';
     case 'fiyat': return GOODS.includes(target as never) && value > 0 && value <= 100 ? null : 'Geçersiz narh.';
     case 'maas': return (STATE_PROFS.includes(target as Profession) || target === 'meclis') && value >= 0 && value <= 60 ? null : 'Geçersiz maaş.';
@@ -118,9 +121,10 @@ export function validateBill(w: World, kind: BillKind, value: number, target: st
   }
 }
 
-export function billTitle(w: World, kind: BillKind, value: number, target: string): string {
+export function billTitle(w: World, kind: BillKind, value: number, target: string, law?: LawSpec): string {
   const who = findPerson(w, target)?.name ?? '';
   switch (kind) {
+    case 'ozel': return law ? (law.name?.trim() || lawTitle(law)) : 'Özel kanun';
     case 'vergi': return `Satış vergisi %${value} olsun`;
     case 'fiyat': return `${GOOD_LABEL[target as keyof typeof GOOD_LABEL] ?? target} narhı ${value} Dinar`;
     case 'maas': return `${target === 'meclis' ? 'Meclis üyesi' : PROF_LABEL[target as Profession]} maaşı ${value} Dinar`;
@@ -135,13 +139,13 @@ export function billTitle(w: World, kind: BillKind, value: number, target: strin
   }
 }
 
-export function propose(w: World, proposer: Person, kind: BillKind, value: number, target: string, title?: string): Bill | string {
+export function propose(w: World, proposer: Person, kind: BillKind, value: number, target: string, title?: string, law?: LawSpec): Bill | string {
   if (!proposer.meclis) return 'Sadece Meclis üyeleri kanun teklif edebilir.';
   if (kind === 'azil') target = w.kayzerId ?? '';
-  const err = validateBill(w, kind, value, target); if (err) return err;
+  const err = validateBill(w, kind, value, target, law); if (err) return err;
   if (w.meclis.bills.filter((b) => b.status === 'tartisma' || b.status === 'oylama').length >= 6) return 'Meclis gündemi dolu.';
   if (w.meclis.bills.some((b) => b.proposerId === proposer.id && (b.status === 'tartisma' || b.status === 'oylama'))) return 'Görüşülen bir teklifiniz zaten var.';
-  const bill: Bill = { id: nextId(w, 'B'), kind, value, target, title: (title?.slice(0, 60) || billTitle(w, kind, value, target)), proposerId: proposer.id, day: w.day,
+  const bill: Bill = { id: nextId(w, 'B'), kind, value, target, title: (title?.slice(0, 60) || billTitle(w, kind, value, target, law)), law, proposerId: proposer.id, day: w.day,
     debateUntil: w.day + DEBATE_DAYS, voteUntil: w.day + DEBATE_DAYS + VOTE_DAYS, status: 'tartisma', votes: {}, speeches: [] };
   w.meclis.bills.push(bill);
   mlog(w, `${proposer.name} teklif verdi: “${bill.title}”.`, proposer.id);
@@ -154,6 +158,7 @@ export function stance(w: World, p: Person, b: Bill): number {
   let s = 0;
   const target = findPerson(w, b.target);
   switch (b.kind) {
+    case 'ozel': s = lawStance(w, p, f, b.law); break;
     case 'vergi': s = b.value < w.taxRate ? (f === 'esnaf' ? 0.8 : f === 'saltanatci' ? -0.2 : 0.4) : (f === 'saltanatci' ? 0.3 : -0.6); if (b.value > 20) s -= 0.6; break;
     case 'fiyat': s = f === 'esnaf' ? -0.7 : f === 'halkci' ? 0.6 : 0; break;
     case 'maas': s = b.target === p.prof || b.target === 'meclis' ? 0.8 : f === 'halkci' ? 0.4 : f === 'esnaf' ? -0.4 : 0; break;
@@ -191,6 +196,7 @@ function enactable(b: Bill): boolean { return b.status === 'kabul'; }
 export function enact(w: World, b: Bill): void {
   b.status = 'kabul';
   switch (b.kind) {
+    case 'ozel': if (b.law) enactLaw(w, b.law, findPerson(w, b.proposerId) ?? null, 'meclis'); break;
     case 'vergi': w.taxRate = b.value; break;
     case 'fiyat': { const g = b.target as keyof typeof BASE_PRICE; w.prices[g] = b.value; for (const l of w.listings) if (l.good === g && l.price > b.value) l.price = b.value; break; }
     case 'maas': if (b.target === 'meclis') w.meclis.salary = b.value; else w.salaries[b.target as Profession] = b.value; break;
@@ -303,3 +309,23 @@ export function budgetLeft(w: World): number {
   return Math.max(0, w.budget.limit - w.budget.spent);
 }
 export function spend(w: World, amount: number): boolean { if (budgetLeft(w) < amount) return false; w.budget.spent += amount; return true; }
+
+/** NPC stance on a custom law: ideology, religion, own trade and wallet. */
+function lawStance(w: World, p: Person, f: string, l?: LawSpec): number {
+  if (!l) return -1;
+  const PRODUCER: Record<string, string> = { ciftci: 'bugday', firinci: 'ekmek', sucu: 'su', kasap: 'et', balikci: 'balik', dokumaci: 'kumas', terzi: 'elbise', marangoz: 'odun', mobilyaci: 'mobilya', demirci: 'alet', barci: 'icki' };
+  const mine = l.good && PRODUCER[p.prof] === l.good;
+  switch (l.kind) {
+    case 'satisVergisi': return (w.taxRate - l.value) / 8 + (f === 'saltanatci' ? 0.2 : f === 'esnaf' ? -0.3 : 0);
+    case 'basVergisi': return (w.headTax - l.value) / 2 + (f === 'halkci' ? -0.3 : 0);
+    case 'malVergisi': return (mine ? -1 : -0.2) + (f === 'saltanatci' ? 0.3 : 0);
+    case 'narh': return mine ? -0.9 : f === 'halkci' ? 0.6 : f === 'esnaf' ? -0.6 : 0.1;
+    case 'yasak': return l.good === 'icki' ? (p.din - 50) / 40 : ['ekmek', 'su', 'bugday'].includes(l.good ?? '') ? -1 : mine ? -1 : -0.2;
+    case 'sokak': return f === 'saltanatci' ? 0.4 : f === 'cumhuriyetci' ? -0.7 : -0.1;
+    case 'hizmet': return f === 'saltanatci' ? 0.3 : f === 'halkci' ? -0.6 : -0.2;
+    case 'destek': return mine ? 1 : f === 'halkci' ? 0.4 : f === 'esnaf' ? 0.3 : 0;
+    case 'servetEsigi': return p.money > l.value ? -0.8 : f === 'halkci' ? 0.6 : 0;
+    case 'sertCeza': return f === 'saltanatci' ? 0.6 : f === 'cumhuriyetci' ? -0.6 : p.honesty < 35 ? -0.8 : 0.1;
+  }
+  return 0;
+}

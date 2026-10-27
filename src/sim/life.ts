@@ -12,9 +12,13 @@ import { findPerson, WORKPLACE } from './world';
 import { log, personal } from './log';
 import { fullAI, openCase } from './ai';
 import { die } from './family';
+import { crimeFactor, curfewAt, customLawsDay, wealthThreshold } from './laws';
+import { hoarderAI, patrolDay } from './hoard';
 
 export const DOCTOR_FEE = 10;
 export const MEALS = 3; export const WATERS = 5;
+/** The ruler and nobles living in the Saray eat from the palace kitchen (paid by the treasury). */
+const palace = (w: World, p: Person): boolean => p.id === w.kayzerId || (p.soylu && p.home === 'saray');
 const active = (p: Person): boolean => p.prof !== 'naip' && p.jailedDays === 0 && p.exiledDays === 0;
 const rel = (a: Person, b: Person, d: number, why: string): void => {
   a.relations[b.id] = clamp((a.relations[b.id] ?? 0) + d, -100, 100); a.relNote[b.id] = why;
@@ -27,6 +31,7 @@ const FOOD_JOY: Partial<Record<Good, number>> = { ekmek: 0.6, balik: 2, et: 2.5 
 /** Eat one meal: from home stock, else buy (fish/meat if affordable – more happiness – else bread). */
 export function eatMeal(w: World, p: Person): boolean {
   if (p.prof === 'naip') { p.meals += 1; return true; }
+  if (palace(w, p)) { if (transfer(w, 'saray', 'dis', 1, 'saray mutfağı')) { p.meals += 1; p.hunger = clamp(p.hunger - 35); p.mood = clamp(p.mood + 1); return true; } }
   if (p.jailedDays > 0) { p.meals += 1; p.hunger = clamp(p.hunger - 30); return true; } // zindan ekmeği
   const prefs: Good[] = p.money > 30 && chance(w, 0.5) ? (chance(w, 0.5) ? ['et', 'balik', 'ekmek'] : ['balik', 'et', 'ekmek']) : ['ekmek', 'balik', 'et'];
   for (const g of prefs) {
@@ -38,6 +43,7 @@ export function eatMeal(w: World, p: Person): boolean {
 }
 export function drinkWater(w: World, p: Person): boolean {
   if (p.prof === 'naip' || p.jailedDays > 0) { p.drinks += 1; return true; }
+  if (palace(w, p) && transfer(w, 'saray', 'dis', 0.3, 'saray mutfağı')) { p.drinks += 1; p.thirst = clamp(p.thirst - 25); return true; }
   if (p.inv.su <= 0) buy(w, p.id, 'su', 2, Math.max(0, p.money * 0.5));
   if (p.inv.su > 0) { p.inv.su -= 1; p.drinks += 1; p.thirst = clamp(p.thirst - 25); return true; }
   p.thirst = clamp(p.thirst + 15); return false;
@@ -122,7 +128,8 @@ export function needsHour(w: World): void {
 
 export function lifeHour(w: World): void {
   const h = w.hour;
-  if (h === 9) karaborsa(w);
+  if (h === 9) { karaborsa(w); patrolDay(w); }
+  if (h === 11) { hoarderAI(w); hamalWork(w); }
   if (h === 13) for (const p of w.people) if (fullAI(p) && active(p) && p.din > 55 && chance(w, 0.4)) pray(w, p);
   if (h === 13 && w.day % 7 === 5) { const imam = w.people.find((x) => (x.prof === 'imam' || x.prof === 'hoca') && active(x) && fullAI(x)); if (imam) sermon(w, imam, pick(w, ['namaz', 'icki', 'sabir'] as const)); }
   if (h === 14) for (const p of w.people) if (fullAI(p) || p.npc) { if (needsHelp(p) && active(p)) seeDoctor(w, p, true); }
@@ -130,7 +137,7 @@ export function lifeHour(w: World): void {
   if (h === 15) collectTaxes(w);
   if (h === 18) for (const p of w.people) if (fullAI(p) && active(p)) shop(w, p);
   if (h === 20) for (const p of w.people) if (fullAI(p) && active(p) && p.din < 45 && p.money > 10 && chance(w, 0.35)) drinkAlcohol(w, p);
-  if (h === 21) for (const p of w.people) if (fullAI(p) && active(p)) p.nightOut = chance(w, (p.honesty < 35 ? 0.25 : 0.05) * (lawOn(w, 'gece') ? 0.3 : 1));
+  if (h === 21) for (const p of w.people) if (fullAI(p) && active(p)) p.nightOut = chance(w, (p.honesty < 35 ? 0.25 : 0.05) * (lawOn(w, 'gece') || curfewAt(w, 23) ? 0.3 : 1) * crimeFactor(w));
   if (h === 6) for (const p of w.people) if (fullAI(p)) p.nightOut = false;
   if (h === 7 || h === 20) resolveArrests(w);
   if (h === 23) nightCrime(w);
@@ -146,7 +153,7 @@ function shop(w: World, p: Person): void {
 
 export function endOfDayLife(w: World): void {
   for (const p of [...w.people]) needsEndOfDay(w, p);
-  nature(w); granaryDay(w); outsideWorld(w); wealthTax(w); switchJobs(w); rumorsDay(w); achievements(w);
+  customLawsDay(w); nature(w); granaryDay(w); outsideWorld(w); wealthTax(w); switchJobs(w); rumorsDay(w); achievements(w);
   w.arrests = w.arrests.filter((a) => a.status === 'bekliyor' && w.day - a.day <= 1);
   w.offers = w.offers.filter((o) => w.day - o.day <= 2);
   w.talks = w.talks.filter((t) => w.day - t.day <= 0);
@@ -181,15 +188,15 @@ export function granaryRelease(w: World, qty: number): number {
   const q = Math.min(Math.floor(w.granary), qty); if (q <= 0) return 0;
   w.granary -= q;
   const ex = w.listings.find((l) => l.sellerId === 'saray' && l.good === 'bugday');
-  const price = Math.round(BASE_PRICE.bugday * 1.3 * 100) / 100;
+  const price = Math.round(BASE_PRICE.bugday * 2 * 100) / 100;
   if (ex) { ex.qty += q; ex.price = price; } else w.listings.push({ id: nextId(w, 'L'), sellerId: 'saray', good: 'bugday', qty: q, price, market: 'ambar' });
   return q;
 }
 function granaryDay(w: World): void {
   w.granary = Math.max(0, w.granary * 0.99); // surplus grain spoils slowly
   const drought = w.nature?.kind === 'kuraklik' || w.nature?.kind === 'sel';
-  if (drought && w.granary > 0) { const q = granaryRelease(w, 90); if (q) log(w, `Tahıl ambarından ${q} buğday sabit fiyatla satışa çıktı.`); }
-  else if (!drought && w.prices.bugday <= BASE_PRICE.bugday * 0.9 && w.granary < 1500 && w.treasury > 2500) granaryBuy(w, 40);
+  if (drought && w.granary > 0) { const q = granaryRelease(w, 40); if (q) log(w, `Tahıl ambarından ${q} buğday sabit fiyatla satışa çıktı.`); }
+  else if (!drought && w.prices.bugday <= BASE_PRICE.bugday * 0.9 && w.granary < 700 && w.treasury > 2500) granaryBuy(w, 30);
 }
 
 // ---------------- outside world ----------------
@@ -271,19 +278,12 @@ export function collectTaxes(w: World): void {
   for (const p of w.people.filter((x) => x.smuggle && active(x))) if (chance(w, 0.12)) arrest(w, p, 'kacakcilik', null, 20);
 }
 function karaborsa(w: World): void {
-  const b = w.people.filter((x) => x.prof === 'bekci' && active(x)); if (!b.length) return;
-  for (const p of w.people) for (const g of Object.keys(p.inv) as Good[]) {
-    if (p.inv[g] > 100 && chance(w, 0.5)) {
-      const ex = p.inv[g] - 100; p.inv[g] = 100; if (g === 'bugday') w.granary += ex;
-      transfer(w, p.id, 'saray', Math.min(p.money, 10), 'karaborsa cezası');
-      log(w, `${pick(w, b).name}, ${p.name}'ın stokladığı ${ex} ${GOOD_LABEL[g]}'a el koydu (karaborsa).`, p.id);
-    }
-  }
-  if (w.bans.includes('icki')) for (const l of w.listings.filter((x) => x.good === 'icki' && x.sellerId !== 'dis')) { l.qty = 0; }
+  // banned goods cannot be sold openly (detection of hoards: see hoard.ts patrolDay)
+  for (const l of w.listings.filter((x) => w.bans.includes(x.good) && x.sellerId !== 'dis')) l.qty = 0;
 }
 function wealthTax(w: World): void {
   if (!lawOn(w, 'servet')) return;
-  for (const p of w.people) if (p.money > 300 && p.id !== w.kayzerId) transfer(w, p.id, 'saray', Math.min(25, (p.money - 300) * 0.02), 'servet vergisi');
+  const th = wealthThreshold(w); for (const p of w.people) if (p.money > th && p.id !== w.kayzerId) transfer(w, p.id, 'saray', Math.min(25, (p.money - th) * 0.02), 'servet vergisi');
 }
 
 // ---------------- jobs ----------------
@@ -292,7 +292,8 @@ function switchJobs(w: World): void {
   const count = (prof: string): number => w.people.filter((x) => x.prof === prof).length;
   for (const p of [...w.people].sort(() => rand(w) - 0.5)) {
     const idleHamal = p.prof === 'hamal' && p.money < 30;
-    if (!fullAI(p) || (!PRODUCES[p.prof] && !idleHamal) || (!idleHamal && (p.unemployedDays < 6 || p.money > 60 || STAPLE_PROFS.includes(p.prof)))) continue;
+    const own = PRODUCES[p.prof]?.good; const glut = !!own && w.listings.filter((l) => l.good === own).reduce((s, l) => s + l.qty, 0) > w.market.sold[own] * 1.5 + 10;
+    if (!fullAI(p) || (!PRODUCES[p.prof] && !idleHamal) || (!idleHamal && (p.unemployedDays < 6 || p.money > 60 || (STAPLE_PROFS.includes(p.prof) && !glut)))) continue;
     const g = PRODUCES[p.prof]?.good;
     const best = (Object.entries(PRODUCES) as [Person['prof'], { good: Good }][])
       .filter(([prof]) => count(prof) < 14 && (!idleHamal || STAPLE_PROFS.includes(prof)))
@@ -381,7 +382,7 @@ function nightCrime(w: World): void {
     const foes = Object.entries(p.relations).filter(([, v]) => v < -60).map(([id]) => findPerson(w, id)).filter((x): x is Person => !!x && active(x));
     if (p.honesty < 30 && p.money < 15 && chance(w, 0.35)) { const vs = w.people.filter((v) => v.money > 60 && v.id !== p.id && !isProtected(w, v)); if (vs.length) steal(w, p, pick(w, vs)); }
     else if (foes.length && p.honesty < 40 && chance(w, 0.15)) { const v = pick(w, foes); if (p.honesty < 12 && (p.relations[v.id] ?? 0) < -90 && chance(w, 0.15)) murder(w, p, v); else assault(w, p, v); }
-    else if (lawOn(w, 'gece') && chance(w, 0.3)) { transfer(w, p.id, 'saray', Math.min(3, p.money), 'gece yasağı cezası'); p.nightOut = false; }
+    else if ((lawOn(w, 'gece') || curfewAt(w, w.hour)) && chance(w, 0.3)) { transfer(w, p.id, 'saray', Math.min(3, p.money), 'gece yasağı cezası'); p.nightOut = false; }
   }
 }
 
@@ -428,3 +429,19 @@ export function questReward(w: World, playerId: string): string | null {
   return `Görev tamam: ${q.text}. Ödül: 3 Dinar.${QUESTS[i + 1] ? ` Sıradaki: ${QUESTS[i + 1]!.text}` : ' Rehber bitti — artık şehir sizin!'}`;
 }
 void STOCK_LIMIT; void addListing; void marketPrice;
+
+// ---------------- hamal work ----------------
+/** Porters earn by hauling: building material to an active site (paid from the project fund) or goods for big sellers at the market. */
+export function hamalWork(w: World): void {
+  const proj = w.projects.find((x) => !x.done && x.paid >= 3);
+  const sellers = w.people.filter((s) => s.id !== 'x' && w.listings.some((l) => l.sellerId === s.id && l.qty >= 15) && s.money > 15);
+  for (const h of w.people.filter((x) => x.prof === 'hamal' && active(x))) {
+    if (h.playerId && !h.npc) continue; // players haul by hand ("Fazla mesai")
+    if (proj && chance(w, 0.6) && transfer(w, `proje:${proj.id}`, h.id, 3, 'yük taşıma (inşaat)')) {
+      proj.progress = Math.min(proj.needed, proj.progress + 1); h.incomeToday += 3; h.work = proj.plot ?? proj.site; h.lastAction = `${proj.name} için taş taşıyor`; h.xp += 1; continue;
+    }
+    h.work = 'pazar';
+    const s = sellers.length ? pick(w, sellers) : undefined;
+    if (s && transfer(w, s.id, h.id, 2, 'hamaliye (pazar taşıma)')) { h.incomeToday += 2; h.lastAction = `${s.name}'ın mallarını taşıyor`; h.xp += 1; h.relations[s.id] = clamp((h.relations[s.id] ?? 0) + 1, -100, 100); }
+  }
+}

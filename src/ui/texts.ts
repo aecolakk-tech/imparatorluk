@@ -1,4 +1,11 @@
 export const RULES: [string, string[]][] = [
+  ['Yönetim ekranı ve özel kanunlar', [
+    'Tahttaki Kayzer (cumhuriyette seçilmiş Başkan) alttaki 👑/🗽 düğmesiyle Divan ekranını açar: hazine dökümü, pazar ve ambar, ordu/isyan haritası, kanunlar, dilekçeler, görevliler, raporlar, aile ve varis.',
+    'Kanun yazıcı: satış vergisi, baş vergisi, mala özel vergi, narh (tavan fiyat), yasak, sokağa çıkma yasağı, zorunlu hizmet, üretim desteği, servet vergisi eşiği ve sert ceza. Her kanun için “Etkiyi tahmin et” sonucu gösterir.',
+    'Cumhuriyette Başkan vergi/narh/destek/servet kanunlarını kararname ile çıkarabilir; yasak, sokağa çıkma, zorunlu hizmet ve sert ceza için Meclis oyu gerekir. Meclis üyeleri her türlü özel kanunu teklif edebilir.',
+    'İstifçilik: fiyatı fırlayan malı stoklayanlar şüphe toplar (komşu ihbarı, dedikodu). Bekçiler devriyede en şüphelileri arar; yakalama ihtimali bekçinin dürüstlüğü ve sadakatine bağlıdır. Fazla stoka el konur, ceza kesilir. Rüşvetçi bekçi göz yumabilir. Oyuncu bekçi/asker kişi kartındaki 🔍 Ara ile günde bir arama yapar.',
+    'Hamallar inşaatta yük taşır (günde 3 D, inşaat ilerler) ya da pazarda tüccara taşıma yapar (2 D). Kuraklıkta buğday pahalanır; ambar her gün piyasaya buğday salar.',
+  ]],
   ['Dünya', [
     'Tek bir ortak dünya var, hiç sıfırlanmaz. 1 oyun günü = 5 gerçek dakika (1x). Hızı sadece Kayzer 0,5x / 1x / 2x yapabilir (Saray).',
     'Kimse çevrimiçi değilken dünya donar; biri girince kaldığı yerden devam eder.',

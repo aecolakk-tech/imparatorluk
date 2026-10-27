@@ -12,6 +12,7 @@ import { ONLINE_WINDOW_MS } from '../sim/constants';
 import { age, ancestorsOf, canHaveChild, canRule, childrenOf, findChild, heirOf, isHanedan, nameOf, stage, STAGE_LABEL, ADULT_AGE, CHILD_UPKEEP, CURE_FEE, PROSPERITY_MONEY } from '../sim/family';
 import { FATE_LABEL, strength, TARGETS } from '../sim/isyan';
 import type { Child, Fate } from '../sim/types';
+import { lawBuilder } from './ruler';
 import { buildingExtras, caseRoles, electionBlock, personActions, personExtras, sarayExtras } from './life';
 
 export interface Ctx {
@@ -265,7 +266,8 @@ function meclisPanel(c: Ctx): HTMLElement {
     const val = numIn(10, 0, 50000);
     const target = select([['', '— hedef —'], ...w.laws.map((l): [string, string] => [l.id, `Kanun: ${l.name}`]), ...GOODS.map((g): [string, string] => [g, `Mal: ${GOOD_LABEL[g]}`]), ['meclis', 'Maaş: Meclis üyesi'], ...STATE_PROFS.map((p): [string, string] => [p, `Maaş: ${PROF_LABEL[p]}`]), ...w.people.filter((p) => p.prof !== 'naip').map((p): [string, string] => [p.id, `Kişi: ${p.name}`])]);
     box.append(h('h3', {}, '✍️ Teklif ver'), h('div', { class: 'row' }, kind, 'değer', val, target, h('button', { class: 'primary', onclick: () => c.act({ t: 'propose', kind: kind.value as BillKind, value: Number(val.value), target: target.value }) }, 'Teklif et')),
-      h('div', { class: 'muted' }, 'Vergi/bütçe/inşaat için “değer”, narh için mal ve fiyat, maaş için görev ve tutar, gensoru/soruşturma/dokunulmazlık için kişi seçin.'));
+      h('div', { class: 'muted' }, 'Vergi/bütçe/inşaat için “değer”, narh için mal ve fiyat, maaş için görev ve tutar, gensoru/soruşturma/dokunulmazlık için kişi seçin.'),
+      h('h3', {}, '📜 Özel kanun teklifi'), lawBuilder(w, 'Meclise sun', (law) => c.act({ t: 'propose', kind: 'ozel', value: law.value, target: law.good ?? '', law })));
   } else if (c.me && !isK(c)) box.append(h('button', { onclick: () => c.act({ t: 'runForMeclis' }) }, 'Meclise aday ol (sadece adaylık döneminde)'));
   for (const id of w.election.candidates) { const p = findPerson(w, id); if (p) box.append(personLine(c, p, h('button', { onclick: (e) => { e.stopPropagation(); c.act({ t: 'vote', candidateId: id }); } }, 'Oy ver'))); }
   // history

@@ -129,12 +129,13 @@ export interface PlayerInfo {
 export type Ideology = 'saltanatci' | 'cumhuriyetci' | 'esnaf' | 'halkci';
 export interface Faction { id: string; name: string; ideology: Ideology; leaderId: string | null; color: string; }
 export interface Seat { id: string; label: string; kind: 'bolge' | 'meslek'; key: string; holder: string | null; }
-export type BillKind = 'vergi' | 'fiyat' | 'maas' | 'butce' | 'kanun' | 'insaat' | 'af' | 'gensoru' | 'sorusturma' | 'dokunulmazlik' | 'azil';
+export type BillKind = 'ozel' | 'vergi' | 'fiyat' | 'maas' | 'butce' | 'kanun' | 'insaat' | 'af' | 'gensoru' | 'sorusturma' | 'dokunulmazlik' | 'azil';
 export type VoteChoice = 'evet' | 'hayir' | 'cekimser';
 export interface Bill {
   id: string; kind: BillKind; title: string; proposerId: string; value: number; target: string;
   day: number; debateUntil: number; voteUntil: number;
   status: 'tartisma' | 'oylama' | 'onay' | 'kabul' | 'ret' | 'veto' | 'zamanasimi';
+  law?: import('./laws').LawSpec;
   votes: Record<string, VoteChoice>; speeches: { personId: string; text: string; day: number }[]; result?: string;
 }
 export interface MeclisState {
@@ -200,6 +201,11 @@ export interface World {
   loans: { id: string; debtor: string; lender: string; amount: number; due: number; day: number }[];
   serverNow?: number;
   shortDays?: number;
+  customLaws: import('./laws').CustomLaw[];
+  serving?: string[];
+  suspicion?: Record<string, number>;
+  treasuryBook?: { day: number; items: Record<string, number> }[];
+  priceHist?: Partial<Record<Good, number[]>>;
   outsideNet: number; // money that left to / came from the outside world (caravans, tribute) – keeps the books balanced
   allowStateTakeover: boolean;
   kayzerId: string | null; // head of state person id: Kayzer, or Başkan in the republic
@@ -237,7 +243,8 @@ export type Action =
   | { t: 'runForMeclis' }
   | { t: 'vote'; candidateId: string }
   | { t: 'runForBaskan' }
-  | { t: 'propose'; kind: BillKind; value?: number; target?: string; title?: string }
+  | { t: 'propose'; kind: BillKind; value?: number; target?: string; title?: string; law?: import('./laws').LawSpec }
+  | { t: 'enactLaw'; law: import('./laws').LawSpec } | { t: 'repealLaw'; lawId: string } | { t: 'inspect'; personId: string }
   | { t: 'castVote'; billId: string; choice: VoteChoice }
   | { t: 'speak'; billId: string; text: string }
   | { t: 'sanction'; billId: string; approve: boolean }

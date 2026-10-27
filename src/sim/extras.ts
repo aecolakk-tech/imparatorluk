@@ -69,7 +69,7 @@ export function lawPreview(w: World, kind: string, value?: number): string {
 /** Bring an older saved world up to the current schema without losing people, money or history. */
 export function migrateWorld(w: World): World {
   const any = w as unknown as Record<string, unknown>;
-  if ((w.schema ?? 1) >= 2) return w;
+  if ((w.schema ?? 1) >= 2) return migrate3(w);
   const def: Record<string, unknown> = { speed: 1, nature: null, nextDrought: w.day + 60, festivalUntil: 0, granary: 400, priceCaps: {}, arrests: [], chatOut: [], talks: [], offers: [], rumors: [], caravan: null, threat: null, bans: [], loans: [] };
   for (const [k, v] of Object.entries(def)) if (any[k] === undefined) any[k] = v;
   for (const g of GOODS) { if (w.prices[g] === undefined) w.prices[g] = 1; if (w.market.sold[g] === undefined) { w.market.sold[g] = 0; w.market.unmet[g] = 0; } }
@@ -88,7 +88,7 @@ export function migrateWorld(w: World): World {
     if (cur === undefined || cur === (OLD_DEFAULT_SALARY as Record<string, number>)[k]) (w.salaries as Record<string, number>)[k] = v as number;
   }
   if (w.meclis.salary === 10) w.meclis.salary = 6;
-  if (w.headTax === 1) w.headTax = 1.5;
+  if (w.headTax === 1) w.headTax = 1.75;
   let i = 0;
   for (const p of w.people) {
     const pa = p as unknown as Record<string, unknown>;
@@ -102,7 +102,7 @@ export function migrateWorld(w: World): World {
     p.inv.su = Math.max(p.inv.su, 3); p.inv.ekmek = Math.max(p.inv.ekmek, 2);
   }
   // diversify old professions into the new production chain: move surplus workers to where the new chain needs hands
-  const TARGET: Partial<Record<Person['prof'], number>> = { ciftci: 10, firinci: 7, sucu: 8, dokumaci: 3, mobilyaci: 2, barci: 2, kasap: 4, balikci: 6, terzi: 3, demirci: 3, marangoz: 4, hamal: 6, insaatci: 8 };
+  const TARGET: Partial<Record<Person['prof'], number>> = { ciftci: 5, firinci: 5, sucu: 8, dokumaci: 3, mobilyaci: 2, barci: 2, kasap: 4, balikci: 6, terzi: 3, demirci: 3, marangoz: 4, hamal: 6, insaatci: 8 };
   const count = (pr: string): number => w.people.filter((x) => x.prof === pr).length;
   const titled = (p: Person): boolean => / /.test(p.name) && Object.values(PROF_LABEL).some((l) => p.name.startsWith(l + ' '));
   for (const [need, n] of Object.entries(TARGET) as [Person['prof'], number][]) {
@@ -119,5 +119,14 @@ export function migrateWorld(w: World): World {
   w.market = { sold: emptyInv(), unmet: emptyInv() };
   w.schema = 2;
   void clamp; void chance;
-  return w;
+  return migrate3(w);
+}
+
+/** Schema 3: custom laws, hoarding suspicion, treasury book, price history, bigger granary. */
+function migrate3(w: World): World {
+  if ((w.schema ?? 1) >= 3) return w;
+  const any = w as unknown as Record<string, unknown>;
+  for (const [k, v] of Object.entries({ customLaws: [], suspicion: {}, treasuryBook: [], priceHist: {}, serving: [] })) if (any[k] === undefined) any[k] = v;
+  if (w.granary < 800) w.granary = 800;
+  w.schema = 3; return w;
 }

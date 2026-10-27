@@ -28,6 +28,11 @@ console.log('me:', st.me, 'people:', st.world.people.length, 'day', st.world.day
 await click(p, 'Saray'); await new Promise((r) => setTimeout(r, 400));
 await p.screenshot({ path: '/workspace/imparatorluk/smoke-saray.png' });
 await click(p, '✕');
+// ruler screen: every tab, law preview + enact
+await click(p, ' Kayzer'); for (const t of ['📊 Ekonomi', '⚔️ Ordu', '📜 Kanunlar', '📨 Dilekçe', '🎖 Görevliler', '📰 Raporlar', '👪 Aile/Varis', '💰 Hazine']) { await click(p, t); }
+await click(p, '📊 Ekonomi'); await p.screenshot({ path: '/workspace/scratch/ruler2.png' }); await click(p, '📜 Kanunlar'); await click(p, 'Etkiyi tahmin'); console.log('law preview:', await p.evaluate(() => [...document.querySelectorAll('.sheet .muted')].map((x) => x.textContent).find((t) => t?.startsWith('🔮'))));
+await click(p, 'Ferman ilan et'); console.log('custom laws:', await p.evaluate(() => window.__imp().world.customLaws?.length));
+await p.screenshot({ path: '/workspace/scratch/ruler.png' }); await click(p, '✕');
 await p.evaluate(() => { const w = window.__imp().world; void w; });
 // tap the Pazar building on the canvas (center of the screen-ish) – compute from camera via hitTest is internal; just tap many spots
 await p.mouse.click(640, 400); await new Promise((r) => setTimeout(r, 400));

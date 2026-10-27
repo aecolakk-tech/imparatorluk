@@ -51,3 +51,5 @@ pre.summary { white-space:pre-wrap; font-family:inherit; margin:0; }
 .phase { flex:1; padding:6px; border:1px solid #5a4630; border-radius:6px; opacity:.6; }
 .phase.on { opacity:1; border-color:#e8c14a; background:#3a2e10; }
 details summary { cursor:pointer; color:#e8c14a; margin:6px 0; }
+.sheet:has(.ruler) { width: min(1040px, 98vw); max-width: 98vw; height: 92vh; max-height: 92vh; left: 50%; transform: translateX(-50%); }
+.ruler table { font-size: 13px; }

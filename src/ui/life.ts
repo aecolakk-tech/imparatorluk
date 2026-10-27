@@ -123,6 +123,7 @@ export function personExtras(c: Ctx, p: Person): HTMLElement {
 export function personActions(c: Ctx, p: Person): HTMLElement {
   const row = h('div', { class: 'row' },
     h('button', { title: 'Yüz yüze konuşun: dostluk +3, ne düşündüğünü söyler.', onclick: () => c.act({ t: 'chatWith', personId: p.id }) }, '🗨 Sohbet et'),
+    c.me && ['bekci', 'asker'].includes(c.me.prof) && c.me.id !== p.id ? h('button', { title: 'İstifçilik araması: fazla stok varsa el konur (günde 1).', onclick: () => c.act({ t: 'inspect', personId: p.id }) }, '🔍 Ara') : '',
     h('button', { title: 'Düşmanlık −25, itibarınız düşer.', onclick: () => c.act({ t: 'insult', personId: p.id }) }, '😤 Hakaret et'),
     h('button', { class: 'danger', title: 'Suç: yaralar; yakalanırsanız 5 gün zindan.', onclick: () => { if (confirm('Saldırı suçtur. Emin misiniz?')) c.act({ t: 'assault', personId: p.id }); } }, '👊 Saldır'),
     h('button', { class: 'danger', title: 'Ağır suç: 25 gün zindan.', onclick: () => { if (confirm('Cinayet! Gerçekten mi?')) c.act({ t: 'kill', personId: p.id }); } }, '🗡 Öldür'),
@@ -181,7 +182,8 @@ export function buildingExtras(c: Ctx, b: Building): HTMLElement | null {
     case 'ciftlik': return h('div', {}, h('div', { class: 'muted' }, `Çiftçiler günde ~30 buğday biçer.${w.nature?.kind === 'kuraklik' ? ' Kuraklık: hasat yarıya düştü!' : ''}`));
     case 'dokuma': return h('div', {}, h('div', { class: 'muted' }, 'Dokumacılar yünden kumaş dokur; terziler kumaştan elbise diker.'));
     case 'mobilyahane': return h('div', {}, h('div', { class: 'muted' }, 'Mobilyacılar odundan mobilya yapar: evde dinlenme ve mutluluk verir.'));
-    case 'arsa': return h('div', {}, h('div', { class: 'muted' }, 'Boş arsa. Kayzer burada inşaat başlatabilir (Saray → Arsaya inşaat).'));
+    case 'arsa': { const ruler = !!me && w.kayzerId === me.id; const kind = select([['cesme', 'Çeşme (800)'], ['hamam', 'Hamam (1500)'], ['kutuphane', 'Kütüphane (1200)'], ['han', 'Kervansaray (2000)']]);
+      return h('div', {}, h('div', { class: 'muted' }, ruler ? 'Boş arsa. Buraya ne yapılsın?' : 'Boş arsa. Yönetici burada inşaat başlatabilir.'), ruler ? h('div', { class: 'row' }, kind, h('button', { class: 'primary', onclick: () => c.act({ t: 'buildAt', plotId: b.id, kind: kind.value }) }, '🏗 Burada inşa et')) : ''); }
     case 'liman': return w.caravan && w.day <= w.caravan.until ? h('div', {}, h('div', { class: 'muted' }, `🐪 ${w.caravan.name} limanda: ${Object.keys(w.caravan.goods).map((g) => GOOD_LABEL[g as Good]).join(', ')}.`)) : null;
     default: return null;
   }

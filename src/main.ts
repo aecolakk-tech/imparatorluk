@@ -12,6 +12,7 @@ import { bar, fmt, h, select } from './ui/dom';
 import { avatar, buildingPanel, familyPanel, isyanBar, personCard, type Ctx } from './ui/panels';
 import { GUIDE, RULES } from './ui/texts';
 import { feedPanel, hudChips, quickPanel } from './ui/life';
+import { rulerScreen, rulerTitle } from './ui/ruler';
 import type { Candidate, ChatMsg } from './server/core';
 import { makeSprite } from './ui/sprites';
 
@@ -153,6 +154,7 @@ function renderDock(): void {
   const pending = world && me() && world.kayzerId === me()!.id ? world.petitions.filter((p) => p.status === 'bekliyor').length : 0;
   dockEl.replaceChildren(
     h('button', { class: 'primary', title: 'Şu an yapabileceğiniz her şey', onclick: () => openSheet(() => quickPanel(ctx())) }, '⚡', h('span', { class: 'lbl' }, ' Ne yapabilirim?'), world && me() && (world.offers.some((o) => o.to === me()!.id) || world.arrests.some((a) => a.status === 'bekliyor' && (a.criminalId === me()!.id || a.catcherId === me()!.id))) ? h('span', { class: 'badge' }, '!') : ''),
+    world && me() && world.kayzerId === me()!.id ? h('button', { class: 'primary', title: 'Devlet yönetim ekranı', onclick: () => openSheet(() => rulerScreen(ctx())) }, world.regime === 'cumhuriyet' ? '🗽' : '👑', h('span', { class: 'lbl' }, ` ${rulerTitle(world)}`), pending ? h('span', { class: 'badge' }, String(pending)) : '') : '',
     h('button', { onclick: () => { const m = me(); if (m) openPersonSheet(m.id); } }, '👤', h('span', { class: 'lbl' }, ' Ben')),
     h('button', { onclick: () => openSheet(() => buildingPanel(ctx(), world!.buildings.find((b) => b.id === 'saray')!)) }, '🏰', h('span', { class: 'lbl' }, ' Saray'), pending ? h('span', { class: 'badge' }, String(pending)) : ''),
     h('button', { onclick: () => openSheet(() => buildingPanel(ctx(), world!.buildings.find((b) => b.id === 'meclis')!)) }, '🏛', h('span', { class: 'lbl' }, ' Meclis')),

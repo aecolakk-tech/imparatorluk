@@ -4,6 +4,7 @@ import { rand } from './rng';
 import { BASE_PRICE, DECAY, PRODUCES, RANKS, STOCK_LIMIT } from './constants';
 import { findPerson } from './world';
 import { nextId } from './rng';
+import { goodTaxPct, paySubsidy } from './laws';
 
 /** Single place where Dinar moves. Accounts: person id, 'saray' (treasury), 'proje:<id>', 'fon' (plot fund). */
 export function transfer(w: World, from: string, to: string, amount: number, reason: string): boolean {
@@ -13,6 +14,10 @@ export function transfer(w: World, from: string, to: string, amount: number, rea
   adjust(w, from, -amt); adjust(w, to, amt);
   if (from === 'saray' || to === 'saray') {
     if (to === 'saray') w.dailyIncome += amt; else w.dailyExpense += amt;
+    // treasury book: per day, per reason (kept 10 days) – the Kayzer screen shows the breakdown
+    const book = (w.treasuryBook ??= []); let d = book[book.length - 1];
+    if (!d || d.day !== w.day) { d = { day: w.day, items: {} }; book.push(d); if (book.length > 10) book.shift(); }
+    const key = `${to === 'saray' ? '+' : '-'}${reason.replace(/[\d.,]+/g, '').replace(/\s+/g, ' ').trim()}`; d.items[key] = Math.round(((d.items[key] ?? 0) + amt) * 100) / 100;
   }
   w.ledger.push({ day: w.day, from, to, amount: amt, reason });
   if (w.ledger.length > 600) w.ledger.splice(0, w.ledger.length - 600);
@@ -65,7 +70,7 @@ export function addListing(w: World, seller: Person, good: Good, qty: number, pr
 /** Buy up to qty of good, cheapest first. Seller pays sales tax. Returns qty bought. */
 export function buy(w: World, buyerAcc: string, good: Good, qty: number, maxPrice = Infinity): number {
   let got = 0;
-  const offers = w.listings.filter((l) => l.good === good && l.qty > 0 && l.sellerId !== buyerAcc).sort((a, b) => a.price - b.price);
+  const offers = w.listings.filter((l) => l.good === good && l.qty > 0 && l.sellerId !== buyerAcc && !(w.bans.includes(good) && l.sellerId !== 'dis')).sort((a, b) => a.price - b.price);
   const fixedWater = good === 'su' && lawOn(w, 'devletsuyu');
   for (const l of offers) {
     while (got < qty && l.qty > 0) {
@@ -75,7 +80,7 @@ export function buy(w: World, buyerAcc: string, good: Good, qty: number, maxPric
       // state water: treasury tops up the difference to the seller
       if (fixedWater && l.price > pay && l.sellerId !== 'dis') transfer(w, 'saray', l.sellerId, l.price - pay, 'su sübvansiyonu');
       // sales tax is owed and collected later by the tahsildar (smugglers hide part of it)
-      const tax = pay * w.taxRate / 100;
+      const tax = pay * (w.taxRate + goodTaxPct(w, good)) / 100; paySubsidy(w, l.sellerId, good);
       const s = findPerson(w, l.sellerId); if (s) { s.taxDue += s.smuggle ? tax * 0.2 : tax; s.incomeToday += pay - tax; }
       else if (l.sellerId === 'dis') { transfer(w, 'dis', 'saray', Math.max(tax, pay * 0.1), 'gümrük'); if (w.caravan) w.caravan.earned = (w.caravan.earned ?? 0) + pay; }
       l.qty -= 1; got += 1;
@@ -97,7 +102,7 @@ export function resetMarketDay(w: World): void { for (const g of GOODS) { w.mark
 
 export function natureMult(w: World, g: Good): number {
   const n = w.nature; if (!n || w.day < n.start || w.day > n.until) return 1;
-  if (n.kind === 'kuraklik' && g === 'bugday') return 0.5;
+  if (n.kind === 'kuraklik' && g === 'bugday') return 0.35;
   if (n.kind === 'kuraklik' && g === 'su') return 0.85;
   if (n.kind === 'bereket' && g === 'bugday') return 1.4;
   if (n.kind === 'sel' && (g === 'balik' || g === 'bugday')) return 0.6;
@@ -109,10 +114,13 @@ export function natureMult(w: World, g: Good): number {
 export function produce(w: World, p: Person): void {
   const spec = PRODUCES[p.prof];
   if (!spec || p.jailedDays > 0 || p.exiledDays > 0) return;
-  if (spec.good === 'icki' && w.bans.includes('icki')) { p.lastAction = 'meyhane kapalı'; return; }
-  let frac = 1;
+  if (w.bans.includes(spec.good)) { p.lastAction = spec.good === 'icki' ? 'meyhane kapalı' : `${spec.good} yasak – üretim durdu`; return; }
+  // don't flood the market: with more than a day's output still unsold, work at reduced pace
+  const unsold = w.listings.filter((l) => l.sellerId === p.id && l.good === spec.good).reduce((s, l) => s + l.qty, 0) + p.inv[spec.good];
+  let frac = unsold >= spec.qty * 1.5 ? 0 : unsold >= spec.qty * 0.7 ? 0.5 : 1;
+  if (frac === 0) { p.lastAction = 'tezgâh dolu, satış bekliyor'; return; }
   for (const [g, need] of Object.entries(spec.inputs ?? {}) as [Good, number][]) {
-    if (p.inv[g] < need) buy(w, p.id, g, need - p.inv[g], Math.max(0.1, Math.min(p.money * 0.7, (spec.qty * w.prices[spec.good] * 0.8) / need / Object.keys(spec.inputs ?? {}).length)));
+    if (p.inv[g] < need * frac) buy(w, p.id, g, Math.ceil(need * frac - p.inv[g]), Math.max(0.1, Math.min(p.money * 0.7, (spec.qty * w.prices[spec.good] * 0.8) / need / Object.keys(spec.inputs ?? {}).length)));
     frac = Math.min(frac, p.inv[g] / need);
   }
   if (frac <= 0) { p.lastAction = 'ham madde bulamadı'; return; }
@@ -141,14 +149,19 @@ export function sellerPrice(w: World, p: Person, g: Good, inputs?: Partial<Recor
 
 /** End of day: price adjustment by supply/demand, decay of goods. */
 export function settleMarket(w: World): void {
+  const ph = (w.priceHist ??= {}); for (const g of GOODS) { const h = (ph[g] ??= []); h.push(w.prices[g]); if (h.length > 7) h.shift(); }
   for (const g of GOODS) {
     const left = w.listings.filter((l) => l.good === g).reduce((s, l) => s + l.qty, 0);
     const sold = w.market.sold[g]; const miss = w.market.unmet[g];
     let p = w.prices[g];
     // supply & demand, gradual (max ±8%/day) to avoid oscillation
-    if (miss > 0) p *= 1 + Math.min(0.08, 0.01 + miss / Math.max(20, sold + miss) * 0.15);
-    else if (left > sold * 0.3 + 3) p *= 1 - Math.min(0.06, 0.01 + left / Math.max(20, sold + left) * 0.08);
-    w.prices[g] = Math.round(Math.max(BASE_PRICE[g] * 0.4, Math.min(BASE_PRICE[g] * 5, p)) * 100) / 100;
+    const nm = natureMult(w, g);
+    if (nm < 1) p *= 1 + Math.min(0.15, (1 - nm) * 0.3); // scarcity: a bad harvest drives the price even before shelves are empty
+    else if (miss > 0) p *= 1 + Math.min(0.08, 0.01 + miss / Math.max(20, sold + miss) * 0.15);
+    else if (left < sold * 0.25) p *= 1.02; // thin shelves
+    else if (left > sold * 1.2 + 5) p *= 1 - Math.min(0.06, 0.01 + left / Math.max(20, sold + left) * 0.06);
+    else p += (BASE_PRICE[g] - p) * 0.03; // balanced market drifts to the normal price
+    w.prices[g] = Math.round(Math.max(BASE_PRICE[g] * 0.6, Math.min(BASE_PRICE[g] * 5, p)) * 100) / 100;
   }
   // decay unsold stock and inventories
   // stochastic rounding: a single coat (2%/day) lasts ~50 days on average instead of vanishing overnight

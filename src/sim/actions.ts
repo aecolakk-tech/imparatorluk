@@ -15,6 +15,8 @@ import { fullAI } from './ai';
 import { eatMeal, assault, bribeAcceptChance, decideBribe, directive, drinkAlcohol, drinkWater, granaryBuy, granaryRelease, murder, payTribute, pray, relate, seeDoctor, sermon } from './life';
 import { opinion } from './chat';
 import { borrow, repay } from './extras';
+import { enactLaw, repealLaw, validateLaw } from './laws';
+import { inspectPerson } from './hoard';
 import { electionPhase, hourMs } from './tick';
 import { produce } from './economy';
 
@@ -204,8 +206,22 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       t.loyalty = clamp(t.loyalty + Math.min(15, amt / 4)); t.mood = clamp(t.mood + 5); t.relations[me.id] = clamp((t.relations[me.id] ?? 0) + 10, -100, 100); return ok(`${t.name}'a ${amt} Dinar verildi.`);
     }
     case 'propose': {
-      const r = propose(w, me, a.kind, num(a.value, 0, 50000) ?? 0, String(a.target ?? ''), a.title ? filterProfanity(a.title) : undefined);
+      const law = a.law ? { ...a.law, name: a.law.name ? filterProfanity(String(a.law.name)).slice(0, 50) : undefined } : undefined;
+      const r = propose(w, me, a.kind, num(a.value, 0, 50000) ?? 0, String(a.target ?? ''), a.title ? filterProfanity(a.title) : undefined, law);
       return typeof r === 'string' ? no(r) : ok('Teklifiniz Meclis gündeminde. 1 gün görüşme, 1 gün oylama.');
+    }
+    case 'enactLaw': {
+      if (!isKayzer(w, me)) return no('Kanunu sadece hükümdar ferman ile çıkarır; siz Meclis’e teklif verin.');
+      if (w.regime === 'cumhuriyet' && ['yasak', 'sokak', 'hizmet', 'sertCeza'].includes(a.law?.kind)) return no('Cumhuriyette yasak, sokağa çıkma, zorunlu hizmet ve ağır ceza kanunlarını sadece Meclis çıkarır.');
+      const law = { ...a.law, name: a.law?.name ? filterProfanity(String(a.law.name)).slice(0, 50) : undefined };
+      const err = validateLaw(law); if (err) return no(err);
+      return ok(enactLaw(w, law, me, 'ferman'));
+    }
+    case 'repealLaw': { if (!isKayzer(w, me)) return no('Kanunu hükümdar kaldırır.'); const r = repealLaw(w, a.lawId); return { ok: r.endsWith('kaldırıldı.'), msg: r }; }
+    case 'inspect': {
+      if (me.prof !== 'bekci' && me.prof !== 'asker') return no('Arama yapmayı bekçi ya da asker yapar.');
+      const t = findPerson(w, a.personId); if (!t || t.id === me.id) return no('Kişi yok.');
+      return ok(inspectPerson(w, me, t));
     }
     case 'castVote': {
       const b = w.meclis.bills.find((x) => x.id === a.billId);

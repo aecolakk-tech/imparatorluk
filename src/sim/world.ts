@@ -94,7 +94,7 @@ const NAMED: Seed[] = [
 ];
 
 const COUNTS: [Profession, number][] = [
-  ['ciftci', 10], ['firinci', 7], ['sucu', 8], ['kasap', 4], ['balikci', 6], ['dokumaci', 3], ['terzi', 3], ['demirci', 3], ['marangoz', 4], ['mobilyaci', 2], ['barci', 2],
+  ['ciftci', 5], ['firinci', 5], ['sucu', 8], ['kasap', 4], ['balikci', 6], ['dokumaci', 3], ['terzi', 3], ['demirci', 3], ['marangoz', 4], ['mobilyaci', 2], ['barci', 2],
   ['tuccar', 3], ['hekim', 3], ['hoca', 3], ['imam', 1], ['hamal', 9], ['insaatci', 8], ['kalemsor', 2],
   ['memur', 6], ['tahsildar', 3], ['bekci', 6], ['savci', 2], ['hakim', 2], ['asker', 10],
 ];
@@ -150,11 +150,11 @@ export function defaultLaws(): Law[] {
 export function createWorld(seed = 42, now = Date.now()): World {
   const w: World = {
     version: 1, seed, rng: seed, day: 1, hour: 6, lastTickAt: now, frozen: true,
-    treasury: 10000, taxRate: 10, headTax: 1.5, salaries: { ...DEFAULT_SALARY }, laws: defaultLaws(),
+    treasury: 10000, taxRate: 10, headTax: 1.75, salaries: { ...DEFAULT_SALARY }, laws: defaultLaws(),
     people: [], buildings: makeBuildings(), listings: [], prices: { ...BASE_PRICE }, market: { sold: emptyInv(), unmet: emptyInv() }, ledger: [], petitions: [], cases: [],
     projects: [{ id: 'saray-insa', name: 'Saray Kanadı İnşaatı (Usta Bekir)', site: 'santiye', cost: 1200, paid: 200, progress: 0, needed: 120, done: false }],
     election: { nextDay: 10, candidates: [], votes: {}, seats: 5, baskanNextDay: 0, baskanCandidates: [], baskanVotes: {} }, gazette: [], events: [], todayEvents: [], players: {},
-    regime: 'imparatorluk', meclis: initMeclis(), budget: { limit: DEFAULT_BUDGET, spent: 0, until: 20, approved: false }, schema: 2, speed: 1, nature: null, nextDrought: 60, festivalUntil: 0, granary: 400, priceCaps: {}, arrests: [], chatOut: [], talks: [], offers: [], rumors: [], caravan: null, threat: null, bans: [], loans: [], outsideNet: 0,
+    regime: 'imparatorluk', meclis: initMeclis(), budget: { limit: DEFAULT_BUDGET, spent: 0, until: 20, approved: false }, schema: 3, speed: 1, nature: null, nextDrought: 60, festivalUntil: 0, granary: 800, priceCaps: {}, arrests: [], chatOut: [], talks: [], offers: [], rumors: [], caravan: null, threat: null, bans: [], loans: [], outsideNet: 0, customLaws: [], suspicion: {}, treasuryBook: [], priceHist: {},
     headAwayDays: 0, children: [], proposals: [], pregnancies: [], veliaht: null, regentId: null, regentFor: null, isyan: null, deposed: null, allowStateTakeover: false, kayzerId: null, founderPersonId: null, hanedanId: '', cumhuriyet: 5, cumhuriyetDays: 0, coup: null, stats: [],
     dailyIncome: 0, dailyExpense: 0, lastSnapshotAt: now, idSeq: 0,
   };

@@ -146,10 +146,32 @@ describe('migration', () => {
   it.skipIf(!existsSync(path))('the live day-3 world migrates and keeps running', () => {
     const raw = JSON.parse(readFileSync(path, 'utf8')); const w: World = (Array.isArray(raw) ? raw[0] : raw).state;
     const ids = w.people.map((p) => p.id); migrateWorld(w);
-    expect(w.schema).toBe(2); expect(w.people.map((p) => p.id)).toEqual(ids);
+    expect(w.schema).toBe(3); expect(w.people.map((p) => p.id)).toEqual(ids);
     for (const p of w.people) if (p.spouse) { const s = findPerson(w, p.spouse); if (s) expect(s.female).not.toBe(p.female); }
     const m0 = totalMoney(w); let now = w.lastTickAt;
     for (let i = 0; i < 24 * 10; i++) { now += DAY_MS / 24; advanceWorld(w, now); }
     expect(Math.abs(totalMoney(w) - m0)).toBeLessThan(1);
+  });
+});
+
+describe('custom laws, hoarding, hamal', () => {
+  it('ruler enacts and repeals a custom law with preview', async () => {
+    const { previewLaw } = await import('../src/sim/laws');
+    const w = setup(); run(w, 2);
+    expect(previewLaw(w, { kind: 'malVergisi', good: 'icki', value: 20 })).toMatch(/🔮/);
+    const r = applyAction(w, 'f', { t: 'enactLaw', law: { kind: 'malVergisi', good: 'icki', value: 20, name: 'İçki vergisi' } }, T0 + 2 * DAY_MS);
+    expect(r.ok).toBe(true); expect(w.customLaws!.length).toBe(1);
+    const id = w.customLaws![0]!.id; expect(applyAction(w, 'f', { t: 'repealLaw', lawId: id }, T0 + 2 * DAY_MS).ok).toBe(true); expect(w.customLaws!.length).toBe(0);
+  });
+  it('curfew law runs 30 days with money conserved', () => {
+    const w = setup(); const m0 = totalMoney(w);
+    applyAction(w, 'f', { t: 'enactLaw', law: { kind: 'sokak', value: 22, value2: 5 } }, T0);
+    run(w, 30); expect(Math.abs(totalMoney(w) - m0)).toBeLessThan(1); expect(w.people.filter((p) => p.health >= 50).length).toBeGreaterThan(80);
+  });
+  it('bekçi can find a hoarder', async () => {
+    const { searchAndSeize } = await import('../src/sim/hoard');
+    const w = setup(); const b = w.people.find((p) => p.prof === 'bekci')!; b.honesty = 100; b.loyalty = 100;
+    const t = w.people.find((p) => p.prof === 'hamal' || p.prof === 'tuccar')!; t.inv.bugday = 400;
+    const msg = searchAndSeize(w, b, t); expect(t.inv.bugday).toBeLessThan(400); expect(msg.length).toBeGreaterThan(0);
   });
 });

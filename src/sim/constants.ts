@@ -19,14 +19,14 @@ export const PRODUCES: Partial<Record<Profession, Recipe>> = {
   kasap: { good: 'et', qty: 14, market: 'gida', extra: { good: 'yun', qty: 3 } },
   balikci: { good: 'balik', qty: 14, market: 'pazar' },
   dokumaci: { good: 'kumas', qty: 4, market: 'zanaat', inputs: { yun: 4 } },
-  terzi: { good: 'elbise', qty: 3, market: 'zanaat', inputs: { kumas: 2 } },
+  terzi: { good: 'elbise', qty: 2, market: 'zanaat', inputs: { kumas: 2 } },
   marangoz: { good: 'odun', qty: 20, market: 'yeni' },
-  mobilyaci: { good: 'mobilya', qty: 2, market: 'yeni', inputs: { odun: 4 } },
-  demirci: { good: 'alet', qty: 4, market: 'zanaat', inputs: { odun: 2 } },
+  mobilyaci: { good: 'mobilya', qty: 1, market: 'yeni', inputs: { odun: 4 } },
+  demirci: { good: 'alet', qty: 2, market: 'zanaat', inputs: { odun: 2 } },
   barci: { good: 'icki', qty: 16, market: 'bar', inputs: { bugday: 8 } },
 };
 /** decay per day of stored goods (fraction lost) – food spoils, crafts wear out slowly so demand persists */
-export const DECAY: Record<Good, number> = { ekmek: 0.35, su: 0.3, et: 0.3, balik: 0.4, kumas: 0.02, alet: 0.01, odun: 0.05, bugday: 0.03, yun: 0.02, elbise: 0.04, mobilya: 0.02, icki: 0.05 };
+export const DECAY: Record<Good, number> = { ekmek: 0.35, su: 0.3, et: 0.3, balik: 0.4, kumas: 0.02, alet: 0.03, odun: 0.05, bugday: 0.12, yun: 0.02, elbise: 0.05, mobilya: 0.02, icki: 0.05 };
 /** max units one seller may keep listed (anti-hoarding / karaborsa) */
 export const STOCK_LIMIT: Record<Good, number> = { ekmek: 120, su: 200, et: 40, balik: 40, kumas: 20, alet: 10, odun: 40, bugday: 150, yun: 30, elbise: 10, mobilya: 4, icki: 50 };
 export const RANKS = [{ xp: 0, label: 'Çırak', mult: 0.85 }, { xp: 20, label: 'Kalfa', mult: 1 }, { xp: 60, label: 'Usta', mult: 1.2 }];
