@@ -1,6 +1,6 @@
 import type { Action, ActionResult, Person, Profession, World } from './types';
 import { GOODS } from './types';
-import { GOOD_LABEL, ONLINE_WINDOW_MS, PLAYER_PROFS, PROF_LABEL, STATE_PROFS } from './constants';
+import { GOOD_LABEL, ONLINE_WINDOW_MS, PLAYER_PROFS, PROF_LABEL, PRODUCES, STATE_PROFS } from './constants';
 import { addListing, buy, lawOn, transfer } from './economy';
 import { openCase, openPetition, steal, bekciPower } from './ai';
 import { answerPetition } from './state';
@@ -12,6 +12,11 @@ import { propose, sanction, spend, budgetLeft } from './meclis';
 import { answerProposal, canRule, childrenOf, cureChild, divorce, findChild, isHanedan, proposeMarriage, requestChild, stage, succeed } from './family';
 import { command, voteFate } from './isyan';
 import { fullAI } from './ai';
+import { eatMeal, assault, bribeAcceptChance, decideBribe, directive, drinkAlcohol, drinkWater, granaryBuy, granaryRelease, murder, payTribute, pray, relate, seeDoctor, sermon } from './life';
+import { opinion } from './chat';
+import { borrow, repay } from './extras';
+import { electionPhase, hourMs } from './tick';
+import { produce } from './economy';
 
 const ok = (msg: string): ActionResult => ({ ok: true, msg });
 const no = (msg: string): ActionResult => ({ ok: false, msg });
@@ -43,10 +48,10 @@ export function joinWorld(w: World, playerId: string, name: string, prof: Profes
     const houses = w.buildings.filter((b) => b.kind === 'ev');
     const counts = new Map<string, number>(); for (const x of w.people) counts.set(x.home, (counts.get(x.home) ?? 0) + 1);
     const home = [...houses].sort((a, b) => (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0))[0]?.id ?? 'ev1';
-    p = makePerson(w, { name: clean(name), prof: safeProf, money: 80, honesty: 60, ambition: 50, loyalty: 60 }, home);
+    p = makePerson(w, { name: clean(name), prof: safeProf, money: 40, honesty: 60, ambition: 50, loyalty: 60 }, home);
     w.people.push(p);
   }
-  p.playerId = playerId; p.npc = false;
+  p.playerId = playerId; p.npc = false; p.protectedUntil = w.day + 5;
   w.players[playerId] = { playerId, personId: p.id, name: p.name, founder, banned: false, lastSeen: now, lastSeenDay: w.day, awayLog: [], awayMoney: p.money };
   log(w, `${p.name} şehre geldi.`, p.id);
   return p;
@@ -90,15 +95,17 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
   switch (a.t) {
     case 'buy': {
       const q = num(a.qty, 1, 20); if (q === null || !GOODS.includes(a.good)) return no('Geçersiz miktar.');
-      const got = buy(w, me.id, a.good, Math.floor(q)); return got ? ok(`${got} ${GOOD_LABEL[a.good]} aldınız.`) : no('Pazarda yok ya da paranız yetmiyor.');
+      const got = buy(w, me.id, a.good, Math.floor(q)); if (got) { me.bought = me.bought ?? {}; me.bought[a.good] = (me.bought[a.good] ?? 0) + got; } return got ? ok(`${got} ${GOOD_LABEL[a.good]} aldınız.`) : no('Pazarda yok ya da paranız yetmiyor.');
     }
     case 'sell': {
       const q = num(a.qty, 1, 500); const pr = num(a.price, 0.1, 1000);
       if (q === null || pr === null || !GOODS.includes(a.good) || me.inv[a.good] < q) return no('Elinizde o kadar mal yok.');
+      if (me.inv[a.good] - (me.bought?.[a.good] ?? 0) < q) return no('Bugün aldığınız malı aynı gün yeniden satamazsınız (karaborsa önlemi).');
       me.inv[a.good] -= Math.floor(q); addListing(w, me, a.good, Math.floor(q), pr, 'pazar'); return ok('Tezgâha koydunuz.');
     }
     case 'eat': {
-      if (me.inv.ekmek > 0) { me.inv.ekmek -= 1; me.hunger = clamp(me.hunger - 35); return ok('Ekmek yediniz.'); } return no('Ekmeğiniz yok.');
+      if (me.meals >= 3) return no('Bugünkü 3 öğününüzü yediniz; toksunuz.');
+      return eatMeal(w, me) ? ok(`Yemek yediniz (bugün ${me.meals}/3).`) : no('Yiyecek alacak paranız yok ya da pazarda yemek kalmadı.');
     }
     case 'askida': {
       const q = num(a.qty, 1, 20); if (q === null) return no('Geçersiz.');
@@ -180,6 +187,8 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     }
     case 'bribe': {
       const t = findPerson(w, a.personId); const amt = num(a.amount, 1, 10000); if (!t || amt === null || t.id === me.id) return no('Geçersiz.');
+      if (isKayzer(w, me) || me.soylu) return no('Hükümdarın rüşvete ihtiyacı yoktur; ferman yazın.');
+      if (!STATE_PROFS.includes(t.prof) && !t.meclis) return no('Rüşvet sadece memur, asker, bekçi, kadı ya da Meclis üyesine, bir şey karşılığında verilir.');
       if (!transfer(w, me.id, t.id, amt, 'rüşvet')) return no('Paranız yetmiyor.');
       if (t.meclis) w.meclis.bribes.push({ from: me.id, to: t.id, amount: amt, day: w.day, exposed: false });
       t.loyalty = clamp(t.loyalty - amt / 5); t.relations[me.id] = clamp((t.relations[me.id] ?? 0) + amt / 2, -100, 100);
@@ -226,8 +235,8 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       return ok(`Başkan adayısınız. Seçim ${w.election.baskanNextDay}. gün.`);
     }
     case 'voteBaskan': { if (w.regime !== 'cumhuriyet' || !findPerson(w, a.candidateId)) return no('Geçersiz.'); w.election.baskanVotes[me.id] = a.candidateId; return ok('Oyunuz sandıkta.'); }
-    case 'runForMeclis': { if (me.id === w.kayzerId && w.regime === 'imparatorluk') return no('Kayzer aday olamaz.'); if (!w.election.candidates.includes(me.id)) w.election.candidates.push(me.id); return ok(`Adaysınız. Seçim ${w.election.nextDay}. gün.`); }
-    case 'vote': { if (!w.election.candidates.includes(a.candidateId) && !findPerson(w, a.candidateId)) return no('Aday yok.'); w.election.votes[me.id] = a.candidateId; return ok('Oyunuz sandıkta.'); }
+    case 'runForMeclis': { if (me.id === w.kayzerId && w.regime === 'imparatorluk') return no('Kayzer aday olamaz.'); if (electionPhase(w).phase !== 'aday') return no(`Adaylık dönemi değil. ${electionPhase(w).label}.`); if (!w.election.candidates.includes(me.id)) w.election.candidates.push(me.id); return ok(`Adaysınız. Seçim ${w.election.nextDay}. gün.`); }
+    case 'vote': { if (!w.election.candidates.includes(a.candidateId)) return no('Bu kişi aday değil.'); if (electionPhase(w).phase === 'bekleme' || electionPhase(w).phase === 'aday') return no(`Oy verme zamanı değil. ${electionPhase(w).label}.`); w.election.votes[me.id] = a.candidateId; return ok('Oyunuz sandıkta.'); }
     case 'plot': {
       if (me.id === w.kayzerId) return no(`Zaten ${headTitle(w)}siniz.`);
       if (a.kind === 'none') { me.plotting = 'none'; return ok('Komplodan vazgeçtiniz.'); }
@@ -271,6 +280,103 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'joinRebels': {
       if (!w.isyan) return no('Ortada isyan yok.'); if (me.id === w.kayzerId || me.soylu) return no('Siz sarayın tarafındasınız.');
       if (!w.isyan.rebels.includes(me.id)) w.isyan.rebels.push(me.id); me.republic = clamp(me.republic + 20); return ok('Asilere katıldınız!');
+    }
+    case 'setSpeed': {
+      if (w.kayzerId !== me.id) return no('Oyun hızını sadece hükümdar değiştirir.');
+      if (![0.5, 1, 2].includes(a.speed)) return no('0.5x, 1x ya da 2x.');
+      const f = Math.min(0.999, Math.max(0, (now - w.lastTickAt) / hourMs(w)));
+      w.speed = a.speed; w.lastTickAt = now - f * hourMs(w); // keep the clock continuous
+      log(w, `Ferman: zaman ${a.speed}x hızla akıyor.`); return ok(`Hız ${a.speed}x.`);
+    }
+    case 'drinkWater': if (me.drinks >= 5) return no('Bugünkü 5 suyunuzu içtiniz.'); return drinkWater(w, me) ? ok(`Su içtiniz (bugün ${me.drinks}/5).`) : no('Su alacak paranız yok ya da kuyuda su kalmadı.');
+    case 'pray': return ok(pray(w, me));
+    case 'drink': { const r = drinkAlcohol(w, me); return { ok: r.startsWith('Meyhanede bir'), msg: r }; }
+    case 'doctor': { const r = seeDoctor(w, me, false); return { ok: r.includes('iyileştirdi'), msg: r }; }
+    case 'work': {
+      if (me.lastAction.startsWith('fazla mesai')) return no('Bugün zaten fazla mesai yaptınız.');
+      const spec = PRODUCES[me.prof];
+      if (spec) { produce(w, me); me.health = clamp(me.health - 4); me.lastAction = `fazla mesai · ${me.lastAction}`; return ok(`Fazla mesai yaptınız: ${me.lastAction}`); }
+      const pay = 4; if (transfer(w, 'saray', me.id, pay, 'yevmiye')) { me.incomeToday += pay; me.lastAction = 'fazla mesai'; me.health = clamp(me.health - 3); return ok('Yevmiyeli iş yaptınız (+4 Dinar).'); }
+      return no('İş yok.');
+    }
+    case 'nightOut': { me.nightOut = a.on; return ok(a.on ? 'Gece dışarıdasınız; dikkat, gece suç çok.' : 'Eve girdiniz.'); }
+    case 'chatWith': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); const line = opinion(w, t); relate(t, me, 3, 'sohbet ettik'); relate(me, t, 3, 'sohbet ettik'); w.talks.push({ a: t.id, b: me.id, text: line.slice(0, 60), day: w.day, hour: w.hour }); return ok(`${t.name}: “${line}”`); }
+    case 'insult': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); relate(t, me, -25, 'bana hakaret etti'); me.rep = clamp(me.rep - 2, -100, 100); return ok(`${t.name} size küstü.`); }
+    case 'assault': { const t = findPerson(w, a.personId); if (!t || t.id === me.id || t.prof === 'naip') return no('Geçersiz.'); me.honesty = clamp(me.honesty - 15); return ok(assault(w, me, t)); }
+    case 'kill': { const t = findPerson(w, a.personId); if (!t || t.id === me.id || t.prof === 'naip' || t.id === w.kayzerId) return no('Geçersiz.'); me.honesty = clamp(me.honesty - 40); return ok(murder(w, me, t)); }
+    case 'offerBribe': {
+      const ar = w.arrests.find((x) => x.id === a.arrestId && x.criminalId === me.id && x.status === 'bekliyor'); const amt = num(a.amount, 1, 1000);
+      if (!ar || amt === null) return no('Bekleyen bir tutuklamanız yok.'); if (me.money < amt) return no('Paranız yetmiyor.');
+      ar.offer = amt; const ca = findPerson(w, ar.catcherId);
+      if (ca && fullAI(ca)) { const r = decideBribe(w, ar, chance(w, bribeAcceptChance(ca, amt))); return { ok: r.includes('saldı'), msg: r }; }
+      return ok(`${ca?.name ?? 'Bekçi'} teklifinizi düşünüyor…`);
+    }
+    case 'answerBribe': { const ar = w.arrests.find((x) => x.id === a.arrestId && x.catcherId === me.id && x.status === 'bekliyor'); if (!ar) return no('Teklif yok.'); return ok(decideBribe(w, ar, a.accept)); }
+    case 'answerOffer': {
+      const o = w.offers.find((x) => x.id === a.offerId && x.to === me.id); if (!o) return no('Teklif yok.'); w.offers = w.offers.filter((x) => x !== o);
+      const f = findPerson(w, o.from); if (!f) return no('Kişi gitmiş.');
+      if (!a.accept) { relate(f, me, -2, 'teklifimi geri çevirdi'); return ok('Geri çevirdiniz.'); }
+      if (o.kind === 'borc' && transfer(w, me.id, f.id, o.amount ?? 10, 'iyilik')) { relate(f, me, 15, 'zor günümde yardım etti'); me.rep = clamp(me.rep + 2, -100, 100); return ok(`${f.name} çok minnettar.`); }
+      if (o.kind === 'mal' && o.good && o.price) { const q = o.qty ?? 1; const g = o.good; const have = f.inv[g] + w.listings.filter((l) => l.sellerId === f.id && l.good === g).reduce((s2, l) => s2 + l.qty, 0); if (have < q) return no('Malı kalmamış.'); if (!transfer(w, me.id, f.id, o.price * q, `${g} alımı`)) return no('Paranız yetmiyor.'); let need = q; const take = Math.min(f.inv[g], need); f.inv[g] -= take; need -= take; for (const l of w.listings.filter((l2) => l2.sellerId === f.id && l2.good === g)) { const t2 = Math.min(l.qty, need); l.qty -= t2; need -= t2; } me.inv[g] += q; f.taxDue += o.price * q * w.taxRate / 100; relate(f, me, 4, 'alışveriş yaptık'); return ok('Pazarlık tamam.'); }
+      if (o.kind === 'rusvet' && transfer(w, f.id, me.id, o.amount ?? 15, 'rüşvet')) { relate(f, me, 10, 'göz yumdu'); if (chance(w, 0.25)) { openCase(w, me.id, 'rusvet', null, o.amount ?? 15, 55); return ok('Rüşveti aldınız… ama biri gördü!'); } return ok('Rüşveti aldınız.'); }
+      return no('Olmadı.');
+    }
+    case 'poster': {
+      if (electionPhase(w).phase !== 'propaganda' && electionPhase(w).phase !== 'aday') return no('Afiş sadece adaylık ve propaganda döneminde asılır.');
+      if (!w.election.candidates.includes(me.id)) return no('Önce aday olun.');
+      if (!transfer(w, me.id, 'saray', 5, 'afiş harcı')) return no('Afiş 5 Dinar.');
+      w.election.posters = w.election.posters ?? {}; w.election.posters[me.id] = (w.election.posters[me.id] ?? 0) + 1; return ok('Afişleriniz asıldı.');
+    }
+    case 'campaign': {
+      if (!w.election.candidates.includes(me.id)) return no('Önce aday olun.');
+      const text = filterProfanity(String(a.text ?? '')).slice(0, 160); if (text.length < 4) return no('Konuşma kısa.');
+      for (const p of w.people) if (chance(w, 0.25)) relate(p, me, Math.abs(p.republic - me.republic) < 25 ? 3 : -1, 'seçim konuşmasını dinledim');
+      w.chatOut.push({ fromPersonId: me.id, fromName: me.name, toPersonId: null, text: `📣 ${text}`, at: now }); return ok('Meydanda konuştunuz.');
+    }
+    case 'sermon': { if (me.prof !== 'imam' && me.prof !== 'hoca') return no('Vaazı imam ya da hoca verir.'); if (me.lastAction === 'vaaz') return no('Bugün vaaz verdiniz.'); me.lastAction = 'vaaz'; return ok(sermon(w, me, a.topic)); }
+    case 'directive': { if (!isKayzer(w, me)) return no('Yönlendirmeyi devlet yapar.'); return ok(directive(w, a.topic)); }
+    case 'granary': {
+      if (!isKayzer(w, me)) return no('Ambarı devlet yönetir.'); const q = num(a.qty, 1, 500); if (q === null) return no('Geçersiz.');
+      return a.op === 'buy' ? ok(`Ambara ${granaryBuy(w, q)} buğday alındı (sadece ucuz buğday).`) : ok(`Ambardan ${granaryRelease(w, q)} buğday sabit fiyatla satışa çıktı.`);
+    }
+    case 'priceCap': {
+      if (!isKayzer(w, me)) return no('Narhı devlet koyar.'); if (!GOODS.includes(a.good)) return no('Mal yok.');
+      if (a.price === null) { delete w.priceCaps[a.good]; return ok('Narh kaldırıldı.'); }
+      const v = num(a.price, 0.1, 500); if (v === null) return no('Geçersiz.'); w.priceCaps[a.good] = v;
+      for (const l of w.listings) if (l.good === a.good && l.price > v) l.price = v;
+      log(w, `Ferman: ${GOOD_LABEL[a.good]} için narh (tavan fiyat) ${v} Dinar.`); return ok('Narh kondu. Çok düşük narh kıtlık yaratır!');
+    }
+    case 'defend': {
+      const c = w.cases.find((x) => x.id === a.caseId && x.stage !== 'kapandi'); if (!c || c.accusedId === me.id) return no('Dava yok.');
+      c.defenders = c.defenders ?? []; if (c.defenders.includes(me.id)) return no('Zaten avukatsınız.');
+      c.defenders.push(me.id); c.evidence = Math.max(0, c.evidence - 12 - me.school / 3); const acc = findPerson(w, c.accusedId);
+      if (acc && transfer(w, acc.id, me.id, Math.min(acc.money, 8), 'avukatlık ücreti')) me.incomeToday += 8;
+      if (acc) relate(acc, me, 15, 'beni mahkemede savundu'); return ok('Savunmayı üstlendiniz; delil zayıfladı.');
+    }
+    case 'witness': {
+      const c = w.cases.find((x) => x.id === a.caseId && x.stage !== 'kapandi'); if (!c || c.accusedId === me.id) return no('Dava yok.');
+      c.witnesses = c.witnesses ?? []; if (c.witnesses.some((x) => x.id === me.id)) return no('Zaten tanıksınız.');
+      c.witnesses.push({ id: me.id, against: a.against }); c.evidence = clamp(c.evidence + (a.against ? 15 : -10)); const acc = findPerson(w, c.accusedId);
+      if (acc) relate(acc, me, a.against ? -30 : 12, a.against ? 'aleyhime tanıklık etti' : 'lehime tanıklık etti'); return ok('Tanıklığınız tutanağa geçti.');
+    }
+    case 'smuggle': { me.smuggle = a.on; return ok(a.on ? 'Satışlarınızı vergiden saklıyorsunuz (kaçakçılık suçtur!).' : 'Dürüst ticarete döndünüz.'); }
+    case 'tribute': { if (!isKayzer(w, me) || !w.threat) return no('Haraç isteyen yok.'); if (a.pay) return ok(payTribute(w)); log(w, `${headTitle(w)} haracı reddetti! Ordu sınıra yürüyor.`); w.threat.deadline = w.day; return ok('Haraç reddedildi; savaş yakında.'); }
+    case 'caravanBuy': { const q = num(a.qty, 1, 50); if (q === null) return no('Geçersiz.'); const got = buy(w, me.id, a.good, q); return got ? ok(`Kervandan/pazardan ${got} ${GOOD_LABEL[a.good]} aldınız.`) : no('Alınamadı.'); }
+    case 'borrow': { const v = num(a.amount, 5, 150); if (v === null) return no('5–150 Dinar.'); const r = borrow(w, me, v); return { ok: r.includes('verdi'), msg: r }; }
+    case 'repay': return ok(repay(w, me, a.loanId));
+    case 'festivalOpen': {
+      if (!isKayzer(w, me)) return no('Festivali devlet düzenler.'); const c = num(a.cost, 100, 5000); if (c === null) return no('100–5000.');
+      if (!spend(w, c) || !transfer(w, 'saray', 'dis', c, 'festival masrafı')) return no('Bütçe/hazine yetmiyor.');
+      w.festivalUntil = w.day + 1; for (const p of w.people) { p.mood = clamp(p.mood + c / 100); p.loyalty = clamp(p.loyalty + c / 200); }
+      log(w, `🎪 FESTİVAL! Festival Alanı yarın akşama kadar açık; müzik, oyun, yemek!`); return ok('Festival başladı.');
+    }
+    case 'buildAt': {
+      if (!isKayzer(w, me)) return no('İnşaatı devlet başlatır.'); const plot = w.buildings.find((b) => b.id === a.plotId && b.kind === 'arsa'); if (!plot) return no('Bu arsa boş değil.');
+      if (w.projects.some((x) => !x.done)) return no('Önce süren inşaat bitmeli.');
+      const K: Record<string, [string, number]> = { cesme: ['Çeşme', 800], hamam: ['Hamam', 1500], kutuphane: ['Kütüphane', 1200], han: ['Kervansaray', 2000] };
+      const k = K[a.kind]; if (!k) return no('Bilinmeyen yapı.');
+      w.projects.push({ id: `pr${++w.idSeq}`, name: `${k[0]} inşaatı`, site: plot.id, plot: plot.id, kind: a.kind, cost: k[1], paid: 0, progress: 0, needed: Math.round(k[1] / 10), done: false });
+      plot.name = `${k[0]} (inşaatta)`; log(w, `Ferman: ${plot.id} arsasına ${k[0]} yapılacak. Ustalar şantiyeden yola çıkıyor.`); return ok('İnşaat başladı; ödenek ayırın.');
     }
     case 'fateVote': { if (!['surgun', 'zindan', 'af'].includes(a.fate)) return no('Geçersiz.'); const r = voteFate(w, me, a.fate); return { ok: r.startsWith('Oyunuz'), msg: r }; }
     case 'festival': {

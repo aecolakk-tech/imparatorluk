@@ -12,6 +12,7 @@ import { ONLINE_WINDOW_MS } from '../sim/constants';
 import { age, ancestorsOf, canHaveChild, canRule, childrenOf, findChild, heirOf, isHanedan, nameOf, stage, STAGE_LABEL, ADULT_AGE, CHILD_UPKEEP, CURE_FEE, PROSPERITY_MONEY } from '../sim/family';
 import { FATE_LABEL, strength, TARGETS } from '../sim/isyan';
 import type { Child, Fate } from '../sim/types';
+import { buildingExtras, caseRoles, electionBlock, personActions, personExtras, sarayExtras } from './life';
 
 export interface Ctx {
   w: World; me: Person | null; founder: boolean;
@@ -42,8 +43,8 @@ export function personCard(c: Ctx, p: Person): HTMLElement {
     h('div', { class: 'card' }, `💭 “${p.thought || '…'}”`),
     h('table', {},
       h('tr', {}, h('td', {}, 'Kese'), h('td', {}, `${fmt(p.money)} Dinar`)),
-      h('tr', {}, h('td', {}, 'Memnuniyet'), h('td', {}, bar(p.mood, '#5fae5a'), ` ${Math.round(p.mood)}`)),
-      h('tr', {}, h('td', {}, 'Sadakat'), h('td', {}, bar(p.loyalty, '#e8c14a'), ` ${Math.round(p.loyalty)}`)),
+      h('tr', { title: 'Kişisel hayat: yemek, aile, eğlence, din' }, h('td', {}, 'Mutluluk'), h('td', {}, bar(p.mood, '#5fae5a'), ` ${Math.round(p.mood)}`)),
+      h('tr', { title: 'Devlete ve tahta bakış (eski memnuniyet + sadakat)' }, h('td', {}, 'Memnuniyet'), h('td', {}, bar(p.loyalty, '#e8c14a'), ` ${Math.round(p.loyalty)}`)),
       h('tr', {}, h('td', {}, 'Açlık / Susuzluk'), h('td', {}, `${Math.round(p.hunger)} / ${Math.round(p.thirst)}`)),
       h('tr', {}, h('td', {}, 'Sağlık'), h('td', {}, bar(p.health, '#c8483a'), ` ${Math.round(p.health)}`)),
       h('tr', {}, h('td', {}, 'Cumhuriyetçilik'), h('td', {}, bar(p.republic, '#5a8ad0'), ` ${Math.round(p.republic)}`)),
@@ -52,23 +53,23 @@ export function personCard(c: Ctx, p: Person): HTMLElement {
       h('tr', {}, h('td', {}, 'Eşi'), h('td', {}, findPerson(w, p.spouse)?.name ?? '—')),
       h('tr', {}, h('td', {}, 'Ebeveyn'), h('td', {}, p.parents.map((id) => nameOf(w, id)).join(', ') || '—')),
       h('tr', {}, h('td', {}, 'Çocukları'), h('td', {}, childrenOf(w, p.id).map((k) => nameOf(w, k.id)).join(', ') || '—')),
-      h('tr', {}, h('td', {}, 'Dostları'), h('td', {}, friends || '—')),
-      h('tr', {}, h('td', {}, 'Küsleri'), h('td', {}, foes || '—')),
       h('tr', {}, h('td', {}, 'Son yaptığı'), h('td', {}, p.lastAction)),
     ),
+    personExtras(c, p),
   );
+  void friends; void foes;
   if (!c.me || mine) {
-    if (mine) box.append(h('div', { class: 'row' }, h('button', { onclick: () => c.act({ t: 'eat' }) }, '🍞 Ekmek ye')));
+    if (mine) box.append(h('div', { class: 'row' }, h('button', { onclick: () => c.act({ t: 'eat' }) }, `🍞 Ye (${p.meals}/3)`), h('button', { onclick: () => c.act({ t: 'drinkWater' }) }, `💧 Su iç (${p.drinks}/5)`), h('button', { onclick: () => c.act({ t: 'doctor' }) }, '🩺 Hekim')));
     return box;
   }
   const amt = numIn(10, 1);
   const actions = h('div', { class: 'row' }, amt,
     h('button', { onclick: () => c.act({ t: 'give', personId: p.id, amount: Number(amt.value) }) }, isK(c) ? '💰 Saraydan ver' : '💰 Para ver'),
-    h('button', { onclick: () => c.act({ t: 'bribe', personId: p.id, amount: Number(amt.value) }) }, '🤫 Rüşvet'),
+    !isK(c) && !c.me.soylu && (STATE_PROFS.includes(p.prof) || p.meclis) ? h('button', { title: 'Sadece devlet görevlisine ya da Meclis üyesine. Suçtur.', onclick: () => c.act({ t: 'bribe', personId: p.id, amount: Number(amt.value) }) }, '🤫 Rüşvet') : '',
     h('button', { onclick: () => c.dm(p.id) }, '✉️ Mesaj'),
-    !c.me.spouse && !p.spouse && p.prof !== 'naip' && stage(w, p) === 'yetiskin' ? h('button', { onclick: () => c.act({ t: 'marry', personId: p.id }) }, '💍 Evlenme teklif et') : '',
+    !c.me.spouse && !p.spouse && p.prof !== 'naip' && stage(w, p) === 'yetiskin' && p.female !== c.me.female ? h('button', { onclick: () => c.act({ t: 'marry', personId: p.id }) }, '💍 Evlenme teklif et') : '',
   );
-  box.append(h('h3', {}, 'Ne yapacaksınız?'), actions);
+  box.append(h('h3', {}, 'Ne yapacaksınız?'), actions, personActions(c, p));
   const risky = h('div', { class: 'row' });
   if (!isK(c)) risky.append(h('button', { class: 'danger', onclick: () => { if (confirm('Çalmak suçtur; bekçi yakalayabilir. Emin misiniz?')) c.act({ t: 'steal', personId: p.id }); } }, '🦹 Kesesini çal'));
   if (c.me.prof === 'bekci') risky.append(h('button', { onclick: () => c.act({ t: 'arrest', personId: p.id }) }, '⛓ Tutukla'));
@@ -150,9 +151,10 @@ function sarayPanel(c: Ctx): HTMLElement {
         h('div', { class: 'row' }, 'Veliaht:', sel, h('button', { onclick: () => c.act({ t: 'veliaht', childId: sel.value || null }) }, 'Belirle')),
         h('button', { class: 'danger', onclick: () => { if (confirm('Tahttan feragat edilsin mi? Hanedan hakkınız sürer.')) c.act({ t: 'abdicate' }); } }, '🏳 Tahttan feragat et'));
     }
+    box.append(sarayExtras(c));
     const fest = numIn(150, 50, 5000);
     box.append(h('h3', {}, '🎉 Bayram'), h('div', { class: 'row' }, fest, 'Dinar', h('button', { onclick: () => c.act({ t: 'festival', cost: Number(fest.value) }) }, 'Bayram ilan et')),
-      h('div', { class: 'muted' }, 'Hazineden herkese harçlık dağıtılır; memnuniyet artar, cumhuriyet isteği azalır.'));
+      h('div', { class: 'muted' }, 'Hazineden herkese harçlık dağıtılır; memnuniyet artar, cumhuriyet isteği azalır. (Festival Alanı ayrı: yukarıda.)'));
   } else if (c.me) {
     const kind = select([['yardim', 'Yardım isteği'], ['is', 'İş isteği'], ['vergi', 'Vergi şikâyeti'], ['sikayet', 'Şikâyet'], ['kanun', 'Kanun teklifi'], ['gorev', 'Devlet görevi isteği']]);
     const text = h('textarea', { rows: '2', style: 'width:100%', placeholder: 'Efendim, …' });
@@ -170,7 +172,7 @@ function sarayPanel(c: Ctx): HTMLElement {
 function courtPanel(c: Ctx): HTMLElement {
   const w = c.w; const box = h('div', {});
   const open = w.cases.filter((x) => x.stage !== 'kapandi'); const closed = w.cases.filter((x) => x.stage === 'kapandi').slice(-6).reverse();
-  box.append(h('div', { class: 'muted' }, 'Akış: Bekçi yakalar → Savcı dava açar ya da düşürür → Hâkim karar verir. Kayzer affedebilir.'));
+  box.append(h('div', { class: 'muted' }, 'Akış: Bekçi/asker yakalar → (rüşvet penceresi) → Savcı dava açar ya da düşürür → Kadı karar verir. Oyuncular avukat ya da tanık olabilir. Kayzer affedebilir.'));
   box.append(h('h3', {}, `Açık davalar (${open.length})`));
   for (const cs of open) {
     const a = findPerson(w, cs.accusedId);
@@ -178,7 +180,7 @@ function courtPanel(c: Ctx): HTMLElement {
     if (c.me?.prof === 'savci' && cs.stage === 'savci') row.append(h('button', { onclick: () => c.act({ t: 'caseDecision', caseId: cs.id, decision: 'kovustur' }) }, 'Kovuştur'), h('button', { onclick: () => c.act({ t: 'caseDecision', caseId: cs.id, decision: 'dusur' }) }, 'Düşür'));
     if (c.me?.prof === 'hakim' && cs.stage === 'hakim') row.append(h('button', { onclick: () => c.act({ t: 'caseDecision', caseId: cs.id, decision: 'suclu' }) }, 'Suçlu'), h('button', { onclick: () => c.act({ t: 'caseDecision', caseId: cs.id, decision: 'beraat' }) }, 'Beraat'));
     if (isK(c)) row.append(h('button', { onclick: () => c.act({ t: 'pardon', caseId: cs.id }) }, '🕊 Af'));
-    box.append(h('div', { class: 'card' }, h('b', {}, `${CRIME_LABEL[cs.crime]}: ${a?.name ?? '?'}`), h('div', { class: 'muted' }, `aşama: ${cs.stage === 'savci' ? 'Savcıda' : 'Hâkimde'} · delil ${cs.evidence} · ${cs.amount} Dinar`), row));
+    box.append(h('div', { class: 'card' }, h('b', {}, `${CRIME_LABEL[cs.crime]}: ${a?.name ?? '?'}`), h('div', { class: 'muted' }, `aşama: ${cs.stage === 'savci' ? 'Savcıda' : 'Kadıda'} · delil ${Math.round(cs.evidence)} · ${cs.amount} Dinar${cs.defenders?.length ? ` · avukat: ${cs.defenders.map((id) => findPerson(w, id)?.name).join(', ')}` : ''}${cs.witnesses?.length ? ` · ${cs.witnesses.length} tanık` : ''}`), row, caseRoles(c, cs.id, cs.accusedId)));
   }
   if (closed.length) box.append(h('h3', {}, 'Son kararlar'), ...closed.map((cs) => h('div', { class: 'msg' }, `${CRIME_LABEL[cs.crime]} – ${findPerson(w, cs.accusedId)?.name ?? '?'}: ${cs.verdict ?? ''} ${cs.sentence ?? ''}`)));
   box.append(h('h3', {}, '📚 Kanun kitabı'), ...w.laws.map((l) => h('div', { class: 'msg' }, `${l.active ? '🟢' : '⚪'} ${l.name}: ${l.desc}`)));
@@ -236,6 +238,7 @@ function meclisPanel(c: Ctx): HTMLElement {
     for (const id of w.election.baskanCandidates) { const p = findPerson(w, id); if (p) box.append(personLine(c, p, h('button', { onclick: (e) => { e.stopPropagation(); c.act({ t: 'voteBaskan', candidateId: id }); } }, 'Başkanlığa oy'))); }
     if (c.me) box.append(h('button', { class: 'primary', onclick: () => c.act({ t: 'runForBaskan' }) }, 'Başkan adayı ol'));
   } else box.append(h('div', { class: 'muted' }, 'İmparatorlukta Meclis’in kabul ettiği kararlar Kayzer’in onayına gider. Kayzer’in vetosu kesindir, aşılamaz.'));
+  box.append(electionBlock(c));
   // seat chart
   box.append(h('h3', {}, `🪑 Sandalyeler · seçim ${w.election.nextDay}. gün · üye maaşı ${w.meclis.salary} D`));
   const chart = h('div', { class: 'row' });
@@ -263,7 +266,7 @@ function meclisPanel(c: Ctx): HTMLElement {
     const target = select([['', '— hedef —'], ...w.laws.map((l): [string, string] => [l.id, `Kanun: ${l.name}`]), ...GOODS.map((g): [string, string] => [g, `Mal: ${GOOD_LABEL[g]}`]), ['meclis', 'Maaş: Meclis üyesi'], ...STATE_PROFS.map((p): [string, string] => [p, `Maaş: ${PROF_LABEL[p]}`]), ...w.people.filter((p) => p.prof !== 'naip').map((p): [string, string] => [p.id, `Kişi: ${p.name}`])]);
     box.append(h('h3', {}, '✍️ Teklif ver'), h('div', { class: 'row' }, kind, 'değer', val, target, h('button', { class: 'primary', onclick: () => c.act({ t: 'propose', kind: kind.value as BillKind, value: Number(val.value), target: target.value }) }, 'Teklif et')),
       h('div', { class: 'muted' }, 'Vergi/bütçe/inşaat için “değer”, narh için mal ve fiyat, maaş için görev ve tutar, gensoru/soruşturma/dokunulmazlık için kişi seçin.'));
-  } else if (c.me && !isK(c)) box.append(h('button', { onclick: () => c.act({ t: 'runForMeclis' }) }, 'Meclise aday ol (kendi mahalleniz ve meslek sandalyeniz için)'));
+  } else if (c.me && !isK(c)) box.append(h('button', { onclick: () => c.act({ t: 'runForMeclis' }) }, 'Meclise aday ol (sadece adaylık döneminde)'));
   for (const id of w.election.candidates) { const p = findPerson(w, id); if (p) box.append(personLine(c, p, h('button', { onclick: (e) => { e.stopPropagation(); c.act({ t: 'vote', candidateId: id }); } }, 'Oy ver'))); }
   // history
   const done = w.meclis.bills.filter((b) => !['tartisma', 'oylama', 'onay'].includes(b.status)).slice(-8).reverse();
@@ -289,20 +292,21 @@ function santiyePanel(c: Ctx): HTMLElement {
 const INFO: Record<string, string> = {
   okul: 'Öğretmenler çocuklara okuma yazma öğretiyor. Hocalar maaşını hazineden alır.',
   cami: 'Hoca Abdullah’ın camisi. Düğünler avluda yapılır.',
-  hekimhane: 'Sağlığı bozulan vatandaşlar hekime 4 Dinar öder. Parası olmayana darülaceze (hazine) bakar.',
+  hekimhane: 'Hekimler ücret karşılığı tedavi eder. Parası olmayana darülaceze (hazine) bakar.',
   liman: 'Balıkçılar her sabah ağ atar; balık çabuk bozulur.',
   kasaphane: 'Kasaplar et keser. Et pahalıdır ama insanı mutlu eder.',
   degirmen: 'Değirmen fırınlara un öğütür.',
   kuyu: 'Sucular kuyudan su çeker. Devlet Suyu kanunu fiyatı sabitler.',
   atolye: 'Terziler kumaş, demirciler alet, marangozlar odun ve mobilya yapar.',
   firin: 'Fırıncılar ekmek pişirir. Buraya askıda ekmek bırakabilirsiniz.',
-  zindan: 'Yargılanan ve hüküm giyenler burada yatar.',
+  zindan: 'Yakalananlar ve hüküm giyenler burada yatar; haritada içeride görünürler.',
+  kahve: 'Memurlar ve tahsildarlar burada. Sarraf (borç) ⚡ menüsünde.',
 };
 
 export function buildingPanel(c: Ctx, b: Building): HTMLElement {
   const w = c.w;
   const box = h('div', {}, h('h2', {}, b.name));
-  if (b.market) box.append(marketPanel(c, b));
+  if (b.market) { const ex = buildingExtras(c, b); if (ex) box.append(ex); box.append(marketPanel(c, b)); }
   else if (b.id === 'saray') box.append(sarayPanel(c));
   else if (b.id === 'mahkeme') box.append(courtPanel(c));
   else if (b.id === 'kisla') box.append(kislaPanel(c));
@@ -310,6 +314,7 @@ export function buildingPanel(c: Ctx, b: Building): HTMLElement {
   else if (b.id === 'santiye') box.append(santiyePanel(c));
   else {
     if (INFO[b.id]) box.append(h('div', { class: 'muted' }, INFO[b.id]!));
+    const ex = buildingExtras(c, b); if (ex) box.append(ex);
     if (b.id === 'firin' && c.me) { const q = numIn(3, 1, 20); box.append(h('div', { class: 'row' }, q, h('button', { onclick: () => c.act({ t: 'askida', qty: Number(q.value) }) }, '🥖 Askıda ekmek bırak'))); }
   }
   const people = w.people.filter((p) => (b.id === 'zindan' ? p.jailedDays > 0 : b.kind === 'ev' ? p.home === b.id : p.work === b.id && p.jailedDays === 0));

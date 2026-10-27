@@ -68,4 +68,25 @@ await click(p, '✕'); await click(p, 'Aile'); await new Promise((r) => setTimeo
 console.log('aile panel:', await p.evaluate(() => ['Aile', 'Soy ağacı', 'Çocuklar'].map((k) => document.querySelector('.sheet')?.textContent?.includes(k))));
 await p.screenshot({ path: '/workspace/imparatorluk/smoke-aile.png' });
 console.log('console errors/warnings:', errors.length ? errors : 'none');
+
+// ---- v1.4 checks ----
+const p3 = await page(1280, 800);
+await p3.goto(url, { waitUntil: 'networkidle0' }); await new Promise((r) => setTimeout(r, 1500));
+for (let i = 0; i < 10; i += 1) { const has = await p3.$('.modal'); if (!has) break; await click(p3, 'Tamam'); }
+console.log('hud:', await p3.evaluate(() => document.querySelector('.hud')?.textContent));
+await click(p3, 'Ne yapabilirim'); await new Promise((r) => setTimeout(r, 300));
+console.log('quick panel:', await p3.evaluate(() => ['İhtiyaçlar', 'Sarraf', 'Görev'].map((k) => document.querySelector('.sheet')?.textContent?.includes(k))));
+await click(p3, 'Su iç'); await new Promise((r) => setTimeout(r, 600));
+await p3.screenshot({ path: '/workspace/imparatorluk/smoke-quick.png' });
+await click(p3, '✕'); await click(p3, 'Olaylar'); await new Promise((r) => setTimeout(r, 300));
+await p3.screenshot({ path: '/workspace/imparatorluk/smoke-feed.png' }); await click(p3, '✕');
+// freeze check: how many visible people move over 3 seconds
+const snap = async () => p3.evaluate(() => window.__imp().placed);
+const a = await snap(); await new Promise((r) => setTimeout(r, 3000)); const b = await snap();
+const mapB = new Map(b.map((x) => [x[0], x])); let vis = 0, moved = 0;
+for (const x of a) { const y = mapB.get(x[0]); if (!y || !x[3] || !y[3]) continue; vis += 1; if (Math.hypot(x[1] - y[1], x[2] - y[2]) > 0.05) moved += 1; }
+const wh = await p3.evaluate(() => window.__imp().world.hour);
+console.log(`freeze check at hour ${wh}: ${moved}/${vis} visible people moved in 3 s`);
+await p3.screenshot({ path: '/workspace/imparatorluk/smoke-map2.png' });
+console.log('console errors/warnings (final):', errors.length ? errors : 'none');
 await browser.close();

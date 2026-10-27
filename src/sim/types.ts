@@ -1,16 +1,18 @@
-export type Good = 'ekmek' | 'su' | 'et' | 'balik' | 'kumas' | 'alet' | 'odun';
-export const GOODS: Good[] = ['ekmek', 'su', 'et', 'balik', 'kumas', 'alet', 'odun'];
+export type Good = 'ekmek' | 'su' | 'et' | 'balik' | 'kumas' | 'alet' | 'odun' | 'bugday' | 'yun' | 'elbise' | 'mobilya' | 'icki';
+export const GOODS: Good[] = ['ekmek', 'su', 'et', 'balik', 'kumas', 'alet', 'odun', 'bugday', 'yun', 'elbise', 'mobilya', 'icki'];
 
 export type Profession =
   | 'firinci' | 'sucu' | 'kasap' | 'balikci' | 'terzi' | 'demirci' | 'marangoz'
   | 'tuccar' | 'hekim' | 'hoca' | 'hamal' | 'insaatci' | 'kalemsor' | 'imam'
-  | 'memur' | 'tahsildar' | 'bekci' | 'savci' | 'hakim' | 'asker' | 'kayzer' | 'naip';
+  | 'memur' | 'tahsildar' | 'bekci' | 'savci' | 'hakim' | 'asker' | 'kayzer' | 'naip'
+  | 'ciftci' | 'dokumaci' | 'mobilyaci' | 'barci';
 
 export type Office = 'meclis';
 
 export type BuildingKind =
   | 'saray' | 'mahkeme' | 'kisla' | 'cami' | 'meclis' | 'okul' | 'hekimhane' | 'liman'
-  | 'kasap' | 'degirmen' | 'firin' | 'kuyu' | 'atolye' | 'pazar' | 'ev' | 'santiye' | 'zindan' | 'kahve';
+  | 'kasap' | 'degirmen' | 'firin' | 'kuyu' | 'atolye' | 'pazar' | 'ev' | 'santiye' | 'zindan' | 'kahve'
+  | 'bar' | 'festival' | 'ciftlik' | 'dokuma' | 'mobilyahane' | 'ambar' | 'arsa' | 'yapi';
 
 export interface Building {
   id: string;
@@ -58,7 +60,26 @@ export interface Person {
   soylu: boolean; // nobility (Kayzer's spouse, royal children)
   school: number; // days of schooling (children who grew up)
   exiledDays: number; // sürgün
+  din: number; // dindarlık 0..100
+  meals: number; drinks: number; // today
+  wounded: boolean; // needs a doctor
+  protectedUntil: number; // newcomer protection (game day)
+  xp: number; // profession experience → çırak/kalfa/usta
+  rep: number; // reputation -100..100 (gossip)
+  relNote: Record<string, string>; // why we are friends/enemies
+  titles: string[]; // achievements
+  taxDue: number; smuggle: boolean;
+  nightOut: boolean;
+  bought?: Partial<Record<Good, number>>; // bought today – cannot be resold the same day
 }
+
+export interface Arrest { id: string; criminalId: string; catcherId: string; crime: CrimeKind; victimId: string | null; amount: number; day: number; hour: number; offer: number; status: 'bekliyor' | 'kabul' | 'ret'; }
+export type CrimeKind = 'hirsizlik' | 'rusvet' | 'zimmet' | 'isyan' | 'saldiri' | 'cinayet' | 'kacakcilik';
+export interface NpcMsg { fromPersonId: string; fromName: string; toPersonId: string | null; text: string; at: number }
+export interface Offer { id: string; from: string; to: string; kind: 'mal' | 'borc' | 'is' | 'rusvet'; good?: Good; qty?: number; price?: number; amount?: number; arrestId?: string; day: number; text: string }
+export interface Nature { kind: 'kuraklik' | 'salgin' | 'sel' | 'bereket' | 'balik'; start: number; until: number }
+export interface Caravan { day: number; until: number; goods: Partial<Record<Good, number>>; name: string; earned?: number; spent?: number }
+export interface Threat { name: string; demand: number; day: number; deadline: number; strength: number }
 
 /** A minor (bebek/çocuk/genç). Becomes a full Person (same id) at ADULT_AGE game days. */
 export interface Child {
@@ -86,23 +107,23 @@ export interface Petition {
 
 export type CaseStage = 'savci' | 'hakim' | 'kapandi';
 export interface CourtCase {
-  id: string; accusedId: string; crime: 'hirsizlik' | 'rusvet' | 'zimmet' | 'isyan'; victimId: string | null;
+  id: string; accusedId: string; crime: CrimeKind; victimId: string | null;
   amount: number; evidence: number; stage: CaseStage; day: number; deadline: number;
-  verdict?: 'suclu' | 'beraat' | 'dusuruldu' | 'af'; sentence?: string; bribed?: boolean;
+  verdict?: 'suclu' | 'beraat' | 'dusuruldu' | 'af'; sentence?: string; bribed?: boolean; defenders?: string[]; witnesses?: { id: string; against: boolean }[];
 }
 
 export interface Law { id: string; name: string; desc: string; active: boolean; param?: number; paramLabel?: string; }
 
-export interface Project { id: string; name: string; site: string; cost: number; paid: number; progress: number; needed: number; done: boolean; }
+export interface Project { id: string; name: string; site: string; kind?: string; plot?: string; cost: number; paid: number; progress: number; needed: number; done: boolean; }
 
-export interface Election { nextDay: number; candidates: string[]; votes: Record<string, string>; seats: number; baskanNextDay: number; baskanCandidates: string[]; baskanVotes: Record<string, string>; }
+export interface Election { posters?: Record<string, number>; nextDay: number; candidates: string[]; votes: Record<string, string>; seats: number; baskanNextDay: number; baskanCandidates: string[]; baskanVotes: Record<string, string>; }
 
 export interface Gazette { day: number; headline: string; lines: string[]; meclis?: string[]; }
 
 export interface PlayerInfo {
   playerId: string; personId: string; name: string; founder: boolean; banned: boolean;
   lastSeen: number; // ms
-  lastSeenDay: number; awayLog: string[]; awayMoney: number;
+  lastSeenDay: number; awayLog: string[]; awayMoney: number; quest?: number;
 }
 
 export type Ideology = 'saltanatci' | 'cumhuriyetci' | 'esnaf' | 'halkci';
@@ -163,6 +184,23 @@ export interface World {
   regentFor: string | null;
   isyan: Isyan | null;
   deposed: Deposed | null;
+  schema: number;
+  speed: number; // 0.5 | 1 | 2 (Kayzer only)
+  nature: Nature | null; nextDrought: number;
+  festivalUntil: number; // game day (inclusive) the festival ground is open
+  granary: number; // state wheat store (tahıl ambarı)
+  priceCaps: Partial<Record<Good, number>>;
+  arrests: Arrest[];
+  chatOut: NpcMsg[];
+  talks: { a: string; b: string; text: string; day: number; hour: number }[];
+  offers: Offer[];
+  rumors: { day: number; text: string; about: string }[];
+  caravan: Caravan | null; threat: Threat | null;
+  bans: string[]; // custom bans (icki, kumar, gece)
+  loans: { id: string; debtor: string; lender: string; amount: number; due: number; day: number }[];
+  serverNow?: number;
+  shortDays?: number;
+  outsideNet: number; // money that left to / came from the outside world (caravans, tribute) – keeps the books balanced
   allowStateTakeover: boolean;
   kayzerId: string | null; // head of state person id: Kayzer, or Başkan in the republic
   founderPersonId: string | null;
@@ -220,6 +258,20 @@ export type Action =
   | { t: 'abdicate' }
   | { t: 'isyanCmd'; cmd: 'dagit' | 'tutukla' | 'saldir' }
   | { t: 'joinRebels' }
-  | { t: 'fateVote'; fate: Fate };
+  | { t: 'fateVote'; fate: Fate }
+  | { t: 'setSpeed'; speed: number }
+  | { t: 'drinkWater' } | { t: 'pray' } | { t: 'drink' } | { t: 'doctor' } | { t: 'work' } | { t: 'nightOut'; on: boolean }
+  | { t: 'assault'; personId: string } | { t: 'kill'; personId: string } | { t: 'insult'; personId: string } | { t: 'chatWith'; personId: string }
+  | { t: 'offerBribe'; arrestId: string; amount: number } | { t: 'answerBribe'; arrestId: string; accept: boolean }
+  | { t: 'answerOffer'; offerId: string; accept: boolean }
+  | { t: 'poster' } | { t: 'campaign'; text: string }
+  | { t: 'sermon'; topic: 'namaz' | 'icki' | 'sabir' }
+  | { t: 'directive'; topic: 'namaz' | 'icki' | 'laik' }
+  | { t: 'granary'; op: 'buy' | 'release'; qty: number }
+  | { t: 'priceCap'; good: Good; price: number | null }
+  | { t: 'defend'; caseId: string } | { t: 'witness'; caseId: string; against: boolean }
+  | { t: 'smuggle'; on: boolean }
+  | { t: 'borrow'; amount: number } | { t: 'repay'; loanId: string } | { t: 'festivalOpen'; cost: number } | { t: 'buildAt'; plotId: string; kind: string }
+  | { t: 'tribute'; pay: boolean } | { t: 'caravanBuy'; good: Good; qty: number };
 
 export interface ActionResult { ok: boolean; msg: string; }

@@ -77,3 +77,13 @@ Bilinen sınırlar için rapordaki "Eksikler" bölümüne bakın: dünya durumu 
 - **İsyan** artık haritada canlı: asiler Pazar'da toplanır, binaları sırayla işgal eder (🚩), üstte İSYAN çubuğu (asi vs sadık güç). Hükümdar/naip/asker: Dağıt-pazarlık, Elebaşları tutukla, Saldır. Cumhuriyet sadece asiler Saray'ı alırsa ya da sadık asker kalmazsa ilan edilir. Devrik Kayzer'in kaderini (sürgün/zindan/af) isyancı oyuncular oylar, yoksa önderler kuralla seçer; hanedan hakkı sürer (`src/sim/isyan.ts`).
 - **Evlilik ve aile** (`src/sim/family.ts`): teklif/kabul, düğün, ortak hane; Kayzer'in eşi soylu olur ve saraya taşınır, Kayzer yokken/pasifken eş yönetir. Bolluk eşiğinin üstünde çocuk, günlük bakım, bebek→çocuk→genç→yetişkin (60 gün), huy mirası, okul, hastalık/hekim, yetimlere devlet bakımı, miras, boşanmada mal paylaşımı, veliaht, feragat ve naiplik, hanedan hakkının çocuklara geçmesi, soy ağacı paneli. Yetişkin çocuklar yeni oyuncular tarafından devralınabilir.
 - Canlı: https://aecolakk-tech.github.io/imparatorluk/ (GitHub Pages, `gh-pages` dalı: `npm run build` sonra `dist/` yayınlanır), sunucu: Supabase Edge Function `game`.
+
+## v1.4 – Yaşayan şehir
+- 1 gün = 5 dk; Kayzer hızı 0,5x/1x/2x yapar. HUD: saat, öğün/su, sağlık, mutluluk, dindarlık, aktif olaylar, seçim takvimi; ⚡ “Ne yapabilirim?” paneli, 📣 olay/dedikodu panosu, görev rehberi.
+- İhtiyaçlar (3 öğün, 5 su; eksikse −10 sağlık), hekim (sağlık <30 / yara), dindarlık (namaz, içki, vaaz, devlet yönlendirmesi), meyhane, festival alanı.
+- Üretim zincirleri (çiftçi → fırıncı/barcı, kasap yünü → dokumacı → terzi, marangoz → mobilyacı/demirci), çırak/kalfa/usta, arz-talep fiyatları (günde ±%8), stok sınırı ve karaborsa, tahsildar, kaçakçılık, sarraf ve haciz, tahıl ambarı, narh, kervanlar, sınır tehditleri, miras/servet vergisi.
+- Suç: hırsızlık, saldırı, cinayet; yakalayana rüşvet penceresi; kadı, avukat, tanık; zindandakiler zindanın içinde görünür.
+- NPC sohbeti: Meydan’da konuşur, DM’lere cevap verir, oyunculara teklif getirir; haritada konuşma balonları.
+- Cinsiyet herkes için; evlilik sadece kadın-erkek. Seçimde adaylık → propaganda (afiş, konuşma) → oylama.
+- Kuraklık her 180 günde 14 gün; salgın, sel, bereket. Daha büyük harita (100×60), arsalara inşaat.
+- Kayıtlı dünyalar `migrateWorld` ile şema 2’ye taşınır (kimse silinmez).

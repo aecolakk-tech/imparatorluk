@@ -54,7 +54,7 @@ describe('clock', () => {
     const n2 = advanceWorld(w, T0 + DAY_MS / 2);
     expect(n1).toBeGreaterThan(0); expect(n2).toBe(0); expect(JSON.stringify(w)).toBe(snap);
   });
-  it('1 game day = 10 real minutes', () => { expect(DAY_MS).toBe(600_000); });
+  it('1 game day = 5 real minutes', () => { expect(DAY_MS).toBe(300_000); });
 });
 
 describe('economy', () => {
@@ -87,14 +87,14 @@ describe('economy', () => {
     const w = setup();
     w.taxRate = 25;
     for (const p of w.people) { p.money = 200; p.hunger = 0; p.thirst = 0; p.plotting = 'none'; p.republic = 10; }
-    for (let i = 0; i < 20; i += 1) for (const p of w.people) { p.incomeToday = 20; feel(w, p); p.hunger = 0; p.thirst = 0; }
+    for (let i = 0; i < 20; i += 1) for (const p of w.people) { p.incomeToday = 20; p.meals = 3; p.drinks = 5; feel(w, p); p.hunger = 0; p.thirst = 0; }
     expect(w.people.every((p) => p.republic <= 10)).toBe(true);
   });
   it('committed republicans keep their leaning while others fall back', () => {
     const w = setup();
     for (const p of w.people) { p.money = 200; p.incomeToday = 20; p.republic = 50; p.plotting = 'none'; }
     const r = w.people[20]!; r.plotting = 'revolution'; r.republic = 80;
-    for (let i = 0; i < 40; i += 1) for (const p of w.people) { feel(w, p); p.hunger = 0; p.thirst = 0; }
+    for (let i = 0; i < 40; i += 1) for (const p of w.people) { p.meals = 3; p.drinks = 5; feel(w, p); p.hunger = 0; p.thirst = 0; }
     expect(r.republic).toBeGreaterThanOrEqual(75);
     expect(w.people[30]!.republic).toBeLessThan(40);
   });
@@ -221,12 +221,12 @@ describe('Meclis', () => {
     const avg = (f: (p: Person) => number) => w.people.filter((p) => p.prof !== 'naip' && p.id !== w.kayzerId).reduce((a, p) => a + f(p), 0) / (w.people.length - 2);
     const r0 = avg((p) => p.republic), l0 = avg((p) => p.loyalty);
     expect(applyAction(w, 'f', { t: 'sanction', billId: b.id, approve: false }, T0).ok).toBe(true);
-    expect(b.status).toBe('veto'); expect(w.taxRate).toBe(12);
+    expect(b.status).toBe('veto'); expect(w.taxRate).toBe(10);
     expect(avg((p) => p.republic) - r0).toBeCloseTo(0.7, 1);
     expect(avg((p) => p.loyalty) - l0).toBeCloseTo(-1.5, 1);
     expect(sanction(w, b, true)).toContain('beklemiyor'); // cannot be revived
     for (let i = 0; i < 5; i += 1) { w.day += 1; meclisDay(w, () => true, true); }
-    expect(b.status).toBe('veto'); expect(w.taxRate).toBe(12);
+    expect(b.status).toBe('veto'); expect(w.taxRate).toBe(10);
   });
   it('approved budget limits the head of state’s spending', () => {
     const w = withMeclis();
@@ -298,7 +298,7 @@ describe('onboarding', () => {
     applyAdmin(w, { t: 'allowStateTakeover', allow: true });
     expect(joinWorld(w, 'n4', 'x', 'hamal', false, T0, bekci.id).id).toBe(bekci.id);
     const fresh = joinWorld(w, 'n5', 'Yeni', 'terzi', false, T0);
-    expect(fresh.money).toBe(80); expect(fresh.prof).toBe('terzi');
+    expect(fresh.money).toBe(40); expect(fresh.prof).toBe('terzi');
   });
 });
 
@@ -314,11 +314,12 @@ import { totalMoney } from '../src/sim/economy';
 
 function rich(w: World, ...ps: Person[]): void { for (const p of ps) { p.money = 400; p.hunger = 0; } w.market.unmet.ekmek = 0; w.prices.ekmek = 1.2; }
 const npcSingle = (w: World): Person[] => w.people.filter((p) => !p.spouse && p.home.startsWith('ev') && !p.playerId);
+const bride = (w: World): Person => npcSingle(w).find((p) => p.female)!;
 
 describe('marriage & family', () => {
   it("the Kayzer's spouse becomes soylu and moves into the Saray", () => {
     const w = setup(); const k = findPerson(w, w.kayzerId)!;
-    const t = npcSingle(w)[0]!; t.mood = 90; t.relations[k.id] = 80;
+    const t = bride(w); t.mood = 90; t.relations[k.id] = 80;
     const r = applyAction(w, 'f', { t: 'marry', personId: t.id }, T0);
     expect(r.msg).toContain('evet'); expect(t.spouse).toBe(k.id); expect(t.soylu).toBe(true); expect(t.home).toBe('saray');
   });
@@ -360,17 +361,17 @@ describe('marriage & family', () => {
     const c = w.children.find((x) => x.id === 'cs')!; expect(c.orphan).toBe(true); expect(w.treasury).toBeLessThan(t0 + 1e6);
     expect(c.hunger).toBe(0);
   });
-  it('inheritance: spouse and adult children share the estate, money conserved', () => {
+  it('inheritance: 10% miras vergisi, then spouse and adult children share the estate, money conserved', () => {
     const w = setup(); const [a, b, kid] = npcSingle(w); a!.spouse = b!.id; b!.spouse = a!.id; kid!.parents = [a!.id, b!.id];
     a!.money = 200; b!.money = 0; kid!.money = 0; const m0 = totalMoney(w);
     die(w, a!, 'test');
-    expect(b!.money).toBe(100); expect(kid!.money).toBe(100); expect(totalMoney(w)).toBeCloseTo(m0, 1);
+    expect(b!.money).toBe(90); expect(kid!.money).toBe(90); expect(totalMoney(w)).toBeCloseTo(m0, 1);
   });
 });
 
 describe('succession & hanedan', () => {
   function royalFamily(w: World, minor: boolean) {
-    const k = findPerson(w, w.kayzerId)!; const sp = npcSingle(w)[0]!; sp.mood = 95; sp.relations[k.id] = 90;
+    const k = findPerson(w, w.kayzerId)!; const sp = bride(w); sp.mood = 95; sp.relations[k.id] = 90;
     applyAction(w, 'f', { t: 'marry', personId: sp.id }, T0);
     w.children.push({ id: 'heir', name: 'Kerem Şehzade', female: false, born: w.day - (minor ? 20 : 70), parents: [k.id, sp.id], honesty: 60, ambition: 60, hairColor: 0, skin: 0, shirt: 0, school: 0, inSchool: false, sick: 0, hunger: 0, orphan: false, soylu: true });
     if (!minor) growUp(w, w.children.find((c) => c.id === 'heir')!);

@@ -53,6 +53,7 @@ const adultFree = (w: World, p: Person | undefined): boolean => !!p && !p.spouse
 
 export function proposeMarriage(w: World, from: Person, to: Person, playerDecides: (p: Person) => boolean): string {
   if (from.id === to.id) return 'Kendinizle evlenemezsiniz.';
+  if (from.female === to.female) return 'Evlilik sadece bir erkek ile bir kadın arasında olur.';
   if (!adultFree(w, from)) return 'Zaten evlisiniz.';
   if (!adultFree(w, to)) return `${to.name} evli ya da evlenemez.`;
   if (from.parents.some((x) => to.parents.includes(x)) || from.parents.includes(to.id) || to.parents.includes(from.id)) return 'Akrabalar evlenemez.';
@@ -82,6 +83,7 @@ export function answerProposal(w: World, me: Person, id: string, accept: boolean
 
 /** Wedding: shared home (the Saray if one is the Kayzer: the spouse becomes soylu), festivities paid to the imam. */
 export function wed(w: World, a: Person, b: Person): void {
+  if (a.female === b.female) return;
   a.spouse = b.id; b.spouse = a.id;
   const imam = w.people.find((p) => p.prof === 'imam' && p.jailedDays === 0);
   for (const x of [a, b]) { const c = Math.min(WEDDING_COST / 2, x.money); if (c > 0) transfer(w, x.id, imam?.id ?? 'saray', c, 'düğün'); x.mood = clamp(x.mood + 15); }
@@ -261,6 +263,7 @@ export function growUp(w: World, c: Child): Person {
 export function die(w: World, p: Person, text: string): void {
   const heirs = childrenOf(w, p.id); const sp = findPerson(w, p.spouse);
   const adults = heirs.filter((h) => h.adult).map((h) => findPerson(w, h.id)!).filter(Boolean);
+  if (p.money > 20) transfer(w, p.id, 'saray', Math.round(p.money * 0.1 * 100) / 100, 'miras vergisi (%10)');
   const money = Math.max(0, p.money);
   if (money > 0) {
     const toSp = sp ? (adults.length ? money / 2 : money) : 0;

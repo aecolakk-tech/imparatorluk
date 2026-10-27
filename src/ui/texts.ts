@@ -1,8 +1,8 @@
 export const RULES: [string, string[]][] = [
   ['Dünya', [
-    'Tek bir ortak dünya var, hiç sıfırlanmaz. 1 oyun günü = 10 gerçek dakika. Oyun durdurulamaz, hızlandırılamaz.',
+    'Tek bir ortak dünya var, hiç sıfırlanmaz. 1 oyun günü = 5 gerçek dakika (1x). Hızı sadece Kayzer 0,5x / 1x / 2x yapabilir (Saray).',
     'Kimse çevrimiçi değilken dünya donar; biri girince kaldığı yerden devam eder.',
-    'Siz yokken karakterinizi oyunun yapay zekâsı temkinli yönetir: çalışır, yer içer, ticaret yapar. Suç işlemez, mal satmaz, riskli karar almaz. Girdiğiniz an kontrol size geçer.',
+    'Siz yokken karakterinizi oyunun yapay zekâsı SADECE hayatta tutar: 3 öğün yer, 5 kez su içer, gerekirse hekime gider. Çalışmaz, satmaz, para biriktirmez, suç işlemez. Girdiğiniz an kontrol size geçer.',
     'Üç hafta hiç girmeyen oyuncunun karakteri tamamen bağımsız bir vatandaşa döner (geri gelince yine sizin olur).',
   ]],
   ['Kayzer ve Naip', [
@@ -55,8 +55,38 @@ export const RULES: [string, string[]][] = [
     'Halkı tok, işi ve adaleti yerinde olan bir imparatorlukta istek kendiliğinden azalır; sadece kararlı cumhuriyetçiler fikrinden dönmez.',
   ]],
   ['Adalet', [
-    'Suçlar: hırsızlık, rüşvet, zimmet, isyan. Akış: Bekçi yakalar → Savcı dava açar ya da düşürür → Hâkim karar verir. Kayzer affedebilir.',
-    'Suçlu bulunan çaldığını öder, para cezası alır ve zindana girer.',
+    'Suçlar: hırsızlık, saldırı (yaralar), cinayet, rüşvet, zimmet, kaçakçılık, isyan. Bekçi (gündüz) ve asker (gece) yakalar.',
+    'Yakalanan kişi akşam ya da sabah, kendisini yakalayana rüşvet teklif edebilir (Ben → Tutuklamam). Kabul ihtimali yakalayanın sadakatine ve dürüstlüğüne bağlıdır. Reddedilirse rüşvet de ayrı bir suç olarak kadıya gider.',
+    'Rüşvet sadece halktan devlet görevlisine ya da Meclis üyesine verilebilir. Kayzer ve soylular rüşvet veremez.',
+    'Akış: Savcı dava açar → Kadı (hâkim) karar verir. Oyuncular davada avukat (savunma) ya da tanık olabilir. Kayzer affedebilir.',
+    'Cezalar: hırsızlık çaldığını öder + ceza; saldırı 5 gün; cinayet 25 gün zindan. Zindandakiler haritada Zindan’ın içinde görünür.',
+    'Şehre yeni gelen oyuncu ilk 5 gün dokunulmazdır (soyulamaz, saldırıya uğramaz).',
+  ]],
+  ['İhtiyaçlar ve sağlık', [
+    'Herkes günde 3 öğün yemek ve 5 kez su ister. Eksik kalan her gün −10 sağlık. Tam beslenen her gün biraz iyileşir.',
+    'Sağlık 30’un altına düştüyse ya da yaralandıysanız kendiliğinden iyileşmezsiniz: Hekimhane’de ücretli hekime gidin (ücret hekimin rütbesine göre). Parası olmayana darülaceze bakar.',
+    'Mutluluk (kişisel hayat) ile Memnuniyet (devlete bakış) ayrıdır. Et ve balık ekmekten fazla mutlu eder; meyhanede içki namazdan fazla mutlu eder ama dindarlığı düşürür.',
+    'Elbise (≈30 günde eskir) sağlık ve itibar, mobilya dinlenme ve mutluluk, alet üretim hızı verir.',
+  ]],
+  ['Din', [
+    'Dindarlık 0–100. Camide namaz kılmak artırır, içki düşürür. Cuma vaazı ve devletin yönlendirmesi (Saray) toplumu etkiler.',
+    'Dindarlar tahta daha sadık, içki yasağına sevinir; seküler halk cumhuriyete ve içkiye yatkındır. Meclis seçmenleri adayın dindarlığına da bakar.',
+  ]],
+  ['Ekonomi', [
+    'Fiyatlar arz ve talebe göre her gün en çok %8 oynar. Her esnaf kendi fiyatını maliyetine ve pazara göre belirler.',
+    'Üretim zinciri: çiftçi 30 buğday → fırıncı 20 buğdaydan 40 ekmek; barcı buğdaydan içki; kasap et + yün → dokumacı kumaş → terzi elbise; marangoz odun → mobilyacı mobilya, demirci alet.',
+    'Rütbe: Çırak → Kalfa → Usta. Usta daha çok ve daha kaliteli üretir, daha pahalı satar.',
+    'Satış vergisini tahsildar toplar (rüşvet ve kaçakçılık mümkündür). Her mal için en çok 100 stok tutulabilir; fazlası karaborsa sayılır, el konur ve ceza kesilir. Bugün aldığınız malı aynı gün satamazsınız.',
+    'Hazine para basamaz. Gelirler: satış vergisi, baş vergisi, gümrük, servet vergisi, miras vergisi, cezalar. Giderler: maaşlar, ordu, yardım, bayram, inşaat.',
+    'Tahıl Ambarı bollukta ucuza buğday alır, kuraklıkta sabit fiyatla satar. Kayzer ekmek/su gibi mallara tavan fiyat (narh) koyabilir.',
+    'Sarraf 150 Dinar’a kadar %15 faizle 7 günlük borç verir. Ödenmeyen borçta haciz, o da yetmezse zindan.',
+    'Kervanlar kıtlıkta limana gelir; pahalı satar, şehrin fazlasını alır. Sınırda tehdit olursa haraç ödenir ya da ordu savaşır.',
+  ]],
+  ['Doğa', [
+    'Her 6 oyun ayında (180 gün) 2 hafta kuraklık olur: buğday ve su azalır. Ayrıca salgın, sel, bereket ve balık bolluğu gelebilir.',
+  ]],
+  ['Dostluk ve düşmanlık', [
+    'Her ilişkinin bir sebebi vardır ve kişi kartında görünür: yardım, sohbet, iltifat, alışveriş, rüşvet dostluk getirir; hakaret, soygun, saldırı, tutuklama düşmanlık. Dostun dostu, düşmanın düşmanı da etkilenir.',
   ]],
   ['Kullanım kuralları', [
     'Oyun sadece davetlilere açıktır; giriş şifresini başkasıyla paylaşmayın.',
@@ -69,7 +99,9 @@ export const RULES: [string, string[]][] = [
 export const GUIDE: string[] = [
   'Hoş geldiniz! Ben Maecenas, sarayın danışmanıyım (cumhuriyet olsa da hâlâ buradayım). Size şehri kısaca göstereyim.',
   'Harita oyunun kendisi. Parmağınızla kaydırın, iki parmakla ya da tekerlekle yakınlaştırın.',
-  'Bir binaya dokunun: pazarda alışveriş, sarayda dilekçe, mahkemede davalar, kışlada askerler, Meclis’te seçim.',
+  'BİNALARA DOKUNARAK etkileşirsiniz: Pazar’da alışveriş, Kuyu’da su, Camide namaz, Meyhanede içki, Hekimhane’de tedavi, Saray’da dilekçe, Mahkeme’de davalar, Meclis’te seçim.',
+  'Üstteki çubukta saat, ihtiyaçlarınız (🍞 öğün x/3, 💧 su x/5), sağlık, aktif olaylar ve seçim takvimi var. ⚡ “Ne yapabilirim?” düğmesi her an yapabileceklerinizi listeler.',
+  'Her gün 3 öğün ve 5 su gerekir, yoksa sağlığınız düşer. Görevler (🎯) size adım adım şehri öğretir ve ödül verir.',
   'Yürüyen herhangi birine dokunun: kartında parasını, ihtiyaçlarını, ne düşündüğünü görürsünüz; para verebilir, mesaj atabilirsiniz.',
   'Karakteriniz her gün kendi mesleğinde otomatik çalışır ve kazandığıyla ekmek, su alır. Siz daha fazlasını yapabilirsiniz: ticaret, dilekçe, seçim… ya da darbe.',
   '📜 Gazete her günün özetini verir, 💬 Meydan’da herkesle konuşursunuz. Kurallar 📖 sayfasında. Hayırlı olsun!',

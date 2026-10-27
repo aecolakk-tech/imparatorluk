@@ -34,7 +34,7 @@ const DEBATE_DAYS = 1; const VOTE_DAYS = 1; const SANCTION_DAYS = 3;
 export const DEFAULT_BUDGET = 600; // discretionary spending per 20-day term without an approved budget
 
 export function initMeclis(): World['meclis'] {
-  return { seats: SEATS.map((s) => ({ ...s, holder: null })), factions: FACTIONS.map((f) => ({ ...f })), bills: [], log: [], bribes: [], salary: 10 };
+  return { seats: SEATS.map((s) => ({ ...s, holder: null })), factions: FACTIONS.map((f) => ({ ...f })), bills: [], log: [], bribes: [], salary: 6 };
 }
 
 export function districtOf(w: World, p: Person): string {
@@ -76,7 +76,7 @@ export function meclisElection(w: World, playerCandidates: string[], playerVotes
       const pv = playerVotes[v.id];
       if (pv && tally[pv] !== undefined) { tally[pv] += 1; continue; }
       let best = ''; let bs = -Infinity;
-      for (const c of cands) { const cp = findPerson(w, c)!; const sc = (v.relations[c] ?? 0) - Math.abs(v.republic - cp.republic) - Math.abs(v.loyalty - cp.loyalty) * 0.3 + rand(w) * 30 + (c === v.id ? 50 : 0); if (sc > bs) { bs = sc; best = c; } }
+      for (const c of cands) { const cp = findPerson(w, c)!; const sc = (v.relations[c] ?? 0) - Math.abs(v.republic - cp.republic) - Math.abs(v.loyalty - cp.loyalty) * 0.3 - Math.abs(v.din - cp.din) * 0.2 + (w.election.posters?.[c] ?? 0) * 3 + cp.rep * 0.2 + rand(w) * 30 + (c === v.id ? 50 : 0); if (sc > bs) { bs = sc; best = c; } }
       if (best) tally[best] = (tally[best] ?? 0) + 1;
     }
     const win = Object.entries(tally).sort((a, b) => b[1] - a[1])[0]![0];

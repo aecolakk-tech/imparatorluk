@@ -10,6 +10,19 @@ import { expirePetitions, naipPetitions, saraykorBonus } from './state';
 import { meclisDay, meclisElection } from './meclis';
 import { command, isyanHour, settleFate, startIsyan, strength } from './isyan';
 import { actingHead, familyDay } from './family';
+import { endOfDayLife, lifeHour, needsHour, rumor } from './life';
+import { chatHour } from './chat';
+import { loansDay } from './extras';
+
+/** Real ms per game hour at the world's speed (0.5x slower, 2x faster; Kayzer only). */
+export const hourMs = (w: World): number => HOUR_MS / (w.speed > 0 ? w.speed : 1);
+export function electionPhase(w: World): { phase: 'bekleme' | 'aday' | 'propaganda' | 'oylama'; label: string } {
+  const n = w.election.nextDay; const d = w.day;
+  if (d >= n - 6 && d <= n - 4) return { phase: 'aday', label: `Meclis: adaylık açık (${n - 4}. güne kadar), seçim ${n}. gün` };
+  if (d >= n - 3 && d <= n - 1) return { phase: 'propaganda', label: `Meclis: propaganda dönemi, seçim ${n}. gün` };
+  if (d === n) return { phase: 'oylama', label: 'Meclis: BUGÜN SEÇİM — oy verin!' };
+  return { phase: 'bekleme', label: `Meclis seçimi ${n}. gün (adaylık ${n - 6}. gün açılır)` };
+}
 
 /** How the AI/naip handles an uprising when no player ruler is commanding. Tests/sims may override. */
 export const isyanPolicy: { fn: (w: World) => 'dagit' | 'tutukla' | 'saldir' | null } = {
@@ -30,11 +43,13 @@ export function kayzerOnline(w: World, now: number): boolean { return isOnline(w
 export function advanceWorld(w: World, now: number): number {
   if (onlineCount(w, now) === 0) { w.frozen = true; return 0; }
   if (w.frozen) { w.frozen = false; w.lastTickAt = now; return 0; }
-  let hours = Math.floor((now - w.lastTickAt) / HOUR_MS);
+  w.serverNow = now;
+  const hm = hourMs(w);
+  let hours = Math.floor((now - w.lastTickAt) / hm);
   if (hours <= 0) return 0;
-  if (hours > MAX_CATCHUP_HOURS) { w.lastTickAt = now - MAX_CATCHUP_HOURS * HOUR_MS; hours = MAX_CATCHUP_HOURS; }
+  if (hours > MAX_CATCHUP_HOURS) { w.lastTickAt = now - MAX_CATCHUP_HOURS * hm; hours = MAX_CATCHUP_HOURS; }
   for (let i = 0; i < hours; i += 1) stepHour(w, now);
-  w.lastTickAt += hours * HOUR_MS;
+  w.lastTickAt += hours * hm;
   w.version += 1;
   return hours;
 }
@@ -48,18 +63,22 @@ export function stepHour(w: World, now: number): void {
     const ruler = actingHead(w, now, ONLINE_WINDOW_MS);
     const playerCommands = !!ruler?.playerId && !ruler.npc && isOnline(w, ruler.playerId, now, ONLINE_WINDOW_MS);
     isyanHour(w, playerCommands ? null : () => isyanPolicy.fn(w));
+    if (w.isyan) transfer(w, 'saray', 'dis', Math.min(w.treasury, 4), 'isyan masrafı (ordu seferberliği)'); // long rebellions drain the treasury
   }
+  needsHour(w); lifeHour(w);
+  chatHour(w, now, (p) => isOnline(w, p.playerId, now, ONLINE_WINDOW_MS));
+  if (w.hour === 10) campaign(w, now);
   switch (w.hour) {
     case 2: for (const p of w.people) decide(w, p); break;
     case 7: sellGazette(w); break;
-    case 8: resetMarketDay(w); for (const p of w.people) { p.incomeToday = 0; produce(w, p); } traderRelist(w); break;
+    case 8: resetMarketDay(w); for (const p of w.people) p.incomeToday = 0; for (const p of shuffled(w)) if (!p.playerId || isOnline(w, p.playerId, now, ONLINE_WINDOW_MS)) produce(w, p); traderRelist(w); break; // offline players only keep their needs
     case 10: court(w, now); break;
     case 11: meclisDay(w, (p) => !fullAI(p) && isOnline(w, p.playerId, now), kOnline); break;
     case 12: salaries(w); projects(w, kOnline); hamaliye(w); break;
-    case 14: doctors(w); break;
     case 16: if (!kOnline) { const d = naipPetitions(w, now); if (d.length) naipNote(w, `Naip olarak ${d.length} dilekçeyi karara bağladım.`, now); } break;
     case 17: stateBread(w); break;
     case 19: for (const p of shuffled(w)) consume(w, p); break;
+    case 22: if (w.festivalUntil >= w.day) for (const p of w.people) p.mood = clamp(p.mood + 1.5); break;
     case 20: for (const p of w.people) spendSurplus(w, p); break;
     case 21: traders(w); break;
     default: break;
@@ -113,6 +132,8 @@ function projects(w: World, kOnline: boolean): void {
     }
     if (pr.progress >= pr.needed) {
       pr.done = true; log(w, `${pr.name} tamamlandı! Şehirde bayram havası.`);
+      const plot = w.buildings.find((b) => b.id === pr.plot);
+      if (plot) { plot.kind = 'yapi'; plot.name = pr.name.replace(/ inşaatı$/i, ''); }
       for (const p of w.people) { p.mood = clamp(p.mood + 6); p.loyalty = clamp(p.loyalty + 3); }
       const rest = pr.paid; if (rest > 0) transfer(w, `proje:${pr.id}`, 'saray', rest, 'proje artanı');
     }
@@ -130,14 +151,21 @@ function hamaliye(w: World): void {
   for (const t of w.people.filter((p) => p.prof === 'tuccar' && p.money > 50)) { const h = pick(w, hamals); transfer(w, t.id, h.id, 4, 'hamaliye'); h.incomeToday += 4; }
 }
 
-function doctors(w: World): void {
-  const hs = w.people.filter((p) => p.prof === 'hekim' && p.jailedDays === 0); if (!hs.length) return;
-  for (const p of w.people) if (p.health < 70 && p.prof !== 'hekim') {
-    const h = pick(w, hs);
-    if (transfer(w, p.id, h.id, 4, 'hekim ücreti')) { h.incomeToday += 4; p.health = clamp(p.health + 25); }
-    else if (w.treasury > 400 && transfer(w, 'saray', h.id, 3, 'darülaceze')) p.health = clamp(p.health + 15);
+/** Meclis campaign: NPC candidacies in the aday window, speeches & posters during propaganda. */
+function campaign(w: World, now: number): void {
+  const ph = electionPhase(w).phase; const e = w.election;
+  if (ph === 'aday') for (const p of w.people) if (fullAI(p) && p.ambition > 60 && p.jailedDays === 0 && p.prof !== 'naip' && p.id !== w.kayzerId && !e.candidates.includes(p.id) && chance(w, 0.25) && e.candidates.length < 14) { e.candidates.push(p.id); log(w, `${p.name} Meclis'e aday oldu.`, p.id); }
+  if (ph === 'propaganda') {
+    e.posters = e.posters ?? {};
+    for (const id of e.candidates) {
+      const c = findPerson(w, id); if (!c || !fullAI(c)) continue;
+      if (c.money > 20 && chance(w, 0.6) && transfer(w, c.id, 'saray', 3, 'afiş harcı')) e.posters[id] = (e.posters[id] ?? 0) + 1;
+      if (chance(w, 0.5)) w.chatOut.push({ fromPersonId: c.id, fromName: c.name, toPersonId: null, text: `📣 ${c.republic > 55 ? 'Halkın meclisi için' : c.loyalty > 70 ? 'Devlete sadakat için' : c.din > 65 ? 'Ahlak ve din için' : 'Ucuz ekmek için'} bana oy verin! – ${c.name}`, at: now });
+    }
   }
+  void rumor;
 }
+
 
 function stateBread(w: World): void {
   if (!lawOn(w, 'devletekmegi')) return;
@@ -197,9 +225,9 @@ export function verdict(w: World, caseId: string, guilty: boolean, now: number):
   c.stage = 'kapandi'; c.verdict = guilty ? 'suclu' : 'beraat';
   if (guilty) {
     if (c.victimId) transfer(w, a.id, c.victimId, Math.min(a.money, c.amount), 'tazminat');
-    const fine = Math.min(a.money, c.crime === 'isyan' ? a.money : 10 + c.amount * 0.5);
+    const fine = Math.min(a.money, c.crime === 'isyan' || c.crime === 'cinayet' ? a.money : 10 + c.amount * 0.5);
     transfer(w, a.id, 'saray', fine, 'para cezası');
-    a.jailedDays = c.crime === 'isyan' ? 7 : 3; a.honesty = clamp(a.honesty + 5); a.mood = clamp(a.mood - 15);
+    a.jailedDays = c.crime === 'cinayet' ? 25 : c.crime === 'isyan' ? 7 : c.crime === 'saldiri' ? 5 : 3; a.honesty = clamp(a.honesty + 5); a.mood = clamp(a.mood - 15);
     c.sentence = `${a.jailedDays} gün zindan, ${Math.round(fine)} Dinar ceza`;
     log(w, `Hâkim kararı: ${a.name} suçlu bulundu (${c.sentence}).`, a.id);
   } else {
@@ -226,6 +254,7 @@ function endOfDay(w: World, now: number): void {
   w.cumhuriyet = Math.round(clamp(avg((p) => p.republic)) * 10) / 10;
   revolution(w, avg((p) => (p.prof === 'asker' ? p.loyalty : 0)) * citizens.length / Math.max(1, citizens.filter((p) => p.prof === 'asker').length));
   familyDay(w, fullAI, now);
+  endOfDayLife(w); loansDay(w);
   settleFate(w);
   for (const p of w.people) if (p.exiledDays > 0) { p.exiledDays -= 1; if (p.exiledDays === 0) { p.home = 'ev1'; log(w, `${p.name} sürgünden döndü.`, p.id); } }
   election(w);
@@ -251,7 +280,7 @@ function election(w: World): void {
   const e = w.election;
   if (w.day < e.nextDay) return;
   meclisElection(w, e.candidates, e.votes, fullAI);
-  w.election = { ...e, nextDay: w.day + 20, candidates: [], votes: {} };
+  w.election = { ...e, nextDay: w.day + 20, candidates: [], votes: {}, posters: {} };
 }
 
 export function declareRepublic(w: World): void {

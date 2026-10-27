@@ -3,7 +3,7 @@
  * Several tabs share the same world (crude multiplayer for testing).
  */
 import type { Action, ActionResult, Profession, World } from '../sim/types';
-import { act, admin, candidates, createWorld, heartbeat, makeChat, register, type Candidate, type ChatMsg } from '../server/core';
+import { act, admin, candidates, createWorld, drainChat, heartbeat, makeChat, migrateWorld, register, type Candidate, type ChatMsg } from '../server/core';
 import type { AdminRequest, Backend, Session, Snapshot } from './api';
 import { SNAPSHOTS_KEPT } from '../sim/constants';
 
@@ -28,7 +28,12 @@ export class MockBackend implements Backend {
     return { world: createWorld(Math.floor(Math.random() * 1e9), this.clock()), users: {}, access: 'imparator', msgs: [], snaps: [] };
   }
   private save(st: Store): void { this.storage.setItem(KEY, JSON.stringify(st)); }
-  private tx<T>(f: (st: Store) => T): T { const st = this.load(); const r = f(st); this.save(st); return r; }
+  private tx<T>(f: (st: Store) => T): T {
+    const st = this.load(); migrateWorld(st.world); const r = f(st);
+    for (const m of drainChat(st.world)) st.msgs.push({ id: `${m.at}-${Math.round(Math.random() * 1e6)}`, ...m });
+    if (st.msgs.length > 300) st.msgs.splice(0, st.msgs.length - 300);
+    this.save(st); return r;
+  }
 
   session(): Session | null { return this.s; }
   async restore(): Promise<Session | null> {

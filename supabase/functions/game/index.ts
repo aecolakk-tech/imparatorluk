@@ -14,18 +14,23 @@ const chatTimes = new Map<string, number[]>(); // per-instance; DB check below i
 
 async function loadWorld(): Promise<{ state: any; version: number }> {
   const { data } = await db.from('world_state').select('state, version').eq('id', 1).maybeSingle();
-  if (data) return { state: data.state, version: data.version };
+  if (data) return { state: core.migrateWorld(data.state), version: data.version };
   const state = core.createWorld(Math.floor(Math.random() * 1e9), Date.now());
   await db.from('world_state').insert({ id: 1, state, version: 0 });
   return { state, version: 0 };
 }
 /** read → mutate → compare-and-swap commit, retried on conflict */
+async function storeNpcChat(msgs: any[]) {
+  if (!msgs.length) return;
+  await db.from('messages').insert(msgs.map((m) => ({ from_user: null, from_person: m.fromPersonId, from_name: m.fromName, to_person: m.toPersonId, text: String(m.text).slice(0, 280), created_at: new Date(m.at).toISOString() })));
+}
 async function mutate<T>(f: (w: any) => T): Promise<T> {
   for (let i = 0; i < 5; i++) {
     const { state, version } = await loadWorld();
     const r = f(state);
+    const npc = core.drainChat(state);
     const { data: ok } = await db.rpc('commit_world', { new_state: state, expected: version });
-    if (ok) return r;
+    if (ok) { await storeNpcChat(npc); return r; }
   }
   throw new Error('Dünya meşgul, tekrar deneyin.');
 }
@@ -77,9 +82,8 @@ Deno.serve(async (req) => {
         const since = new Date(now - 30_000).toISOString();
         const { count } = await db.from('messages').select('id', { count: 'exact', head: true }).eq('from_user', uid).gte('created_at', since);
         if ((count ?? 0) >= 5) return json({ error: 'Çok hızlı yazıyorsunuz; biraz bekleyin.' });
-        const { state } = await loadWorld();
         const times = chatTimes.get(uid) ?? []; chatTimes.set(uid, times);
-        const m = core.makeChat(state, uid, String(body.text ?? ''), body.to ?? null, times, now);
+        const m = await mutate((state) => core.makeChat(state, uid, String(body.text ?? ''), body.to ?? null, times, now));
         if (typeof m === 'string') return json({ error: m });
         await db.from('messages').insert({ from_user: uid, from_person: m.fromPersonId, from_name: m.fromName, to_person: m.toPersonId, text: m.text });
         return json({});

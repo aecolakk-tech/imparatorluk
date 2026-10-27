@@ -1,5 +1,6 @@
 import type { Building, Person, World } from '../sim/types';
-import { HOUR_MS, MAP_H, MAP_W } from '../sim/constants';
+import { MAP_H, MAP_W } from '../sim/constants';
+import { hourMs, electionPhase } from '../sim/tick';
 import { ROADS_X, ROADS_Y } from '../sim/world';
 import { shade, spriteFor } from './sprites';
 
@@ -10,6 +11,7 @@ const ROOF: Record<string, string> = {
   saray: '#7b2d8b', meclis: '#2d5b8b', mahkeme: '#5a4636', zindan: '#3c3c3c', kisla: '#8b2d2d', cami: '#3a8a6a', okul: '#b5652b',
   hekimhane: '#e4e4e4', kahve: '#8b5a2b', pazar: '#c9a227', firin: '#b5442b', kasap: '#9b2b2b', degirmen: '#8a7a5a', kuyu: '#5a6a7a',
   atolye: '#6a5a4a', santiye: '#c08a2a', liman: '#4a6a8a', ev: '#a8553a',
+  bar: '#6a2a4a', festival: '#c04a8a', dokuma: '#7a5a8a', mobilyahane: '#6a4a2a', ambar: '#9a7a3a', yapi: '#8a6a9a',
 };
 
 function hash(s: string): number { let h = 2166136261; for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
@@ -86,6 +88,19 @@ function drawBuilding(g: CanvasRenderingContext2D, b: Building): void {
     g.fillStyle = '#3a6a8a'; g.fillRect(X + W - 60, Y + 6, 50, H - 12);
     return;
   }
+  if (b.kind === 'ciftlik') {
+    for (let yy = 0; yy < b.h; yy += 1) { g.fillStyle = yy % 2 ? '#c8a840' : '#a88a30'; g.fillRect(X, Y + yy * T, W, T); g.fillStyle = '#e0c860'; for (let xx = 2; xx < W; xx += 6) g.fillRect(X + xx, Y + yy * T + 3, 2, 8); }
+    g.strokeStyle = '#6a4a2a'; g.lineWidth = 2; g.strokeRect(X, Y, W, H); return;
+  }
+  if (b.kind === 'arsa') {
+    g.fillStyle = '#9a8a6a'; g.fillRect(X, Y, W, H); g.fillStyle = '#7a6a4a'; for (let i = 0; i < 30; i += 1) { const hh = hash(b.id + i); g.fillRect(X + (hh % W), Y + ((hh >> 8) % H), 3, 2); }
+    g.fillStyle = '#e0e0d0'; for (const [cx, cy] of [[X, Y], [X + W - 3, Y], [X, Y + H - 3], [X + W - 3, Y + H - 3]] as const) g.fillRect(cx, cy, 3, 3);
+    g.strokeStyle = 'rgba(240,240,220,0.7)'; g.setLineDash([4, 4]); g.lineWidth = 1; g.strokeRect(X + 1, Y + 1, W - 2, H - 2); g.setLineDash([]); return;
+  }
+  if (b.kind === 'festival') {
+    g.fillStyle = '#b8c87a'; g.fillRect(X, Y, W, H); g.fillStyle = '#e0d0a0'; g.fillRect(X + W / 2 - 20, Y + H / 2 - 12, 40, 24);
+    g.strokeStyle = '#6a4a2a'; g.lineWidth = 2; g.strokeRect(X, Y, W, H); return;
+  }
   if (b.kind === 'kuyu') {
     g.fillStyle = '#7a7a7a'; g.fillRect(X + 6, Y + 14, W - 12, H - 18); g.fillStyle = '#2a4a8a'; g.fillRect(X + 10, Y + 18, W - 20, 8);
     g.fillStyle = '#6a4a2a'; g.fillRect(X + 6, Y + 2, 3, 14); g.fillRect(X + W - 9, Y + 2, 3, 14); g.fillStyle = roof; g.fillRect(X + 2, Y, W - 4, 5);
@@ -112,6 +127,8 @@ function drawBuilding(g: CanvasRenderingContext2D, b: Building): void {
   if (b.kind === 'mahkeme') { g.fillStyle = '#c9a227'; g.fillRect(X + W / 2 - 8, Y + 6, 16, 2); g.fillRect(X + W / 2 - 1, Y + 2, 2, 10); }
   if (b.kind === 'hekimhane') { g.fillStyle = '#d03030'; g.fillRect(X + W / 2 - 6, Y + 4, 12, 4); g.fillRect(X + W / 2 - 2, Y, 4, 12); }
   if (b.kind === 'degirmen') { g.strokeStyle = '#f0e8d8'; g.lineWidth = 3; const cx = X + W / 2, cy = Y + 8; for (let a = 0; a < 4; a += 1) { g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a * Math.PI / 2 + 0.4) * 26, cy + Math.sin(a * Math.PI / 2 + 0.4) * 26); g.stroke(); } }
+  if (b.kind === 'bar') { g.fillStyle = '#c9a227'; g.fillRect(X + 4, Y + roofH + 2, 14, 8); g.fillStyle = '#6a2a1a'; g.fillRect(X + W - 18, Y + H - 12, 8, 10); }
+  if (b.kind === 'ambar') { g.fillStyle = '#e0c860'; g.fillRect(X + W / 2 - 10, Y + roofH + 2, 20, 6); }
   if (b.kind === 'firin') { g.fillStyle = '#7a7a7a'; g.fillRect(X + W - 14, Y - 12, 8, 14); g.fillStyle = 'rgba(220,220,220,0.7)'; g.fillRect(X + W - 16, Y - 22, 10, 6); }
 }
 
@@ -141,39 +158,57 @@ const findPersonLite = (w: World, id: string | undefined): Person | undefined =>
 export interface Placed { p: Person; x: number; y: number; moving: boolean; visible: boolean; dir: number }
 
 export function placePeople(w: World, now: number): Placed[] {
-  const frac = w.frozen ? 0 : Math.max(0, Math.min(0.999, (now - w.lastTickAt) / HOUR_MS));
+  const frac = w.frozen ? 0 : Math.max(0, Math.min(0.999, (now - w.lastTickAt) / hourMs(w)));
   const t = w.hour + frac;
   const B = new Map(w.buildings.map((b) => [b.id, b]));
+  const night = t < 6 || t >= 21.5;
   const door = (id: string, p: Person, spread = 1.6): Pt => {
     const b = B.get(id) ?? B.get('pazar')!; const h = hash(p.id + id);
-    const isBig = b.kind === 'pazar' || b.kind === 'kahve' || b.kind === 'santiye' || b.kind === 'kisla' || b.kind === 'liman';
+    const isBig = ['pazar', 'kahve', 'santiye', 'kisla', 'liman', 'ciftlik', 'festival', 'arsa', 'yapi'].includes(b.kind);
+    if (b.kind === 'ciftlik' || b.kind === 'arsa' || b.kind === 'festival') return { x: b.x + 0.8 + (h % 100) / 100 * (b.w - 1.6), y: b.y + 1 + ((h >> 8) % 100) / 100 * (b.h - 1.2) };
     if (isBig) return { x: b.x + 0.5 + (h % 100) / 100 * (b.w - 1), y: b.y + b.h + 0.3 + ((h >> 8) % 100) / 100 * spread };
     return { x: b.door.x + ((h % 100) / 100 - 0.5) * spread * 2, y: b.door.y + 0.4 + ((h >> 8) % 100) / 100 * spread * 0.6 };
   };
+  const zindan = B.get('zindan');
+  const jailed = w.people.filter((p) => p.jailedDays > 0);
+  const site = w.projects.find((x) => !x.done && x.plot && x.paid >= 6)?.plot;
+  const festOpen = (w.festivalUntil ?? 0) >= w.day;
   return w.people.map((p): Placed => {
     const h = hash(p.id);
     const market = p.prof === 'memur' || p.prof === 'tahsildar' ? 'kahve' : MARKETS[h % 4]!;
-    const work = p.jailedDays > 0 ? 'zindan' : p.work;
-    const home = p.jailedDays > 0 ? 'zindan' : p.home;
+    let work = p.work;
+    if (p.prof === 'insaatci' && site) work = site;
+    if (festOpen && t >= 12 && t < 20 && h % 3 === 0) work = 'festival';
+    const home = p.home;
     const off = (h % 60) / 60; // personal schedule offset in hours
-    const s1 = 6 + off, s2 = 8 + off, s3 = 17 + off, s4 = 18 + off, s5 = 20.5 + off, s6 = 22 + off;
+    const s1 = 5.5 + off, s2 = 7.5 + off, s3 = 17 + off, s4 = 18 + off, s5 = 20.5 + off, s6 = 22 + off;
     let pos: Pt; let moving = false; let visible = true;
-    const wiggle = Math.sin(now / 900 + h) * 0.25;
-    if (p.prof === 'asker' && (t < 6 || t > 21)) { // night patrol around the kışla & saray
+    // gentle personal wandering around the workplace so nobody stands frozen
+    const wanderX = Math.sin(now / 2300 + h) * 0.9 + Math.sin(now / 5100 + h * 3) * 0.6;
+    const wanderY = Math.cos(now / 3100 + h * 2) * 0.35;
+    const walking = Math.abs(Math.cos(now / 2300 + h)) > 0.35;
+    if (p.jailedDays > 0 && zindan) { // inside the Zindan behind bars
+      const i = jailed.indexOf(p); const cols = Math.max(1, zindan.w - 1);
+      pos = { x: zindan.x + 0.8 + (i % cols), y: zindan.y + zindan.h - 0.6 - Math.floor(i / cols) * 0.5 };
+      return { p, x: pos.x, y: pos.y, moving: false, visible: true, dir: 1 };
+    }
+    if (p.prof === 'asker' && night) { // night patrol around the kışla & saray
       const k = (now / 40000 + (h % 10) / 10) % 1; pos = along([{ x: 57, y: 13 }, { x: 30, y: 13 }, { x: 30, y: 20 }, { x: 56, y: 20 }, { x: 57, y: 13 }], k); moving = true;
-    } else if (p.prof === 'bekci' && (t < 6 || t > 21)) {
-      const k = (now / 50000 + (h % 10) / 10) % 1; pos = along([{ x: 6, y: 29 }, { x: 68, y: 29 }, { x: 68, y: 35 }, { x: 6, y: 35 }, { x: 6, y: 29 }], k); moving = true;
-    } else if (p.jailedDays > 0) { pos = door('zindan', p, 0.8); }
+    } else if (p.prof === 'bekci' && night) {
+      const k = (now / 50000 + (h % 10) / 10) % 1; pos = along([{ x: 6, y: 29 }, { x: 80, y: 29 }, { x: 80, y: 35 }, { x: 6, y: 35 }, { x: 6, y: 29 }], k); moving = true;
+    } else if (p.nightOut && night) { // the rare night owl: wanders between the bar and the streets
+      const k = (now / 60000 + (h % 10) / 10) % 1; const bb = B.get('bar')!; pos = along([{ x: bb.door.x, y: bb.door.y + 0.5 }, { x: bb.door.x, y: 20 }, { x: 44, y: 20 }, { x: 44, y: 29 }, { x: bb.door.x, y: 29 }, { x: bb.door.x, y: bb.door.y + 0.5 }], k); moving = true;
+    }
     else if (t >= s1 && t < s2) { pos = along(route(door(home, p), door(work, p)), (t - s1) / (s2 - s1)); moving = true; }
-    else if (t >= s2 && t < s3) { pos = door(work, p); pos.x += wiggle; }
+    else if (t >= s2 && t < s3) { pos = door(work, p); pos.x += wanderX; pos.y += wanderY; moving = walking; }
     else if (t >= s3 && t < s4) { pos = along(route(door(work, p), door(market, p)), (t - s3) / (s4 - s3)); moving = true; }
-    else if (t >= s4 && t < s5) { pos = door(market, p); pos.x += wiggle; }
+    else if (t >= s4 && t < s5) { pos = door(market, p); pos.x += wanderX; pos.y += wanderY; moving = walking; }
     else if (t >= s5 && t < s6) { pos = along(route(door(market, p), door(home, p)), (t - s5) / (s6 - s5)); moving = true; }
-    else { pos = door(home, p, 0.6); visible = h % 4 === 0; } // most are indoors at night
-    if (p.id === w.kayzerId || p.prof === 'naip' || (p.soylu && p.home === 'saray')) { pos = door('saray', p, 2); visible = true; moving = false; pos.x += wiggle; }
+    else { pos = door(home, p, 0.6); visible = false; } // indoors at night
+    if (p.id === w.kayzerId || p.prof === 'naip' || (p.soylu && p.home === 'saray')) { pos = door('saray', p, 2); pos.x += wanderX * 0.7; moving = walking; visible = !night || !!p.nightOut; }
     if (p.exiledDays > 0) visible = false;
-    if (w.isyan && p.jailedDays === 0) {
-      if (w.isyan.rebels.includes(p.id)) { const at = w.isyan.occupied[w.isyan.occupied.length - 1] ?? 'pazar'; pos = door(at, p, 3); pos.x += wiggle * 2; visible = true; moving = true; }
+    if (w.isyan) {
+      if (w.isyan.rebels.includes(p.id)) { const at = w.isyan.occupied[w.isyan.occupied.length - 1] ?? 'pazar'; pos = door(at, p, 3); pos.x += wanderX * 2; visible = true; moving = true; }
       else if (p.prof === 'asker') { pos = door('saray', p, 3); pos.y += 1; visible = true; moving = false; }
     }
     return { p, x: pos.x, y: pos.y, moving, visible, dir: 1 };
@@ -245,12 +280,29 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
     ctx.beginPath(); ctx.roundRect(sx - tw / 2, sy - 22, tw, 20, 6); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#222'; ctx.fillText(text, sx, sy - 12);
   }
+  // conversations: speech bubbles for this hour's talks
+  const byId = new Map(vis.map((q) => [q.p.id, q]));
+  ctx.font = `${Math.max(10, fs - 2)}px system-ui, sans-serif`;
+  if (cam.z >= 1.6) for (const tk of (w.talks ?? []).filter((x) => x.day === w.day && w.hour - x.hour <= 1).slice(-8)) {
+    const q = byId.get(tk.a); if (!q) continue;
+    const sx = (q.x - cam.x) * z, sy = (q.y - cam.y) * z - sz - 30;
+    const text = tk.text.length > 38 ? tk.text.slice(0, 37) + '…' : tk.text; const tw = ctx.measureText(text).width + 12;
+    ctx.fillStyle = 'rgba(255,248,220,0.97)'; ctx.strokeStyle = '#6a4a1a'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect(sx - tw / 2, sy - 22, tw, 20, 8); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx - 4, sy - 2); ctx.lineTo(sx, sy + 6); ctx.lineTo(sx + 4, sy - 2); ctx.fill();
+    ctx.fillStyle = '#3a2a10'; ctx.fillText(text, sx, sy - 12);
+  }
+  // festival flags, campaign posters, construction at a plot
+  const fb = w.buildings.find((x) => x.id === 'festival');
+  if (fb && (w.festivalUntil ?? 0) >= w.day) { ctx.font = `${Math.round(fs * 1.4)}px system-ui`; for (let i = 0; i < 5; i += 1) ctx.fillText(['🎉', '🎊', '🏮', '🎶', '🎉'][i]!, (fb.x + 1 + i * (fb.w - 2) / 4 - cam.x) * z, (fb.y - cam.y) * z + Math.sin(now / 300 + i) * 4); }
+  if (electionPhase(w).phase === 'propaganda') { const mb = w.buildings.find((x) => x.id === 'pazar'); if (mb) { ctx.font = `${Math.round(fs * 1.2)}px system-ui`; const n = Math.min(8, Object.values(w.election.posters ?? {}).reduce((a, b) => a + b, 0)); for (let i = 0; i < n; i += 1) ctx.fillText('📜', (mb.x + 0.5 + i * 1.4 - cam.x) * z, (mb.y - cam.y) * z - 6); } }
+  for (const pr of w.projects.filter((x) => !x.done && x.plot)) { const b = w.buildings.find((x) => x.id === pr.plot); if (!b) continue; ctx.font = `${Math.round(fs * 1.4)}px system-ui`; ctx.fillText('🏗', (b.x + b.w / 2 - cam.x) * z, (b.y + b.h / 2 - cam.y) * z + Math.sin(now / 400) * 3); }
   // event markers (last 2 game hours)
   for (const e of w.events.slice(-12)) {
     if (e.x === undefined || e.y === undefined || e.day !== w.day || w.hour - e.hour > 2) continue;
     const sx = (e.x - cam.x) * z, sy = (e.y - cam.y) * z;
     const bounce = Math.sin(now / 200) * 4;
-    ctx.font = `${Math.round(fs * 1.6)}px system-ui`; ctx.fillText(e.text.includes('soyuldu') || e.text.includes('yakaladı') ? '🚨' : e.text.includes('protesto') ? '✊' : e.text.includes('evlendi') ? '💍' : e.text.includes('doğdu') ? '👶' : e.text.includes('İSYAN') ? '🔥' : e.text.includes('dilekçe') ? '📜' : '❗', sx, sy - 30 + bounce);
+    ctx.font = `${Math.round(fs * 1.6)}px system-ui`; ctx.fillText(e.text.includes('soyuldu') || e.text.includes('yakaladı') ? '🚨' : e.text.includes('saldırdı') ? '🤕' : e.text.includes('CİNAYET') ? '💀' : e.text.includes('kervan') || e.text.includes('gemisi') ? '🐪' : e.text.includes('KURAKLIK') || e.text.includes('SALGIN') || e.text.includes('SEL') ? '⚠️' : e.text.includes('protesto') ? '✊' : e.text.includes('evlendi') ? '💍' : e.text.includes('doğdu') ? '👶' : e.text.includes('İSYAN') ? '🔥' : e.text.includes('dilekçe') ? '📜' : '❗', sx, sy - 30 + bounce);
   }
 }
 

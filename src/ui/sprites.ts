@@ -18,6 +18,11 @@ const UNIFORM: Partial<Record<Profession, { body: string; hat?: string; trim?: s
   firinci: { body: '#f0ead8', hat: '#f8f8f8' },
   insaatci: { body: '#c0782a', hat: '#e0b020' },
   balikci: { body: '#2f6d8a', hat: '#d8c890' },
+  ciftci: { body: '#7a8a3a', hat: '#e0c860' },
+  dokumaci: { body: '#8a5a9a' },
+  mobilyaci: { body: '#7a4a2a', trim: '#c9a227' },
+  barci: { body: '#6a2a4a', trim: '#f0f0f0' },
+  kasap: { body: '#f0e8e0', trim: '#b03030' },
 };
 
 /** 16x16 "16-bit" sprite, 2 walk frames, generated from the person's seeds. */

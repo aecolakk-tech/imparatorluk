@@ -43,3 +43,11 @@ td, th { padding:3px 4px; border-bottom:1px solid #4a3a26; text-align:left; }
 pre.summary { white-space:pre-wrap; font-family:inherit; margin:0; }
 @media (max-width: 600px) { .dock .lbl { display:none; } .dock button { padding:8px 10px; } .hud { font-size:11px; gap:4px; } .hud .bar { width:40px; } }
 .isyan{flex-basis:100%;background:rgba(120,20,20,.85);border:1px solid #c8483a;border-radius:8px;padding:4px 8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;color:#fff}
+.hud .stat.warn { border-color:#c8483a; background:#4a1c16; color:#ffd0c8; }
+.hud .stat.ok { border-color:#4f8a3a; }
+.hud .stat.event { border-color:#c9a227; background:#3a2e10; }
+.card.warn { border-color:#c8483a; }
+.card.quest { border-left:5px solid #c9a227; }
+.phase { flex:1; padding:6px; border:1px solid #5a4630; border-radius:6px; opacity:.6; }
+.phase.on { opacity:1; border-color:#e8c14a; background:#3a2e10; }
+details summary { cursor:pointer; color:#e8c14a; margin:6px 0; }
