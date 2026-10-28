@@ -1,5 +1,5 @@
 // İmparatorluk service worker: caches ONLY same-origin static assets. API calls (supabase, other origins, non-GET) are never cached.
-const C = 'imp-static-v201';
+const C = 'imp-static-v202';
 self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(caches.open(C).then((c) => c.addAll(['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png']).catch(() => {}))); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== C).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', (e) => {
