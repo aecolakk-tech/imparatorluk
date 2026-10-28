@@ -1,3 +1,4 @@
+import { season } from '../sim/realm';
 import type { Building, Person, World } from '../sim/types';
 import { MAP_H, MAP_W } from '../sim/constants';
 import { electionPhase } from '../sim/tick';
@@ -145,7 +146,11 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
   const cw = ctx.canvas.width, ch = ctx.canvas.height; const z = cam.z * T;
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = '#5a9238'; ctx.fillRect(0, 0, cw, ch);
-  ctx.drawImage(stat, Math.round(-cam.x * z), Math.round(-cam.y * z), Math.round(stat.width * cam.z), Math.round(stat.height * cam.z));
+  { // v1.7: blit only the visible part of the static map
+    const sx0 = Math.max(0, cam.x * T), sy0 = Math.max(0, cam.y * T);
+    const sw = Math.min(stat.width - sx0, cw / cam.z - Math.max(0, -cam.x * T)), sh = Math.min(stat.height - sy0, ch / cam.z - Math.max(0, -cam.y * T));
+    if (sw > 0 && sh > 0) ctx.drawImage(stat, sx0, sy0, sw, sh, Math.round((sx0 / T - cam.x) * z), Math.round((sy0 / T - cam.y) * z), Math.round(sw * cam.z), Math.round(sh * cam.z));
+  }
   const sz = Math.round(T * cam.z * SPRITE_SCALE);
   drawSign(ctx, w, cam, z, now);
   // corpses: blood pool + body lying on the ground
@@ -184,6 +189,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
     ctx.font = `${Math.round(sz * 0.9)}px system-ui`; ctx.textAlign = 'center'; ctx.fillText('🚩', (b.x + b.w / 2 - cam.x) * z, (b.y - cam.y) * z + sz * 0.6 + Math.sin(now / 250) * 3);
   }
   // night overlay
+  seasonFx(ctx, w, now, cw, ch, dark === 0 && w.people.length > 0);
   if (dark > 0) { ctx.fillStyle = `rgba(10,15,45,${dark})`; ctx.fillRect(0, 0, cw, ch); }
   // labels
   const fs = Math.max(10, Math.min(15, 5 * cam.z));
@@ -279,4 +285,20 @@ export function hitTest(w: World, placed: Placed[], cam: Camera, sx: number, sy:
   const tx = sx / z + cam.x, ty = sy / z + cam.y;
   const b = w.buildings.find((x) => tx >= x.x - 0.3 && tx <= x.x + x.w + 0.3 && ty >= x.y - 1 && ty <= x.y + x.h + 0.5);
   return { building: b };
+}
+
+/** v1.8 season visuals in screen space: snow (kış), falling leaves (sonbahar), petals (ilkbahar), heat haze (yaz). */
+function seasonFx(ctx: CanvasRenderingContext2D, w: World, now: number, cw: number, ch: number, _full: boolean): void {
+  const s = season(w); const t = now / 1000; ctx.save();
+  if (s === 'yaz') { ctx.fillStyle = `rgba(255,190,90,${0.07 + 0.03 * Math.sin(t)})`; ctx.fillRect(0, 0, cw, ch); ctx.restore(); return; }
+  if (s === 'kis') { ctx.fillStyle = 'rgba(220,235,255,0.10)'; ctx.fillRect(0, 0, cw, ch); }
+  const n = s === 'kis' ? 70 : 28; const unit = Math.max(cw, ch) / 900;
+  for (let i = 0; i < n; i++) {
+    const seed = (i * 9301 + 49297) % 233280 / 233280; const sp = s === 'kis' ? 40 : 30;
+    const x = ((seed * cw + Math.sin(t * 0.7 + i) * 30 * unit + t * (s === 'kis' ? 8 : 25) * unit) % cw + cw) % cw;
+    const y = ((seed * 7919 % 1) * ch + t * sp * unit * (0.6 + seed)) % ch;
+    if (s === 'kis') { ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.beginPath(); ctx.arc(x, y, (1.5 + seed * 2) * unit, 0, 7); ctx.fill(); }
+    else { ctx.fillStyle = s === 'sonbahar' ? ['#c8642a', '#d9a441', '#9b3d1f'][i % 3]! : ['#f5a8c8', '#fff', '#f7d46b'][i % 3]!; ctx.save(); ctx.translate(x, y); ctx.rotate(t + i); ctx.fillRect(-3 * unit, -1.5 * unit, 6 * unit, 3 * unit); ctx.restore(); }
+  }
+  ctx.restore();
 }

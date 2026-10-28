@@ -97,3 +97,10 @@ Bilinen sınırlar için rapordaki "Eksikler" bölümüne bakın: dünya durumu 
 - Cinayet akışı: ceset (5 dk) → ihbar → bekçi → savcı → canlı duruşma (YZ kadı) → karar → zindana götürme / para cezası.
 - İsyan tetikleyicisi düzeltildi (çoğunluk cumhuriyetçi ise 3 günde isyan); seçimler 40 günde bir, Meydan'da tabela, aşama pencereleri; asker/bekçi aday olamaz.
 - Denge: kuraklıkta ekmek pahalanır, hasta NPC'ler hekime gider, zanaat fiyatlarına taban, kanun önizlemesi 1. günde de sayı verir.
+
+## v1.7 / v1.8
+- Sohbetten eyleme: NPC'lere verilen emirler (git, takip et, saldır, öldür, tutukla, çal, ver, sat, al, çalış, oy ver, dedikodu, rüşvet, koru, ayrıl) oyun kurallarıyla kabul/ret edilir ve NPC gidip yapar. Asker/memurlar Kayzer'e itaat eder; zalim emirler sadakati düşürür, firara yol açar.
+- Yakalanan oyuncu: gözaltı → mahkeme (hâkim, savcı, savunma) → hüküm.
+- Takip kamerası, müzik, hız kontrolü, vatandaş defteri, hedefler/görevler, düşük grafik, tüm tıklamalara ses.
+- Soylular (Vezir/Paşa/Bey/Ağa, tımar), entrikalar, gizli cemiyetler (muhbir, casus, arama emri, baskın, sorgu), mevsimler, hayvanlar ve çiftlik, sürekli açlık/susuzluk, Tarih Kitabı, bekçi devriyeleri.
+- PWA: ana ekrana eklenebilir (manifest, simgeler, yalnızca statik dosyaları önbelleğe alan service worker).

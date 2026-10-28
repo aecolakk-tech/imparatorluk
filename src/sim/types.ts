@@ -1,10 +1,10 @@
-export type Good = 'ekmek' | 'su' | 'et' | 'balik' | 'kumas' | 'alet' | 'odun' | 'bugday' | 'yun' | 'elbise' | 'mobilya' | 'icki';
-export const GOODS: Good[] = ['ekmek', 'su', 'et', 'balik', 'kumas', 'alet', 'odun', 'bugday', 'yun', 'elbise', 'mobilya', 'icki'];
+export type Good = 'ekmek' | 'su' | 'et' | 'balik' | 'kumas' | 'alet' | 'odun' | 'bugday' | 'yun' | 'elbise' | 'mobilya' | 'icki' | 'sut' | 'yumurta';
+export const GOODS: Good[] = ['ekmek', 'su', 'et', 'balik', 'kumas', 'alet', 'odun', 'bugday', 'yun', 'elbise', 'mobilya', 'icki', 'sut', 'yumurta'];
 
 export type Profession =
   | 'firinci' | 'sucu' | 'kasap' | 'balikci' | 'terzi' | 'demirci' | 'marangoz'
   | 'tuccar' | 'hekim' | 'hoca' | 'hamal' | 'insaatci' | 'kalemsor' | 'imam'
-  | 'memur' | 'tahsildar' | 'bekci' | 'savci' | 'hakim' | 'asker' | 'kayzer' | 'naip'
+  | 'memur' | 'tahsildar' | 'bekci' | 'savci' | 'hakim' | 'asker' | 'kayzer' | 'naip' | 'hayvanci'
   | 'ciftci' | 'dokumaci' | 'mobilyaci' | 'barci';
 
 export type Office = 'meclis';
@@ -24,6 +24,10 @@ export interface Building {
 }
 
 export interface Person {
+  goal?: GoalId; goalsDone?: GoalId[];
+  rank?: import('./realm').Rank | null; fief?: string | null; favor?: number; farm?: boolean; animals?: Record<import('./realm').Animal, number>;
+  task?: import('./orders').Task; // v1.7: an order the NPC is carrying out
+  orderedBy?: { by: string; crime: CrimeKind; victimId: string | null; day: number };
   id: string;
   name: string;
   prof: Profession;
@@ -74,7 +78,7 @@ export interface Person {
   walk?: import('./move').Walk; // player characters: current walk (real-time path)
 }
 
-export interface Arrest { id: string; criminalId: string; catcherId: string; crime: CrimeKind; victimId: string | null; amount: number; day: number; hour: number; offer: number; status: 'bekliyor' | 'kabul' | 'ret'; }
+export interface Arrest { id: string; criminalId: string; catcherId: string; crime: CrimeKind; victimId: string | null; amount: number; day: number; hour: number; offer: number; status: 'bekliyor' | 'kabul' | 'ret'; at?: number }
 export type CrimeKind = 'hirsizlik' | 'rusvet' | 'zimmet' | 'isyan' | 'saldiri' | 'cinayet' | 'kacakcilik';
 export interface Talk { a: string; b: string; text: string; day: number; hour: number; at?: number; lines?: string[]; ai?: boolean }
 export interface Corpse { id: string; personId: string; name: string; look: { hairColor: number; skin: number; shirt: number; female: boolean; prof: Profession }; x: number; y: number; at: number; killerId: string | null; witnesses: string[]; stage: 'yerde' | 'ihbar' | 'inceleme' | 'kapandi'; reportedBy?: string; reportedAt?: number; bekciId?: string; bekciFrom?: { x: number; y: number }; note?: string }
@@ -152,7 +156,11 @@ export interface Budget { limit: number; spent: number; until: number; approved:
 
 export interface Coup { leaderId: string; kind: 'coup' | 'revolution'; day: number; fund: number; }
 
+export type GoalId = 'tuccar' | 'meclisbaskani' | 'vezir' | 'asi';
+export interface Mission { id: string; text: string; reward: number; to: string | null; by: string; day: number; status: 'acik' | 'bildirildi' | 'odendi' | 'iptal'; claimedBy?: string }
 export interface World {
+  cruelOrders?: number; missions?: Mission[];
+  orgs?: import('./realm').Org[]; spies?: import('./realm').Spy[]; plots?: import('./realm').Plot[]; warrants?: string[]; history?: import('./realm').Chronicle[]; informantPay?: number;
   version: number;
   seed: number;
   rng: number;
@@ -275,6 +283,14 @@ export type Action =
   | { t: 'joinRebels' }
   | { t: 'fateVote'; fate: Fate }
   | { t: 'setSpeed'; speed: number }
+  | { t: 'setGoal'; goal: GoalId }
+  | { t: 'drinkMilk' } | { t: 'eatEgg' } | { t: 'buyFarm' } | { t: 'buyAnimal'; animal: import('./realm').Animal; n?: number } | { t: 'slaughter'; animal: import('./realm').Animal }
+  | { t: 'grantTitle'; personId: string; rank: import('./realm').Rank; fief?: string | null } | { t: 'stripTitle'; personId: string }
+  | { t: 'orgFound'; kind: import('./realm').OrgKind; name: string } | { t: 'orgJoin'; orgId: string } | { t: 'orgLeave' } | { t: 'orgMeet' }
+  | { t: 'assignSpy'; spyId: string; targetId: string } | { t: 'warrant'; personId: string } | { t: 'searchHouse'; personId: string } | { t: 'raidOrg'; orgId: string } | { t: 'informantPay'; amount: number }
+  | { t: 'missionCreate'; text: string; reward: number; to: string | null }
+  | { t: 'missionClaim'; id: string }
+  | { t: 'missionPay'; id: string; pay: boolean }
   | { t: 'drinkWater' } | { t: 'pray' } | { t: 'drink' } | { t: 'doctor' } | { t: 'work' } | { t: 'nightOut'; on: boolean }
   | { t: 'assault'; personId: string } | { t: 'kill'; personId: string } | { t: 'insult'; personId: string } | { t: 'chatWith'; personId: string }
   | { t: 'offerBribe'; arrestId: string; amount: number } | { t: 'answerBribe'; arrestId: string; accept: boolean }

@@ -47,10 +47,10 @@ describe('production chains', () => {
 });
 
 describe('needs & health', () => {
-  it('missing water or meals costs 10 health; a full day restores a little', () => {
-    const w = setup(); w.day = 5; const p = npc(w, 'hamal'); p.health = 80;
-    p.meals = 3; p.drinks = 4; needsEndOfDay(w, p); expect(p.health).toBe(70);
-    p.meals = 3; p.drinks = 5; needsEndOfDay(w, p); expect(p.health).toBeGreaterThan(70);
+  it('v1.8 bars: ending the day starving/parched costs health; fed and watered restores a little', () => {
+    const w = setup(); w.day = 5; const p = npc(w, 'hamal'); p.health = 80; p.inv.elbise = 0; p.inv.mobilya = 0;
+    p.hunger = 30; p.thirst = 95; needsEndOfDay(w, p); expect(p.health).toBe(76);
+    p.hunger = 30; p.thirst = 30; needsEndOfDay(w, p); expect(p.health).toBeGreaterThan(76);
   });
   it('below 30 health only a doctor heals', () => {
     const w = setup(); w.day = 5; const p = npc(w, 'hamal'); p.health = 25; p.meals = 3; p.drinks = 5; p.inv.elbise = 0; p.inv.mobilya = 0;
@@ -147,7 +147,7 @@ describe('migration', () => {
   it.skipIf(!existsSync(path))('the live day-3 world migrates and keeps running', () => {
     const raw = JSON.parse(readFileSync(path, 'utf8')); const w: World = (Array.isArray(raw) ? raw[0] : raw).state;
     const ids = w.people.map((p) => p.id); migrateWorld(w);
-    expect(w.schema).toBe(4); expect(w.people.map((p) => p.id)).toEqual(ids);
+    expect(w.schema).toBe(5); expect(w.people.map((p) => p.id)).toEqual(ids);
     for (const p of w.people) if (p.spouse) { const s = findPerson(w, p.spouse); if (s) expect(s.female).not.toBe(p.female); }
     const m0 = totalMoney(w); let now = w.lastTickAt;
     for (let i = 0; i < 24 * 10; i++) { now += DAY_MS / 24; advanceWorld(w, now); }

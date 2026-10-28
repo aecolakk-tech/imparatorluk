@@ -1,3 +1,4 @@
+import { maybeChronicle } from './realm';
 import type { World } from './types';
 import { findPerson } from './world';
 
@@ -14,6 +15,7 @@ export function log(w: World, text: string, personId?: string, now?: number): vo
   w.todayEvents.push(text);
   if (w.todayEvents.length > 200) w.todayEvents.shift();
   if (p?.playerId) personal(w, p.playerId, text, now);
+  maybeChronicle(w, text);
 }
 export function personal(w: World, playerId: string, text: string, now?: number): void {
   const pl = w.players[playerId]; if (!pl) return;

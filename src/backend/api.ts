@@ -1,7 +1,7 @@
 import type { Action, ActionResult, Profession, World } from '../sim/types';
 import type { AdminOp, Candidate, ChatMsg } from '../server/core';
 
-export type AdminRequest = AdminOp | { t: 'setPassword'; password: string } | { t: 'snapshot' } | { t: 'restoreSnapshot'; id: string };
+export type AdminRequest = AdminOp | { t: 'setPassword'; password: string } | { t: 'snapshot' } | { t: 'restoreSnapshot'; id: string } | { t: 'resetWorld'; confirm: string };
 export interface Snapshot { id: string; at: number; day: number; }
 export interface Session { playerId: string; founder: boolean; }
 

@@ -1,3 +1,5 @@
+import { drinkMilk, eatEgg, buyFarm, buyAnimal, slaughter, grantTitle, stripTitle, orgFound, orgJoin, orgLeave, orgMeet, assignSpy, issueWarrant, searchHouse, raidOrg } from './realm';
+import { setGoal, missionCreate, missionClaim, missionPay } from './goals';
 import type { Action, ActionResult, Person, Profession, World } from './types';
 import { GOODS } from './types';
 import { GOOD_LABEL, ONLINE_WINDOW_MS, PLAYER_PROFS, PROF_LABEL, PRODUCES, STATE_PROFS } from './constants';
@@ -92,7 +94,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
   const pl = w.players[playerId]; if (!pl || pl.banned) return no('Hesap bulunamadı.');
   const me = findPerson(w, pl.personId); if (!me) return no('Karakter bulunamadı.');
   const isKayzer = (ww: World, p: Person): boolean => canRule(ww, p, now, ONLINE_WINDOW_MS);
-  const jailedOk: Action['t'][] = ['petition', 'eat', 'divorce', 'answerProposal', 'defense', 'restCase'];
+  const jailedOk: Action['t'][] = ['petition', 'eat', 'divorce', 'answerProposal', 'defense', 'restCase', 'offerBribe'];
   if (me.jailedDays > 0 && !jailedOk.includes(a.t)) return no('Zindandasınız; şimdilik sadece dilekçe yazabilirsiniz.');
   const exileOk: Action['t'][] = [...jailedOk, 'restore', 'buy', 'sell', 'marry', 'haveChild', 'school', 'cure'];
   if (me.exiledDays > 0 && !exileOk.includes(a.t)) return no(`Sürgündesiniz (${me.exiledDays} gün kaldı).`);
@@ -102,7 +104,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     if (need.kind === 'building' && need.ids.length && !need.ids.some((id) => { const b = w.buildings.find((x) => x.id === id); return b && distToBuilding(b, pos) <= REACH + 0.6; })) return no(`Bunun için önce ${need.label} yürümelisiniz.`);
     if (need.kind === 'person') {
       const tp = need.id.startsWith('corpse:') ? w.corpses?.find((c) => `corpse:${c.id}` === need.id) : placeOf(w, need.id, now);
-      if (tp && Math.hypot(tp.x - pos.x, tp.y - pos.y) > PERSON_REACH + 0.8) return no('Önce yanına yürümelisiniz (çok uzaktasınız).');
+      if (tp && Math.hypot(tp.x - pos.x, tp.y - pos.y) > PERSON_REACH + 0.9) return no('Önce yanına yürümelisiniz (çok uzaktasınız).');
     }
   }
   const decides = (p: Person): boolean => !fullAI(p);
@@ -119,8 +121,8 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       me.inv[a.good] -= Math.floor(q); addListing(w, me, a.good, Math.floor(q), pr, 'pazar'); return ok('Tezgâha koydunuz.');
     }
     case 'eat': {
-      if (me.meals >= 3) return no('Bugünkü 3 öğününüzü yediniz; toksunuz.');
-      return eatMeal(w, me) ? ok(`Yemek yediniz (bugün ${me.meals}/3).`) : no('Yiyecek alacak paranız yok ya da pazarda yemek kalmadı.');
+      if (me.hunger < 15) return no('Karnınız tok.');
+      return eatMeal(w, me) ? ok(`Yemek yediniz (açlık ${Math.round(me.hunger)}/100).`) : no('Yiyecek alacak paranız yok ya da pazarda yemek kalmadı.');
     }
     case 'askida': {
       const q = num(a.qty, 1, 20); if (q === null) return no('Geçersiz.');
@@ -310,6 +312,26 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       if (!w.isyan) return no('Ortada isyan yok.'); if (me.id === w.kayzerId || me.soylu) return no('Siz sarayın tarafındasınız.');
       if (!w.isyan.rebels.includes(me.id)) w.isyan.rebels.push(me.id); me.republic = clamp(me.republic + 20); return ok('Asilere katıldınız!');
     }
+    case 'setGoal': return ok(setGoal(me, a.goal));
+    case 'drinkMilk': { const r = drinkMilk(me); return r.startsWith('Süt içtiniz') ? ok(r) : no(r); }
+    case 'eatEgg': { const r = eatEgg(me); return r.startsWith('Yumurta') ? ok(r) : no(r); }
+    case 'buyFarm': { const r = buyFarm(w, me); return r.startsWith('Çiftlik kurdunuz') ? ok(r) : no(r); }
+    case 'buyAnimal': { const r = buyAnimal(w, me, a.animal, Math.max(1, Math.min(10, Math.round(a.n ?? 1)))); return / aldınız/.test(r) ? ok(r) : no(r); }
+    case 'slaughter': { const r = slaughter(w, me, a.animal); return r.includes('kesildi') ? ok(r) : no(r); }
+    case 'grantTitle': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); const r = grantTitle(w, me, t, a.rank, a.fief); return r.startsWith('👑') ? ok(r) : no(r); }
+    case 'stripTitle': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); const r = stripTitle(w, me, t); return r.startsWith('⚔') ? ok(r) : no(r); }
+    case 'orgFound': { const r = orgFound(w, me, a.kind, String(a.name ?? '')); return r.includes('kuruldu') ? ok(r) : no(r); }
+    case 'orgJoin': { const r = orgJoin(w, me, a.orgId); return r.includes('katıldınız') ? ok(r) : no(r); }
+    case 'orgLeave': return ok(orgLeave(w, me));
+    case 'orgMeet': { const r = orgMeet(w, me); return r.startsWith('Bu gece') ? ok(r) : no(r); }
+    case 'assignSpy': { const s = findPerson(w, a.spyId), t = findPerson(w, a.targetId); if (!s || !t) return no('Kişi yok.'); const r = assignSpy(w, me, s, t); return r.includes('izleyecek') ? ok(r) : no(r); }
+    case 'warrant': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); const r = issueWarrant(w, me, t); return r.includes('çıkarıldı') ? ok(r) : no(r); }
+    case 'searchHouse': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); const r = searchHouse(w, me, t); return r.includes('arandı') || r.includes('bulundu') ? ok(r) : no(r); }
+    case 'raidOrg': { const r = raidOrg(w, me, a.orgId); return r.startsWith('⚔') ? ok(r) : no(r); }
+    case 'informantPay': { if (me.id !== w.kayzerId) return no('Sadece Kayzer.'); w.informantPay = Math.max(0, Math.min(200, Math.round(a.amount))); return ok(w.informantPay ? `Muhbirlere ${w.informantPay} Dinar ödül ilan edildi.` : 'Muhbir ödülü kaldırıldı.'); }
+    case 'missionCreate': { const r = missionCreate(w, me, String(a.text ?? ''), Number(a.reward) || 0, a.to ?? null); return r === 'Görev ilan edildi.' ? ok(r) : no(r); }
+    case 'missionClaim': return ok(missionClaim(w, me, a.id));
+    case 'missionPay': return ok(missionPay(w, me, a.id, !!a.pay));
     case 'setSpeed': {
       if (w.kayzerId !== me.id) return no('Oyun hızını sadece hükümdar değiştirir.');
       if (![0.5, 1, 2].includes(a.speed)) return no('0.5x, 1x ya da 2x.');
@@ -317,7 +339,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       w.speed = a.speed; w.lastTickAt = now - f * hourMs(w); // keep the clock continuous
       log(w, `Ferman: zaman ${a.speed}x hızla akıyor.`); return ok(`Hız ${a.speed}x.`);
     }
-    case 'drinkWater': if (me.drinks >= 5) return no('Bugünkü 5 suyunuzu içtiniz.'); return drinkWater(w, me) ? ok(`Su içtiniz (bugün ${me.drinks}/5).`) : no('Su alacak paranız yok ya da kuyuda su kalmadı.');
+    case 'drinkWater': if (me.thirst < 15) return no('Susamadınız.'); return drinkWater(w, me) ? ok(`Su içtiniz (susuzluk ${Math.round(me.thirst)}/100).`) : no('Su alacak paranız yok ya da kuyuda su kalmadı.');
     case 'pray': return ok(pray(w, me));
     case 'drink': { const r = drinkAlcohol(w, me); return { ok: r.startsWith('Meyhanede bir'), msg: r }; }
     case 'doctor': { const r = seeDoctor(w, me, false); return { ok: r.includes('iyileştirdi'), msg: r }; }

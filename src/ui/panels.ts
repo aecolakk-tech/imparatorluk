@@ -19,7 +19,7 @@ import { buildingExtras, caseRoles, electionBlock, personActions, personExtras, 
 
 export interface Ctx {
   w: World; me: Person | null; founder: boolean;
-  act: (a: Action) => void; dm: (personId: string) => void; openPerson: (id: string) => void;
+  act: (a: Action) => void; dm: (personId: string) => void; openPerson: (id: string) => void; openCitizens?: () => void; atSaray?: boolean;
 }
 
 const isK = (c: Ctx): boolean => !!c.me && canRule(c.w, c.me, Date.now(), ONLINE_WINDOW_MS);
@@ -53,10 +53,12 @@ export function personCard(c: Ctx, p: Person): HTMLElement {
       h('tr', {}, h('td', {}, 'Cumhuriyetçilik'), h('td', {}, bar(p.republic, '#5a8ad0'), ` ${Math.round(p.republic)}`)),
       h('tr', {}, h('td', {}, 'Eşyalar'), h('td', {}, inv)),
       h('tr', {}, h('td', {}, 'Yaş'), h('td', {}, `${age(w, p)} gün · ${STAGE_LABEL[stage(w, p)]}${p.soylu ? ' · soylu' : ''}${p.school ? ` · ${p.school} gün okul` : ''}`)),
+      ...(p.rank ? [h('tr', {}, h('td', {}, '⚜ Unvan'), h('td', {}, `${p.rank}${p.fief ? ` · tımar: ${w.buildings.find((b) => b.id === p.fief)?.name ?? ''}` : ''}`))] : []),
       h('tr', {}, h('td', {}, 'Eşi'), h('td', {}, findPerson(w, p.spouse)?.name ?? '—')),
       h('tr', {}, h('td', {}, 'Ebeveyn'), h('td', {}, p.parents.map((id) => nameOf(w, id)).join(', ') || '—')),
       h('tr', {}, h('td', {}, 'Çocukları'), h('td', {}, childrenOf(w, p.id).map((k) => nameOf(w, k.id)).join(', ') || '—')),
       h('tr', {}, h('td', {}, 'Son yaptığı'), h('td', {}, p.lastAction)),
+      ...(p.task ? [h('tr', { class: 'task-row' }, h('td', {}, '📜 Görevi'), h('td', {}, `${p.task.status === 'yolda' ? '⏳ ' : p.task.status === 'bitti' ? '✅ ' : p.task.status === 'basarisiz' ? '❌ ' : ''}${p.task.label}${p.task.note ? ' – ' + p.task.note : ''} (${findPerson(w, p.task.byId)?.name ?? '?'} istedi)`))] : []),
     ),
     personExtras(c, p),
   );
@@ -118,6 +120,7 @@ function sarayPanel(c: Ctx): HTMLElement {
   const pending = w.petitions.filter((p) => p.status === 'bekliyor');
   const k = findPerson(w, w.kayzerId);
   box.append(h('div', { class: 'muted' }, w.regime === 'cumhuriyet' ? (k ? `Cumhuriyet. Başkan: ${k.name} (seçim ${w.election.baskanNextDay}. gün). Kanunlar Meclis oyuyla değişir. Hazine: ${fmt(w.treasury)} Dinar.` : `Cumhuriyet ilan edildi. Başkanlık seçimi ${w.election.baskanNextDay}. gün; o zamana kadar Naip Maecenas yönetiyor.`) : k ? `Tahtta: ${k.name}. Hazine: ${fmt(w.treasury)} Dinar. Meclis tekliflerine verdiğiniz veto kesindir, ama halkın gönlünü biraz kırar.` : 'Taht boş.'));
+  if (isK(c) && c.openCitizens) box.append(c.atSaray ? h('button', { class: 'primary', onclick: () => c.openCitizens!() }, '📋 Vatandaş defteri (herkesin durumu)') : h('div', { class: 'muted' }, '📋 Vatandaş defterini açmak için Saray’ın içinde/kapısında olmalısınız.'));
   if (isK(c)) {
     box.append(h('h3', {}, `📜 Dilekçeler (${pending.length})`));
     if (!pending.length) box.append(h('div', { class: 'muted' }, 'Bekleyen dilekçe yok.'));

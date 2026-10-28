@@ -15,7 +15,7 @@ export function isState(p: Person): boolean { return STATE_PROFS.includes(p.prof
 export function consume(w: World, p: Person): void {
   if (p.prof === 'naip') { p.hunger = 0; p.thirst = 0; return; }
   // askıda ekmek: hungry & broke takes a hung bread
-  if (p.meals < 2 && p.inv.ekmek === 0 && lawOn(w, 'askida')) {
+  if (p.hunger > 50 && p.inv.ekmek === 0 && lawOn(w, 'askida')) {
     const sponsor = w.people.find((x) => x.inv.ekmek > 3 && x.money > 200 && x.id !== p.id && x.prof !== 'firinci');
     if (sponsor) { sponsor.inv.ekmek -= 1; p.inv.ekmek += 1; }
   }
@@ -44,7 +44,7 @@ export function isPoor(w: World, p: Person, avgMoney?: number): boolean {
 /** Daily mood/loyalty/republic drift from material conditions and policy. */
 export function feel(w: World, p: Person): void {
   if (p.prof === 'naip' || p.id === w.kayzerId) return;
-  const hungry = p.meals < 3 || p.drinks < 5 || p.hunger > 60;
+  const hungry = p.hunger > 70 || p.thirst > 70; // v1.8: continuous bars
   if (hungry) { p.mood -= 3; p.republic += 1.2; p.loyalty -= 1; } else { p.mood += 0.6; }
   // religiosity colours politics: the devout lean to the throne, the secular to the republic
   if (p.din > 70 && w.regime === 'imparatorluk') { p.loyalty += 0.2; p.republic -= 0.2; }
@@ -112,7 +112,7 @@ export function decide(w: World, p: Person): void {
     else if (marketPrice(w, 'ekmek') > 5 && p.mood < 50) openPetition(w, p, 'sikayet', 'Ekmek fiyatı çok yükseldi, fırınlar denetlensin.');
   }
   // theft: desperate & dishonest
-  if (p.money < 8 && p.meals < 3 && p.honesty < 55 && chance(w, (60 - p.honesty) / 200)) {
+  if (p.money < 8 && p.hunger > 60 && p.honesty < 55 && chance(w, (60 - p.honesty) / 200)) {
     const victims = w.people.filter((v) => v.money > 80 && v.id !== p.id && v.prof !== 'kayzer' && v.prof !== 'naip');
     if (victims.length) steal(w, p, pick(w, victims));
   }

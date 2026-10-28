@@ -3,7 +3,7 @@
  * Several tabs share the same world (crude multiplayer for testing).
  */
 import type { Action, ActionResult, Profession, World } from '../sim/types';
-import { act, admin, candidates, createWorld, drainChat, heartbeat, makeChat, migrateWorld, register, type Candidate, type ChatMsg } from '../server/core';
+import { resetWorld, act, admin, candidates, createWorld, drainChat, heartbeat, makeChat, migrateWorld, register, type Candidate, type ChatMsg } from '../server/core';
 import type { AdminRequest, Backend, Session, Snapshot } from './api';
 import { SNAPSHOTS_KEPT } from '../sim/constants';
 
@@ -96,6 +96,7 @@ export class MockBackend implements Backend {
     return this.tx((st) => {
       if (r.t === 'setPassword') { if (r.password.length < 4) return 'En az 4 karakter.'; st.access = r.password; return 'Giriş şifresi değişti.'; }
       if (r.t === 'snapshot') { this.snapshotInto(st); return 'Yedek alındı.'; }
+      if (r.t === 'resetWorld') { if (r.confirm !== 'SIFIRLA') return 'Onay metni yanlış.'; this.snapshotInto(st); resetWorld(st.world, this.clock()); return 'Dünya sıfırlandı (önce yedek alındı).'; }
       if (r.t === 'restoreSnapshot') { const s = st.snaps.find((x) => x.id === r.id); if (!s) return 'Yedek yok.'; const old = st.world; st.world = JSON.parse(s.state) as World; st.world.players = { ...st.world.players, ...old.players }; st.world.lastTickAt = this.clock(); return `Gün ${s.day} yedeği geri yüklendi.`; }
       return admin(st.world, r);
     });

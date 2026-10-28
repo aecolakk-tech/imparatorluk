@@ -162,7 +162,7 @@ export function settleMarket(w: World): void {
     else if (left > sold * 1.2 + 5) p *= 1 - Math.min(0.06, 0.01 + left / Math.max(20, sold + left) * 0.06);
     else p += (BASE_PRICE[g] - p) * 0.03; // balanced market drifts to the normal price
     // v1.6: bread follows wheat (bakers pass on flour cost), crafts don't collapse below cost
-    if (g === 'ekmek' && natureMult(w, 'bugday') < 1) { const wr = w.prices.bugday / BASE_PRICE.bugday; if (wr > 1.1) p *= 1 + Math.min(0.1, (wr - 1) * 0.06); p = Math.max(p, w.prices.bugday * 0.55); }
+    if (g === 'ekmek' && natureMult(w, 'bugday') < 1) { const wr = w.prices.bugday / BASE_PRICE.bugday; p *= 1.03; if (wr > 1.1) p *= 1 + Math.min(0.1, (wr - 1) * 0.08); p = Math.max(p, w.prices.bugday * 0.55); }
     const floor = ['kumas', 'alet', 'elbise', 'mobilya', 'yun', 'odun', 'icki'].includes(g) ? 0.75 : 0.6;
     w.prices[g] = Math.round(Math.max(BASE_PRICE[g] * floor, Math.min(BASE_PRICE[g] * 5, p)) * 100) / 100;
   }

@@ -7,6 +7,7 @@ import type { Person, World } from './types';
 import { ROADS_X, ROADS_Y } from './world';
 import { hourMs } from './tick';
 import { walkPos, type Pt } from './move';
+import { bekciShift } from './life';
 
 export const TALK_MS = 45_000; // a map conversation lasts 45 real seconds
 export const ESCORT_MS = 18_000;
@@ -35,7 +36,9 @@ const MARKETS = ['pazar', 'gida', 'zanaat', 'yeni', 'kahve'];
 export interface Placed { p: Person; x: number; y: number; moving: boolean; visible: boolean; dir: number; talking?: boolean }
 
 export function playerWalking(w: World, p: Person, now: number): boolean {
-  if (!p.playerId || !p.walk) return false;
+  if (!p.walk) return false;
+  if (p.task) return true; // v1.7: an NPC on an errand follows its own path
+  if (!p.playerId) return false;
   const pl = w.players[p.playerId]; return !!pl && now - pl.lastSeen < PLAYER_POS_MS;
 }
 
@@ -54,8 +57,9 @@ function scheduled(w: World, p: Person, now: number, ctx: Ctx): Placed {
   const wanderX = Math.sin(now / 2300 + h) * 0.9 + Math.sin(now / 5100 + h * 3) * 0.6;
   const wanderY = Math.cos(now / 3100 + h * 2) * 0.35;
   const walking = Math.abs(Math.cos(now / 2300 + h)) > 0.35;
-  if (p.prof === 'asker' && night) { const k = (now / 40000 + (h % 10) / 10) % 1; pos = along([{ x: 57, y: 13.5 }, { x: 30, y: 13.5 }, { x: 30, y: 20.5 }, { x: 56, y: 20.5 }, { x: 57, y: 13.5 }], k); moving = true; }
-  else if (p.prof === 'bekci' && night) { const k = (now / 50000 + (h % 10) / 10) % 1; pos = along([{ x: 6, y: 29.5 }, { x: 80, y: 29.5 }, { x: 80, y: 35.5 }, { x: 6, y: 35.5 }, { x: 6, y: 29.5 }], k); moving = true; }
+  if (p.prof === 'asker') { const at = h % 3 === 0 ? 'saray' : 'kisla'; pos = door(B.has(at) ? at : 'saray', p, 2.4); pos.x += wanderX * 0.3; moving = false; visible = at === 'saray' || !night || h % 2 === 0; } // soldiers: kışla or Saray guard, no patrols
+  else if (p.prof === 'bekci' && (bekciShift(p) === 'gece') === night) { const k = (now / 50000 + (h % 10) / 10) % 1; const route2 = night ? [{ x: 6, y: 29.5 }, { x: 80, y: 29.5 }, { x: 80, y: 35.5 }, { x: 6, y: 35.5 }, { x: 6, y: 29.5 }] : [{ x: 30, y: 20.5 }, { x: 80, y: 20.5 }, { x: 80, y: 29.5 }, { x: 30, y: 29.5 }, { x: 30, y: 20.5 }]; pos = along(route2, k); moving = true; }
+  else if (p.prof === 'bekci' && false) { const k = (now / 50000 + (h % 10) / 10) % 1; pos = along([{ x: 6, y: 29.5 }, { x: 80, y: 29.5 }, { x: 80, y: 35.5 }, { x: 6, y: 35.5 }, { x: 6, y: 29.5 }], k); moving = true; }
   else if (p.nightOut && night) { const k = (now / 60000 + (h % 10) / 10) % 1; const bb = B.get('bar')!; pos = along([{ x: bb.door.x, y: bb.door.y + 0.5 }, { x: bb.door.x, y: 20.5 }, { x: 44, y: 20.5 }, { x: 44, y: 29.5 }, { x: bb.door.x, y: 29.5 }, { x: bb.door.x, y: bb.door.y + 0.5 }], k); moving = true; }
   else if (t >= s1 && t < s2) { pos = along(route(door(home, p), door(work, p)), (t - s1) / (s2 - s1)); moving = true; }
   else if (t >= s2 && t < s3) { pos = door(work, p); pos.x += wanderX; pos.y += wanderY; moving = walking; }
@@ -89,7 +93,8 @@ export function placePeople(w: World, now: number): Placed[] {
   const out = new Map<string, Placed>();
   for (const p of w.people) {
     let q: Placed;
-    if (p.jailedDays > 0 && zindan) { const i = jailed.indexOf(p); const cols = Math.max(1, zindan.w - 1); q = { p, x: zindan.x + 0.8 + (i % cols), y: zindan.y + zindan.h - 0.6 - Math.floor(i / cols) * 0.5, moving: false, visible: true, dir: 1 }; }
+    if (p.jailedDays > 0 && inCustody(w, p) && c.B.get('mahkeme')) { const m = c.B.get('mahkeme')!; q = { p, x: m.door.x + 1.6 + (hash(p.id) % 3) * 0.5, y: m.door.y + 1.1, moving: false, visible: true, dir: -1 }; }
+    else if (p.jailedDays > 0 && zindan) { const i = jailed.indexOf(p); const cols = Math.max(1, zindan.w - 1); q = { p, x: zindan.x + 0.8 + (i % cols), y: zindan.y + zindan.h - 0.6 - Math.floor(i / cols) * 0.5, moving: false, visible: true, dir: 1 }; }
     else if (playerWalking(w, p, now)) { const r = walkPos(p.walk!, now); q = { p, x: r.pt.x, y: r.pt.y, moving: r.moving, visible: true, dir: r.dir }; }
     else q = scheduled(w, p, now, c);
     if (p.exiledDays > 0) q.visible = false;
@@ -136,4 +141,6 @@ export function placePeople(w: World, now: number): Placed[] {
   return [...out.values()];
 }
 
+/** Arrested but not yet sentenced: held at the courthouse (nezarethane), not in the zindan. */
+export function inCustody(w: World, p: Person): boolean { return w.arrests.some((a) => a.criminalId === p.id && a.status === 'bekliyor') || w.cases.some((c) => c.accusedId === p.id && c.stage !== 'kapandi'); }
 export function placeOf(w: World, id: string, now: number): Placed | undefined { return placePeople(w, now).find((q) => q.p.id === id); }

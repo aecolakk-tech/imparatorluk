@@ -8,8 +8,8 @@ export const SNAPSHOTS_KEPT = 8;
 export const INACTIVE_TO_NPC_MS = 21 * 24 * 3600 * 1000; // 3 real weeks
 export const MAP_W = 100; export const MAP_H = 60;
 
-export const BASE_PRICE: Record<Good, number> = { ekmek: 1.2, su: 0.5, et: 6, balik: 4, kumas: 8, alet: 20, odun: 2.5, bugday: 0.5, yun: 2, elbise: 18, mobilya: 40, icki: 3 };
-export const GOOD_LABEL: Record<Good, string> = { ekmek: 'Ekmek', su: 'Su', et: 'Et', balik: 'Balık', kumas: 'Kumaş', alet: 'Alet', odun: 'Odun', bugday: 'Buğday', yun: 'Yün', elbise: 'Elbise', mobilya: 'Mobilya', icki: 'İçki' };
+export const BASE_PRICE: Record<Good, number> = { ekmek: 1.2, su: 0.5, et: 6, balik: 4, kumas: 8, alet: 20, odun: 2.5, bugday: 0.5, yun: 2, elbise: 18, mobilya: 40, icki: 3, sut: 1, yumurta: 0.6 };
+export const GOOD_LABEL: Record<Good, string> = { ekmek: 'Ekmek', su: 'Su', et: 'Et', balik: 'Balık', kumas: 'Kumaş', alet: 'Alet', odun: 'Odun', bugday: 'Buğday', yun: 'Yün', elbise: 'Elbise', mobilya: 'Mobilya', icki: 'İçki', sut: 'Süt', yumurta: 'Yumurta' };
 export interface Recipe { good: Good; qty: number; market: string; inputs?: Partial<Record<Good, number>>; extra?: { good: Good; qty: number } }
 /** daily output of a worker; inputs are consumed for a full day's output (partial inputs → partial output) */
 export const PRODUCES: Partial<Record<Profession, Recipe>> = {
@@ -24,11 +24,12 @@ export const PRODUCES: Partial<Record<Profession, Recipe>> = {
   mobilyaci: { good: 'mobilya', qty: 1, market: 'yeni', inputs: { odun: 4 } },
   demirci: { good: 'alet', qty: 2, market: 'zanaat', inputs: { odun: 2 } },
   barci: { good: 'icki', qty: 16, market: 'bar', inputs: { bugday: 8 } },
+  hayvanci: { good: 'bugday', qty: 18, market: 'gida' }, // side job as a farmhand: never idle between animal sales
 };
 /** decay per day of stored goods (fraction lost) – food spoils, crafts wear out slowly so demand persists */
-export const DECAY: Record<Good, number> = { ekmek: 0.35, su: 0.3, et: 0.3, balik: 0.4, kumas: 0.02, alet: 0.03, odun: 0.05, bugday: 0.12, yun: 0.02, elbise: 0.05, mobilya: 0.02, icki: 0.05 };
+export const DECAY: Record<Good, number> = { ekmek: 0.35, su: 0.3, et: 0.3, balik: 0.4, kumas: 0.02, alet: 0.03, odun: 0.05, bugday: 0.12, yun: 0.02, elbise: 0.05, mobilya: 0.02, icki: 0.05, sut: 0.4, yumurta: 0.15 };
 /** max units one seller may keep listed (anti-hoarding / karaborsa) */
-export const STOCK_LIMIT: Record<Good, number> = { ekmek: 120, su: 200, et: 40, balik: 40, kumas: 20, alet: 10, odun: 40, bugday: 150, yun: 30, elbise: 10, mobilya: 4, icki: 50 };
+export const STOCK_LIMIT: Record<Good, number> = { ekmek: 120, su: 200, et: 40, balik: 40, kumas: 20, alet: 10, odun: 40, bugday: 150, yun: 30, elbise: 10, mobilya: 4, icki: 50, sut: 80, yumurta: 80 };
 export const RANKS = [{ xp: 0, label: 'Çırak', mult: 0.85 }, { xp: 20, label: 'Kalfa', mult: 1 }, { xp: 60, label: 'Usta', mult: 1.2 }];
 export const STATE_PROFS: Profession[] = ['memur', 'tahsildar', 'bekci', 'savci', 'hakim', 'asker', 'hoca', 'imam'];
 export const DEFAULT_SALARY: Partial<Record<Profession, number>> = {
@@ -42,6 +43,6 @@ export const PROF_LABEL: Record<Profession, string> = {
   firinci: 'Fırıncı', sucu: 'Sucu', kasap: 'Kasap', balikci: 'Balıkçı', terzi: 'Terzi', demirci: 'Demirci', marangoz: 'Marangoz',
   tuccar: 'Tüccar', hekim: 'Hekim', hoca: 'Hoca', hamal: 'Hamal', insaatci: 'İnşaatçı', kalemsor: 'Kalemşör', imam: 'İmam',
   memur: 'Memur', tahsildar: 'Tahsildar', bekci: 'Bekçi', savci: 'Savcı', hakim: 'Kadı',
-  ciftci: 'Çiftçi', dokumaci: 'Dokumacı', mobilyaci: 'Mobilyacı', barci: 'Barcı', asker: 'Asker', kayzer: 'Kayzer', naip: 'Naip',
+  ciftci: 'Çiftçi', dokumaci: 'Dokumacı', mobilyaci: 'Mobilyacı', barci: 'Barcı', hayvanci: 'Hayvan Tüccarı', asker: 'Asker', kayzer: 'Kayzer', naip: 'Naip',
 };
 export const PLAYER_PROFS: Profession[] = ['ciftci', 'dokumaci', 'mobilyaci', 'barci', 'firinci', 'sucu', 'kasap', 'balikci', 'terzi', 'demirci', 'marangoz', 'tuccar', 'hekim', 'hamal', 'insaatci', 'kalemsor'];

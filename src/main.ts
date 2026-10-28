@@ -14,9 +14,12 @@ import { feedPanel, hudChips, quickPanel } from './ui/life';
 import { rulerScreen } from './ui/ruler';
 import type { Candidate, ChatMsg } from './server/core';
 import { makeSprite } from './ui/sprites';
-import { ambience, installClickSounds, isMuted, setMuted, sfx } from './ui/sound';
+import { GOALS } from './sim/goals';
+import { season, SEASON_LABEL, ANIMALS, ANIMAL_LABEL, ANIMAL_PRICE, ANIMAL_FEED, FARM_PRICE, RANKS_N, RANK_INFO, FIEFS, ORG_LABEL, type OrgKind, type Rank } from './sim/realm';
+import type { GoalId } from './sim/types';
+import { ambience, installClickSounds, isMuted, setMuted, sfx, musicOn, setMusic } from './ui/sound';
 import { needTarget, myPos } from './sim/v16';
-import { findPath, WALK_SPEED, walkEnd, doorSpot, type Pt } from './sim/move';
+import { findPath, WALK_SPEED, walkEnd, doorSpot, distToBuilding, REACH, PERSON_REACH, type Pt } from './sim/move';
 import { electionDates, electionPhase } from './sim/tick';
 import { CRIME_LABEL } from './sim/ai';
 import type { Corpse, CourtCase } from './sim/types';
@@ -96,10 +99,14 @@ const canvas = h('canvas', { id: 'map' });
 const ctx2d = canvas.getContext('2d')!;
 
 function ctx(): Ctx {
-  return { w: world!, me: me(), founder: !!be.session()?.founder, act: (a) => void doAct(a), dm: (id) => { dmTarget = id; openChat(); }, openPerson: (id) => openPersonSheet(id) };
+  return { w: world!, me: me(), founder: !!be.session()?.founder, act: (a) => void doAct(a), dm: (id) => { dmTarget = id; openChat(); }, openPerson: (id) => openPersonSheet(id), openCitizens: () => openCitizens(), atSaray: atSaray() };
 }
 let pending: { a: Action; label: string; since: number; retarget: number } | null = null;
 let walkTarget: Pt | null = null;
+let lowGfx = localStorage.getItem('imp-lowgfx') === '1';
+let localWalk: { walk: NonNullable<Person['walk']>; id: string } | null = null; // client-side prediction wins over older server copies
+let followCam = true; let lastMoveSent = 0; let moveTimer: ReturnType<typeof setTimeout> | null = null; let pendingOpen: string | null = null; let openTries = 0;
+function atSaray(): boolean { const w = world; const m = me(); const b = w?.buildings.find((x) => x.id === 'saray'); return !!(w && m && b && w.kayzerId === m.id && distToBuilding(b, myPos(w, m, gameNow())) <= REACH + 0.6); }
 async function send(a: Action): Promise<void> {
   const r = await be.act(a);
   if (r.msg) toast(r.msg);
@@ -118,10 +125,14 @@ function walkTo(to: Pt): void {
   const w = world; const m = me(); if (!w || !m) return;
   if (m.jailedDays > 0) { toast('Zindandasınız.'); return; }
   const now = gameNow(); const from = myPos(w, m, now);
-  m.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED }; // local prediction; the server computes the same path
+  m.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * ((m.animals?.at ?? 0) > 0 ? 1.5 : 1) }; // local prediction; the server computes the same path
+  localWalk = { walk: m.walk, id: m.id }; followCam = true;
   const pl = Object.values(w.players).find((x) => x.personId === m.id); if (pl) pl.lastSeen = Date.now();
   walkTarget = m.walk.path[m.walk.path.length - 1] ?? to;
-  void be.act({ t: 'move', x: to.x, y: to.y });
+  // throttle server syncs: at most one move per 400 ms, the last target wins
+  const sendMove = (): void => { lastMoveSent = Date.now(); moveTimer = null; void be.act({ t: 'move', x: to.x, y: to.y }); };
+  if (moveTimer) clearTimeout(moveTimer);
+  const wait = 400 - (Date.now() - lastMoveSent); if (wait <= 0) sendMove(); else moveTimer = setTimeout(sendMove, wait);
 }
 function pendingStep(): void {
   if (!pending || !world) return; const m = me(); if (!m) return;
@@ -169,11 +180,11 @@ function renderHud(): void {
   const chips = hudChips(ctx()); // [clock, meals, water, health, mood, din, ...events]
   const events = chips.slice(m ? 6 : 1);
   hudEl.replaceChildren(
-    chips[0]!,
+    chips[0]!, h('span', { class: 'stat', title: 'Mevsim' }, SEASON_LABEL[season(w)]),
     ...(m ? [
       meter('❤️', m.health, '#c8483a', `Sağlık${m.wounded ? ' – yaralısınız, hekime gidin' : ''}`, m.health < 40 || m.wounded),
-      h('span', { class: `stat${m.meals >= 3 ? ' ok' : m.meals < 2 && w.hour > 14 ? ' warn' : ''}`, title: 'Bugünkü öğün (3 gerekir)' }, `🍞 ${m.meals}/3`),
-      h('span', { class: `stat${m.drinks >= 5 ? ' ok' : m.drinks < 3 && w.hour > 14 ? ' warn' : ''}`, title: 'Bugünkü su (5 gerekir)' }, `💧 ${m.drinks}/5`),
+      meter('🍞', 100 - m.hunger, '#d9a441', `Tokluk – açlık ${Math.round(m.hunger)}/100. Boşalınca sağlık düşer.`, m.hunger >= 75),
+      meter('💧', 100 - m.thirst, '#4aa3df', `Su – susuzluk ${Math.round(m.thirst)}/100. Boşalınca sağlık düşer.`, m.thirst >= 75),
       meter('😊', m.mood, '#5fae5a', 'Mutluluk'),
       h('span', { class: 'stat', title: 'Keseniz' }, `👛 ${fmt(m.money)}`),
     ] : []),
@@ -182,13 +193,15 @@ function renderHud(): void {
     !ruler ? h('span', { class: 'stat', title: 'Devletin başı' }, w.regime === 'cumhuriyet' ? `🗽 ${k?.name ?? 'seçim'}` : `👑 ${k?.name ?? 'Naip'}`) : '',
     ...events.slice(0, 2),
     h('span', { class: 'grow' }),
+    ruler ? h('span', { class: 'speed', title: 'Oyun hızı (sadece Kayzer)' }, '⏱', ...[0.5, 1, 2].map((s) => h('button', { class: `mini${w.speed === s ? ' on' : ''}`, onclick: () => { void send({ t: 'setSpeed', speed: s }); } }, `${s === 0.5 ? '½' : s}x`))) : '',
+    h('button', { class: 'mini', title: musicOn() ? 'Müziği kapat' : 'Müziği aç', onclick: () => { setMusic(!musicOn()); renderHud(); } }, musicOn() ? '🎵' : '🎵̸'),
     h('button', { class: 'mini', title: isMuted() ? 'Sesi aç' : 'Sesi kapat', onclick: () => { setMuted(!isMuted()); renderHud(); } }, isMuted() ? '🔇' : '🔊'),
   );
   const ib = isyanBar(ctx()); if (ib) hudEl.append(ib);
 }
 
 // ---------------- one menu with sections ----------------
-type Section = 'yap' | 'ben' | 'mesaj' | 'divan' | 'saray' | 'meclis' | 'aile' | 'gazete' | 'olay' | 'kural' | 'ayar';
+type Section = 'yap' | 'hedef' | 'cemiyet' | 'soylu' | 'tarih' | 'ben' | 'mesaj' | 'divan' | 'saray' | 'meclis' | 'aile' | 'gazete' | 'olay' | 'kural' | 'ayar';
 let section: Section = (localStorage.getItem('imp-sec') as Section) || 'yap';
 function badges(): Partial<Record<Section, number>> {
   const w = world; const m = me(); if (!w || !m) return {};
@@ -205,15 +218,19 @@ function openMenu(sec: Section): void {
   selected = null;
   openSheet(() => {
     const w = world!; const m = me(); const ruler = !!m && w.kayzerId === m.id; const b = badges();
-    const tabs: [Section, string][] = [['yap', '⚡ Yap'], ['ben', '👤 Ben'], ['mesaj', '💬 Mesaj'], ...(ruler ? [['divan', w.regime === 'cumhuriyet' ? '🗽 Makam' : '👑 Divan'] as [Section, string]] : []), ['saray', '🏰 Saray'], ['meclis', '🏛 Meclis'], ['aile', '👪 Aile'], ['gazete', '📜 Gazete'], ['olay', '📣 Olaylar'], ['kural', '📖 Kurallar'], ['ayar', '⚙️']];
+    const tabs: [Section, string][] = [['yap', '⚡ Yap'], ['ben', '👤 Ben'], ['hedef', '🎯 Hedef'], ['cemiyet', '🕯 Cemiyet'], ...(ruler ? [['soylu', '⚜ Soylular'] as [Section, string]] : []), ['tarih', '📖 Tarih'], ['mesaj', '💬 Mesaj'], ...(ruler ? [['divan', w.regime === 'cumhuriyet' ? '🗽 Makam' : '👑 Divan'] as [Section, string]] : []), ['saray', '🏰 Saray'], ['meclis', '🏛 Meclis'], ['aile', '👪 Aile'], ['gazete', '📜 Gazete'], ['olay', '📣 Olaylar'], ['kural', '📖 Kurallar'], ['ayar', '⚙️']];
     const bar_ = h('div', { class: 'tabs' }, ...tabs.map(([id, label]) => h('button', { class: `tab${section === id ? ' on' : ''}`, onclick: () => openMenu(id) }, label, b[id] ? h('span', { class: 'badge' }, String(b[id])) : '')));
     let body: HTMLElement;
     switch (section) {
-      case 'yap': body = quickPanel(ctx()); break;
+      case 'yap': { body = quickPanel(ctx()); const mm = me(); if (mm && (mm.inv.sut > 0 || mm.inv.yumurta > 0)) body.append(h('div', { class: 'row' }, mm.inv.sut > 0 ? h('button', { onclick: () => void send({ t: 'drinkMilk' }) }, `🥛 Süt iç (${mm.inv.sut})`) : '', mm.inv.yumurta > 0 ? h('button', { onclick: () => void send({ t: 'eatEgg' }) }, `🥚 Yumurta ye (${mm.inv.yumurta})`) : '')); if (mm?.farm || (mm?.animals && Object.values(mm.animals).some((n) => n > 0))) body.append(farmBody()); break; }
       case 'ben': body = m ? personCard(ctx(), m) : h('div', {}, '—'); break;
       case 'mesaj': body = chatBody(); break;
+      case 'hedef': body = goalsBody(); break;
+      case 'cemiyet': body = orgsBody(); break;
+      case 'soylu': body = ruler ? noblesBody() : h('div', {}, '—'); break;
+      case 'tarih': body = historyBody(); break;
       case 'divan': body = ruler ? rulerScreen(ctx()) : h('div', {}, '—'); break;
-      case 'saray': body = buildingPanel(ctx(), w.buildings.find((x) => x.id === 'saray')!); break;
+      case 'saray': body = bPanel(w.buildings.find((x) => x.id === 'saray')!); break;
       case 'meclis': body = buildingPanel(ctx(), w.buildings.find((x) => x.id === 'meclis')!); break;
       case 'aile': body = familyPanel(ctx()); break;
       case 'gazete': body = gazetteBody(); break;
@@ -221,11 +238,98 @@ function openMenu(sec: Section): void {
       case 'kural': body = h('div', {}, h('h2', {}, '📖 Kurallar ve kullanım'), ...RULES.flatMap(([t, ls]) => [h('details', {}, h('summary', {}, t), ...ls.map((l) => h('div', { class: 'msg' }, l)))])); break;
       default: body = h('div', {}, h('h2', {}, '⚙️ Ayarlar'),
         h('div', { class: 'row' }, h('button', { onclick: () => { setMuted(!isMuted()); rerenderSheet(true); } }, isMuted() ? '🔇 Ses kapalı (aç)' : '🔊 Ses açık (kapat)'), h('button', { onclick: () => { closeSheet(); guide(0); } }, '❓ Rehber')),
+        h('div', { class: 'row' }, h('button', { onclick: () => { setMusic(!musicOn()); rerenderSheet(true); } }, musicOn() ? '🎵 Müzik açık (kapat)' : '🎵 Müzik kapalı (aç)'), h('button', { onclick: () => { lowGfx = !lowGfx; localStorage.setItem('imp-lowgfx', lowGfx ? '1' : '0'); dispatchEvent(new Event('resize')); rerenderSheet(true); } }, lowGfx ? '🐢 Düşük grafik: AÇIK' : '✨ Düşük grafik: kapalı')),
         be.session()?.founder ? h('button', { onclick: openAdmin }, '🛠 Kurucu paneli') : '',
         h('div', { style: 'margin-top:10px' }, h('button', { class: 'danger', onclick: () => { void be.logout().then(loginScreen); } }, '🚪 Çıkış')));
     }
     return h('div', {}, bar_, body);
   });
+}
+
+function bPanel(b: import('./sim/types').Building): HTMLElement {
+  const box = buildingPanel(ctx(), b);
+  if (b.id === 'saray' || b.id === 'okul') box.append(h('button', { onclick: () => openSheet(historyBody) }, '📖 Tarih Kitabı’nı oku'));
+  if (b.id === 'ciftlik') box.append(farmBody());
+  return box;
+}
+function historyBody(): HTMLElement {
+  const w = world!; const box = h('div', {}, h('h2', {}, '📖 Tarih Kitabı'), h('div', { class: 'muted' }, 'Saltanatlara göre şehrin büyük olayları (kanunlar, savaşlar, isyanlar, evlilikler, ölümler, seçimler, unvanlar).'));
+  const hist = w.history ?? []; if (!hist.length) { box.append(h('div', { class: 'muted' }, 'Henüz yazılmış bir şey yok.')); return box; }
+  const reigns: string[] = []; for (const e of hist) if (!reigns.includes(e.reign)) reigns.push(e.reign);
+  const icon: Record<string, string> = { kanun: '📜', isyan: '🔥', evlilik: '💍', olum: '⚰', secim: '🗳', savas: '⚔', dogum: '👶', doga: '🌾', unvan: '⚜', orgut: '🕯', entrika: '🕵', baslangic: '📖' };
+  for (const r of [...reigns].reverse()) { const es = hist.filter((e) => e.reign === r); box.append(h('details', { open: r === reigns[reigns.length - 1] ? '' : null } as never, h('summary', {}, `👑 ${r} (gün ${es[0]!.day}–${es[es.length - 1]!.day}, ${es.length} olay)`), ...[...es].reverse().slice(0, 150).map((e) => h('div', { class: 'msg' }, `${icon[e.kind] ?? '•'} Gün ${e.day}: ${e.text}`)))); }
+  return box;
+}
+function orgsBody(): HTMLElement {
+  const w = world!; const m = me(); const box = h('div', {}, h('h2', {}, '🕯 Gizli cemiyetler')); if (!m) return box;
+  const mine = (w.orgs ?? []).find((o) => o.members.includes(m.id)); const ruler = w.kayzerId === m.id;
+  box.append(h('div', { class: 'muted' }, 'Hırsızlar loncası, cumhuriyet cemiyeti ya da tarikat kurun veya katılın. Büyüdükçe ve gece toplandıkça şüphe artar: muhbirler, casuslar, baskınlar, ev aramaları ve sorgular sizi ele verebilir.'));
+  if (mine) {
+    const ld = mine.leaderId === m.id;
+    box.append(h('div', { class: 'card' }, h('b', {}, `${ORG_LABEL[mine.kind]} – “${mine.name}”`), h('div', {}, `Lider: ${findPerson(w, mine.leaderId)?.name ?? '—'} · ${mine.members.length} üye · şüphe `, bar(mine.suspicion, '#c8483a'), ` ${Math.round(mine.suspicion)}${mine.known ? ' · ⚠️ Saray biliyor!' : ''}`),
+      h('div', { class: 'muted' }, `Üyeler: ${mine.members.map((id) => findPerson(w, id)?.name).filter(Boolean).join(', ')}`),
+      h('div', { class: 'row' }, ld ? h('button', { onclick: () => void send({ t: 'orgMeet' }) }, '🌙 Bu gece toplantı çağır') : '', h('button', { class: 'danger', onclick: () => void send({ t: 'orgLeave' }) }, 'Ayrıl'))));
+  } else if (!ruler) {
+    const kind = select((Object.keys(ORG_LABEL) as OrgKind[]).map((k): [string, string] => [k, ORG_LABEL[k]])); const nm = h('input', { placeholder: 'Örgütün adı' });
+    box.append(h('h3', {}, 'Kur'), h('div', { class: 'row' }, kind, nm, h('button', { class: 'primary', onclick: () => void send({ t: 'orgFound', kind: kind.value as OrgKind, name: nm.value }) }, 'Kur')));
+    const heard = (w.orgs ?? []).filter((o) => o.members.some((id) => (findPerson(w, id)?.relations[m.id] ?? 0) > 10) || o.known);
+    box.append(h('h3', {}, 'Fısıltıyla duyduklarınız'), ...(heard.length ? heard.map((o) => h('div', { class: 'card row' }, h('span', { class: 'grow' }, `${ORG_LABEL[o.kind]} – “${o.name}” (${o.members.length} üye)`), h('button', { onclick: () => void send({ t: 'orgJoin', orgId: o.id }) }, 'Katıl'))) : [h('div', { class: 'muted' }, 'Kimse size bir şey fısıldamadı. Dost edinin.')]));
+  }
+  if (ruler) {
+    const known = (w.orgs ?? []).filter((o) => o.known);
+    box.append(h('h3', {}, '🕵 Saray’ın bildikleri'), ...(known.length ? known.map((o) => h('div', { class: 'card' }, h('b', {}, `${ORG_LABEL[o.kind]} – “${o.name}”`), h('div', { class: 'muted' }, `Bilinen üyeler: ${o.knownMembers.map((id) => findPerson(w, id)?.name).filter(Boolean).join(', ') || '—'}`), h('button', { class: 'danger', onclick: () => void doAct({ t: 'raidOrg', orgId: o.id }) }, '⚔ Askerlerle baskın (emir)'))) : [h('div', { class: 'muted' }, 'Bilinen gizli örgüt yok. Casus atayın, muhbir ödülü koyun.')]));
+  }
+  return box;
+}
+function noblesBody(): HTMLElement {
+  const w = world!; const box = h('div', {}, h('h2', {}, '⚜ Soylular, casuslar ve adalet'));
+  const nobles = w.people.filter((p) => p.rank);
+  box.append(h('div', { class: 'muted' }, RANKS_N.map((r) => `${r}: ${RANK_INFO[r].stipend} D/gün – ${RANK_INFO[r].duty}`).join(' · ')));
+  box.append(h('h3', {}, 'Unvanlılar'), ...(nobles.length ? nobles.map((p) => h('div', { class: 'card row' }, h('span', { class: 'grow' }, `${p.rank} ${p.name}${p.fief ? ` · tımar: ${w.buildings.find((b) => b.id === p.fief)?.name}` : ''} · gözde `, bar(p.favor ?? 50, '#e8c14a'), ` · sadakat ${Math.round(p.loyalty)}`), h('button', { class: 'danger', onclick: () => void doAct({ t: 'stripTitle', personId: p.id }) }, 'Unvanı al'))) : [h('div', { class: 'muted' }, 'Henüz unvan verilmedi.')]));
+  const cand = w.people.filter((p) => p.prof !== 'naip' && p.id !== w.kayzerId).sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+  const who = select(cand.map((p): [string, string] => [p.id, `${p.name} (${PROF_LABEL[p.prof]})`])); const rk = select(RANKS_N.map((r): [string, string] => [r, r])); const ff = select([['', 'Tımar (Bey için)'], ...FIEFS.map((f): [string, string] => [f, w.buildings.find((b) => b.id === f)?.name ?? f])]);
+  box.append(h('h3', {}, 'Unvan ver'), h('div', { class: 'row' }, who, rk, ff, h('button', { class: 'primary', onclick: () => void doAct({ t: 'grantTitle', personId: who.value, rank: rk.value as Rank, fief: ff.value || null }) }, 'Ver')));
+  const spy = select(cand.filter((p) => !p.playerId || p.npc).map((p): [string, string] => [p.id, p.name])); const tgt = select(cand.map((p): [string, string] => [p.id, p.name]));
+  box.append(h('h3', {}, '🕵 Casus ata (5 gün, 15 D)'), h('div', { class: 'row' }, spy, '→', tgt, h('button', { onclick: () => void doAct({ t: 'assignSpy', spyId: spy.value, targetId: tgt.value }) }, 'İzlet')),
+    h('div', { class: 'muted' }, `Aktif casuslar: ${(w.spies ?? []).map((s) => `${findPerson(w, s.spyId)?.name} → ${findPerson(w, s.targetId)?.name}`).join(', ') || '—'}`));
+  const wt = select(cand.map((p): [string, string] => [p.id, p.name]));
+  box.append(h('h3', {}, '📜 Arama emri'), h('div', { class: 'row' }, wt, h('button', { onclick: () => void doAct({ t: 'warrant', personId: wt.value }) }, 'Emir çıkar'), h('button', { onclick: () => void doAct({ t: 'searchHouse', personId: wt.value }) }, '🔎 Evi ara (bekçilerle)')),
+    h('div', { class: 'muted' }, `Bekleyen emirler: ${(w.warrants ?? []).map((id) => findPerson(w, id)?.name).join(', ') || '—'}`));
+  const pay = h('input', { type: 'number', value: String(w.informantPay ?? 0), style: 'width:80px' });
+  box.append(h('h3', {}, '🗝 Muhbir ödülü'), h('div', { class: 'row' }, pay, h('button', { onclick: () => void doAct({ t: 'informantPay', amount: Number(pay.value) }) }, 'İlan et')));
+  return box;
+}
+function farmBody(): HTMLElement {
+  const w = world!; const m = me(); const box = h('div', {}, h('h3', {}, '🐄 Hayvanlar ve çiftlik')); if (!m) return box;
+  const hd = m.animals ?? { inek: 0, koyun: 0, tavuk: 0, at: 0 }; const seller = w.people.find((p) => p.prof === 'hayvanci');
+  box.append(h('div', { class: 'muted' }, `${seller ? `Hayvan tüccarı: ${seller.name}. ` : ''}İnek → günde 3 süt (susuzluğu da giderir), koyun → yün, tavuk → yumurta, at → %50 daha hızlı yürüyüş. Yem: buğday. Kesilince et verir.`));
+  if (!m.farm) box.append(h('button', { class: 'primary', onclick: () => void doAct({ t: 'buyFarm' }) }, `🏡 Arsa al, çiftlik kur (${FARM_PRICE} D)`));
+  else box.append(h('div', {}, '🏡 Çiftliğiniz var.'));
+  box.append(h('div', {}, `Sürünüz: ${ANIMALS.map((a) => `${ANIMAL_LABEL[a]} ${hd[a]}`).join(' · ')} · günlük yem ${Math.ceil(ANIMALS.reduce((s, a) => s + hd[a] * ANIMAL_FEED[a], 0))} buğday`));
+  box.append(h('div', { class: 'row' }, ...ANIMALS.map((a) => h('button', { onclick: () => void doAct({ t: 'buyAnimal', animal: a }) }, `${ANIMAL_LABEL[a]} al (${ANIMAL_PRICE[a]} D)`))));
+  box.append(h('div', { class: 'row' }, ...ANIMALS.filter((a) => a !== 'at' && hd[a] > 0).map((a) => h('button', { class: 'danger', onclick: () => void send({ t: 'slaughter', animal: a }) }, `🔪 ${ANIMAL_LABEL[a]} kes`))));
+  return box;
+}
+function goalsBody(): HTMLElement {
+  const w = world!; const m = me(); const box = h('div', {}, h('h2', {}, '🎯 Hedefler ve görevler')); if (!m) return box;
+  const ruler = w.kayzerId === m.id;
+  if (!ruler) {
+    if (m.goal) { const g = GOALS[m.goal]; const pr = Math.round(g.progress(w, m) * 100); box.append(h('div', { class: 'card' }, h('b', {}, g.label), h('div', { class: 'muted' }, g.desc), bar(pr, '#e8c14a'), h('small', {}, ` %${pr}`), h('div', { class: 'muted' }, `Ödül: “${g.title}” unvanı${g.reward ? ` + ${g.reward} Dinar` : ' + isyanda önderlik'}`))); }
+    box.append(h('h3', {}, m.goal ? 'Hedefi değiştir' : 'Kişisel hedef seç'), h('div', { class: 'row' }, ...(Object.keys(GOALS) as GoalId[]).filter((g) => !(m.goalsDone ?? []).includes(g)).map((g) => h('button', { class: m.goal === g ? 'primary' : '', onclick: () => void send({ t: 'setGoal', goal: g }) }, GOALS[g].label))));
+    if (m.goalsDone?.length) box.append(h('div', { class: 'muted' }, `Tamamlanan: ${m.goalsDone.map((g) => GOALS[g].title).join(', ')}`));
+  }
+  const ms = (w.missions ?? []).filter((x) => x.status === 'acik' || x.status === 'bildirildi');
+  box.append(h('h3', {}, '👑 Kayzer’in görevleri'));
+  if (!ms.length) box.append(h('div', { class: 'muted' }, 'Şu an açık görev yok.'));
+  for (const x of ms) box.append(h('div', { class: 'card row' }, h('span', { class: 'grow' }, `“${x.text}” · ${x.reward} Dinar${x.to ? ` · ${findPerson(w, x.to)?.name ?? '?'} için` : ' · herkese açık'}${x.status === 'bildirildi' ? ` · ${findPerson(w, x.claimedBy)?.name ?? ''} bildirdi` : ''}`),
+    ruler && x.status === 'bildirildi' ? h('span', {}, h('button', { class: 'primary', onclick: () => void send({ t: 'missionPay', id: x.id, pay: true }) }, '💰 Öde'), h('button', { onclick: () => void send({ t: 'missionPay', id: x.id, pay: false }) }, 'Reddet')) : '',
+    !ruler && x.status === 'acik' && (!x.to || x.to === m.id) ? h('button', { onclick: () => void send({ t: 'missionClaim', id: x.id }) }, '✅ Tamamladım') : ''));
+  if (ruler) {
+    const t = h('input', { placeholder: 'Görev (ör. Limana 20 odun getir)' }); const r = h('input', { type: 'number', value: '50', style: 'width:80px' });
+    const to = select([['', 'Herkese açık'], ...w.people.filter((p) => p.playerId && p.id !== m.id).map((p): [string, string] => [p.id, p.name])]);
+    box.append(h('h3', {}, 'Yeni görev ver'), h('div', { class: 'row' }, t, r, to, h('button', { class: 'primary', onclick: () => void send({ t: 'missionCreate', text: t.value, reward: Number(r.value), to: to.value || null }) }, 'İlan et')));
+  }
+  return box;
 }
 
 function gazetteBody(): HTMLElement {
@@ -286,6 +390,12 @@ function openAdmin(): void {
       h('div', { class: 'row' }, h('button', { onclick: () => void run({ t: 'releaseAll' }) }, 'Zindanı boşalt'), h('button', { onclick: () => void run({ t: 'resetCumhuriyet' }) }, 'Cumhuriyet isteğini sıfırla')));
     const snapBox = h('div', {}, h('div', { class: 'muted' }, 'yükleniyor…'));
     void be.snapshots().then((ss) => { snapBox.replaceChildren(...(ss.length ? ss.map((s) => h('div', { class: 'row card' }, `Gün ${s.day} · ${new Date(s.at).toLocaleString('tr-TR')}`, h('button', { class: 'danger', onclick: () => { if (confirm('Dünya bu yedeğe dönecek. Emin misiniz?')) void run({ t: 'restoreSnapshot', id: s.id }); } }, 'Geri yükle'))) : [h('div', { class: 'muted' }, 'Henüz yedek yok.')])); });
+    box.append(h('h3', {}, '⚠️ Oyunu sıfırla'), h('div', { class: 'muted' }, 'Tüm dünya baştan kurulur; oyuncu hesapları kalır, karakterler yeniden doğar. Önce otomatik yedek alınır.'),
+      h('button', { class: 'danger', onclick: () => {
+        if (!confirm('Oyunu sıfırlamak istediğinize emin misiniz? Bütün şehir, para, aileler ve olaylar silinecek.')) return;
+        const t = prompt('Son onay: sıfırlamak için büyük harflerle SIFIRLA yazın'); if (t !== 'SIFIRLA') { toast('İptal edildi.'); return; }
+        void run({ t: 'resetWorld', confirm: t });
+      } }, '🔄 Oyunu sıfırla'));
     box.append(h('h3', {}, 'Yedekler (3 günde bir otomatik, son 8)'), h('button', { onclick: () => void run({ t: 'snapshot' }) }, 'Şimdi yedek al'), snapBox);
     return box;
   });
@@ -295,23 +405,26 @@ function openAdmin(): void {
 const pointers = new Map<number, { x: number; y: number }>();
 let dragStart: { x: number; y: number; cx: number; cy: number; moved: boolean } | null = null;
 let pinch: { d: number; z: number } | null = null;
+/** Limited view: never more than ~30 tiles across (≈16 on a phone). */
+function minZoom(): number { const tiles = innerWidth < 700 ? 16 : 30; return Math.max(1, canvas.width / (T * tiles)); }
 function clampCam(): void {
+  if (cam.z < minZoom()) cam.z = minZoom();
   const vw = canvas.width / (cam.z * T), vh = canvas.height / (cam.z * T);
-  const top = ((hudEl?.offsetHeight ?? 48) * (window.devicePixelRatio || 1)) / (cam.z * T) + 2.2; // room above the top row so the info bar never hides buildings
+  const top = ((hudEl?.offsetHeight ?? 48) * (lowGfx ? 1 : window.devicePixelRatio || 1)) / (cam.z * T) + 2.2; // room above the top row so the info bar never hides buildings
   cam.x = Math.max(-2, Math.min(MAP_W - vw + 2, cam.x)); cam.y = Math.max(-top, Math.min(MAP_H - vh + 2, cam.y));
 }
 function zoomAt(sx: number, sy: number, nz: number): void {
-  const z0 = cam.z; nz = Math.max(1, Math.min(5, nz));
+  const z0 = cam.z; nz = Math.max(minZoom(), Math.min(6, nz));
   const wx = cam.x + sx / (z0 * T), wy = cam.y + sy / (z0 * T);
   cam.z = nz; cam.x = wx - sx / (nz * T); cam.y = wy - sy / (nz * T); clampCam();
 }
 function setupInput(): void {
-  const dpr = (): number => window.devicePixelRatio || 1;
+  const dpr = (): number => (lowGfx ? 1 : window.devicePixelRatio || 1);
   canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pointers.size === 1) dragStart = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y, moved: false }; else { const [a, b] = [...pointers.values()]; pinch = { d: Math.hypot(a!.x - b!.x, a!.y - b!.y), z: cam.z }; } });
   canvas.addEventListener('pointermove', (e) => {
     if (!pointers.has(e.pointerId)) return; pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinch && pointers.size >= 2) { const [a, b] = [...pointers.values()]; const d = Math.hypot(a!.x - b!.x, a!.y - b!.y); zoomAt((a!.x + b!.x) / 2 * dpr(), (a!.y + b!.y) / 2 * dpr(), pinch.z * d / pinch.d); if (dragStart) dragStart.moved = true; return; }
-    if (dragStart) { const dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y; if (Math.abs(dx) + Math.abs(dy) > 6) dragStart.moved = true; cam.x = dragStart.cx - dx * dpr() / (cam.z * T); cam.y = dragStart.cy - dy * dpr() / (cam.z * T); clampCam(); }
+    if (dragStart) { const dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y; if (Math.abs(dx) + Math.abs(dy) > 6) { dragStart.moved = true; followCam = false; } cam.x = dragStart.cx - dx * dpr() / (cam.z * T); cam.y = dragStart.cy - dy * dpr() / (cam.z * T); clampCam(); }
   });
   const up = (e: PointerEvent): void => {
     pointers.delete(e.pointerId);
@@ -322,17 +435,17 @@ function setupInput(): void {
         const tx = (e.clientX - r.left) * dpr() / (cam.z * T) + cam.x, ty = (e.clientY - r.top) * dpr() / (cam.z * T) + cam.y;
         if (hit.corpse) openCorpse(hit.corpse.id);
         else if (hit.sign) openElectionSign();
-        else if (hit.person && hit.person.id !== me()?.id) openPersonSheet(hit.person.id);
+        else if (hit.person && hit.person.id !== me()?.id) { const mq = placed.find((q) => q.p.id === me()?.id); const tq = placed.find((q) => q.p.id === hit.person!.id); if (!mq || !tq || Math.hypot(tq.x - mq.x, tq.y - mq.y) <= PERSON_REACH + 0.4) openPersonSheet(hit.person.id); else { closeSheet(); pending = null; openTries = 0; pendingOpen = hit.person.id; walkTo({ x: tq.x + 0.7, y: tq.y }); toast(`🚶 ${hit.person.name} yanına yürüyorsunuz…`); } }
         else if (hit.person) openMenu('ben');
-        else if (hit.building) { const b = hit.building; selected = null; pending = null; walkTo(doorSpot(b)); sfx('door'); openSheet(() => buildingPanel(ctx(), b)); }
-        else { pending = null; closeSheet(); walkTo({ x: tx, y: ty }); sfx('step'); }
+        else if (hit.building) { const b = hit.building; selected = null; pending = null; walkTo(doorSpot(b)); sfx('door'); openSheet(() => bPanel(b)); }
+        else { pending = null; pendingOpen = null; closeSheet(); walkTo({ x: tx, y: ty }); sfx('step'); }
       }
       dragStart = null;
     }
   };
   canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); const r = canvas.getBoundingClientRect(); zoomAt((e.clientX - r.left) * dpr(), (e.clientY - r.top) * dpr(), cam.z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)); }, { passive: false });
-  const resize = (): void => { canvas.width = Math.round(innerWidth * dpr()); canvas.height = Math.round(innerHeight * dpr()); clampCam(); };
+  const resize = (): void => { canvas.width = Math.round(innerWidth * dpr()); canvas.height = Math.round(innerHeight * dpr()); const want = canvas.width / (T * (innerWidth < 700 ? 12 : 22)); if (cam.z < want) cam.z = want; clampCam(); };
   addEventListener('resize', resize); resize();
 }
 
@@ -340,12 +453,17 @@ function darkness(w: World): number {
   const t = w.hour; if (t >= 21 || t < 5) return 0.45; if (t >= 19) return (t - 19) / 2 * 0.45; if (t < 7) return (7 - t) / 2 * 0.45; return 0;
 }
 
-let lastHud = 0;
+let lastHud = 0; let lastDraw = 0; let lastFrame = performance.now();
 function frame(): void {
+  const pf = performance.now(); if (lowGfx && pf - lastDraw < 32) { requestAnimationFrame(frame); return; } lastDraw = pf;
   if (world && stat) {
     const now = gameNow();
     placed = placePeople(world, now);
-    drawFrame(ctx2d, stat, world, cam, placed, now, selected, me()?.id ?? null, darkness(world), walkTarget);
+    const meP = me(); const mq = meP ? placed.find((q) => q.p.id === meP.id) : undefined;
+    const dt = Math.min(0.1, (performance.now() - lastFrame) / 1000); lastFrame = performance.now();
+    if (mq && followCam && !dragStart) { const vw = canvas.width / (cam.z * T), vh = canvas.height / (cam.z * T); const tx = mq.x - vw / 2, ty = mq.y - vh / 2 - 0.5; const k = Math.min(1, dt * 6); cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; clampCam(); }
+    if (pendingOpen && mq) { const tq = placed.find((q) => q.p.id === pendingOpen); if (!tq) pendingOpen = null; else if (Math.hypot(tq.x - mq.x, tq.y - mq.y) <= PERSON_REACH + 0.4 || (openTries >= 2 && meP?.walk && now > walkEnd(meP.walk) && Math.hypot(tq.x - mq.x, tq.y - mq.y) <= PERSON_REACH + 0.85)) { const id = pendingOpen; pendingOpen = null; walkTarget = null; openPersonSheet(id); } else if (meP?.walk && now > walkEnd(meP.walk) - 200) { openTries += 1; walkTo({ x: tq.x + (openTries % 2 ? 0.7 : -0.7), y: tq.y + (openTries > 2 ? 0.6 : 0) }); if (openTries > 8) pendingOpen = null; } }
+    drawFrame(ctx2d, stat, world, cam, placed, now, selected, me()?.id ?? null, lowGfx ? 0 : darkness(world), walkTarget);
     pendingStep();
     if (walkTarget) { const m = me(); if (m?.walk && now > walkEnd(m.walk) + 300 && !pending) walkTarget = null; }
     if (now - lastHud > 1000) { lastHud = now; renderHud(); soundscape(); }
@@ -359,7 +477,8 @@ async function tick(): Promise<void> {
   try {
     const r = await be.heartbeat();
     const first = !world; world = r.world;
-    if (world.serverNow) skew = world.serverNow - Date.now();
+    if (world.serverNow) { const ns = world.serverNow - Date.now(); skew = first || Math.abs(ns - skew) > 3000 ? ns : skew + (ns - skew) * 0.15; } // smooth clock: no jumps
+    const mm = me(); if (localWalk && mm && mm.id === localWalk.id && gameNow() < walkEnd(localWalk.walk) + 15_000) mm.walk = localWalk.walk;
     if (first) { stat = buildStatic(world); const m = me(); const b = m ? world.buildings.find((x) => x.id === m.home) : undefined; if (b) { cam.x = b.x - canvas.width / (cam.z * T) / 2; cam.y = b.y - canvas.height / (cam.z * T) / 2; clampCam(); } }
     if (r.summary) modal(maecenas(r.summary));
     renderDock(); events(first); trialPopup();
@@ -375,6 +494,29 @@ async function start(): Promise<void> {
   setInterval(() => { void be.messages().then((m) => { msgs = m; renderDock(); }); }, 5000);
   setInterval(() => rerenderSheet(), 4000);
   requestAnimationFrame(frame);
+}
+
+// ---------------- the Kayzer's citizen register (only at the Saray) ----------------
+let citSort: string = 'name'; let citDir = 1; let citFilter = ''; let citProf = '';
+function openCitizens(): void {
+  openSheet(() => {
+    const w = world!; const box = h('div', {}, h('h2', {}, '📋 Vatandaş defteri'));
+    if (!atSaray()) { box.append(h('div', { class: 'muted' }, 'Defter Saray’da durur. Saray’a yürüyün.')); return box; }
+    const now = gameNow(); const pos = new Map(placed.map((q) => [q.p.id, q]));
+    const where = (p: Person): string => { if (p.jailedDays > 0) return 'Zindan/gözaltı'; const q = pos.get(p.id); if (!q || !q.visible) return 'Evinde'; const b = w.buildings.map((x) => ({ x, d: distToBuilding(x, q) })).sort((a, c) => a.d - c.d)[0]; return b && b.d < 4 ? b.x.name : 'Sokakta'; };
+    const cols: [string, string, (p: Person) => number | string][] = [['name', 'İsim', (p) => p.name], ['prof', 'Meslek', (p) => PROF_LABEL[p.prof]], ['health', '❤️', (p) => p.health], ['mood', '😊', (p) => p.mood], ['loyalty', '🤝', (p) => p.loyalty], ['din', '🕌', (p) => p.din], ['republic', '🗽', (p) => p.republic], ['money', '👛', (p) => p.money], ['where', '📍', where]];
+    const q = h('input', { placeholder: 'İsim ara…', value: citFilter }); q.addEventListener('input', () => { citFilter = q.value; rerenderSheet(true); setTimeout(() => { const i = sheet?.querySelector('input'); if (i) { (i as HTMLInputElement).focus(); (i as HTMLInputElement).setSelectionRange(citFilter.length, citFilter.length); } }, 0); });
+    const pf = select([['', 'Tüm meslekler'], ...[...new Set(w.people.map((p) => p.prof))].map((p): [string, string] => [p, PROF_LABEL[p]])]); pf.value = citProf; pf.addEventListener('change', () => { citProf = pf.value; rerenderSheet(true); });
+    let list = w.people.filter((p) => p.prof !== 'naip' && (!citFilter || p.name.toLocaleLowerCase('tr').includes(citFilter.toLocaleLowerCase('tr'))) && (!citProf || p.prof === citProf));
+    const col = cols.find((c) => c[0] === citSort)!; list = list.sort((a, b) => { const x = col[2](a), y = col[2](b); return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'tr')) * citDir; });
+    const avg = (f: (p: Person) => number): number => Math.round(list.reduce((s, p) => s + f(p), 0) / Math.max(1, list.length));
+    box.append(h('div', { class: 'row' }, q, pf), h('div', { class: 'muted' }, `${list.length} kişi · ort. sağlık ${avg((p) => p.health)} · mutluluk ${avg((p) => p.mood)} · sadakat ${avg((p) => p.loyalty)} · cumhuriyetçilik ${avg((p) => p.republic)}`));
+    const t = h('table', { class: 'citizens' }, h('tr', {}, ...cols.map(([k, l]) => h('th', { style: 'cursor:pointer', onclick: () => { if (citSort === k) citDir = -citDir; else { citSort = k; citDir = k === 'name' || k === 'prof' || k === 'where' ? 1 : -1; } rerenderSheet(true); } }, `${l}${citSort === k ? (citDir > 0 ? ' ▲' : ' ▼') : ''}`))));
+    for (const p of list) t.append(h('tr', { style: 'cursor:pointer', onclick: () => openPersonSheet(p.id) }, h('td', {}, `${p.name}${p.playerId && !p.npc ? ' 🎮' : ''}`), h('td', {}, PROF_LABEL[p.prof]),
+      ...(['health', 'mood', 'loyalty', 'din', 'republic'] as const).map((k) => h('td', {}, bar(p[k], k === 'health' ? '#c8483a' : k === 'republic' ? '#4a7fd4' : k === 'loyalty' ? '#e8c14a' : k === 'din' ? '#8a6fd1' : '#5fae5a'), h('small', {}, ` ${Math.round(p[k])}`))),
+      h('td', {}, fmt(p.money)), h('td', {}, where(p))));
+    void now; box.append(h('div', { style: 'overflow:auto;max-height:60vh' }, t)); return box;
+  });
 }
 
 // ---------------- corpses, election notices, trials, sounds ----------------
@@ -445,4 +587,19 @@ void ({} as Corpse);
 
 void be.restore().then((s) => (s ? start() : loginScreen()));
 // expose for headless smoke tests
-(window as unknown as { __imp: () => unknown }).__imp = () => ({ world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (window.devicePixelRatio || 1), r.top + (y - cam.y) * cam.z * T / (window.devicePixelRatio || 1)]; } });
+(window as unknown as { __imp: () => unknown }).__imp = () => ({ mute: setMuted, world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (lowGfx ? 1 : window.devicePixelRatio || 1), r.top + (y - cam.y) * cam.z * T / (lowGfx ? 1 : window.devicePixelRatio || 1)]; } });
+
+// ---- v1.8 PWA: service worker (static only) + "Ana ekrana ekle" hint ----
+if ('serviceWorker' in navigator && location.protocol === 'https:') void navigator.serviceWorker.register('./sw.js').catch(() => {});
+let installEvt: (Event & { prompt?: () => void }) | null = null;
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; showInstallHint(); });
+function showInstallHint(): void {
+  const standalone = matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches || (navigator as { standalone?: boolean }).standalone;
+  if (standalone || localStorage.getItem('imp-a2hs') === '1' || document.querySelector('.a2hs')) return;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent); if (!ios && !installEvt) return;
+  const close = (): void => { localStorage.setItem('imp-a2hs', '1'); el.remove(); };
+  const el = h('div', { class: 'a2hs' }, ios ? '📲 Tam ekran oynamak için: Safari’de Paylaş ⬆️ → “Ana Ekrana Ekle”.' : '📲 Oyunu ana ekrana ekleyip tam ekran oynayabilirsiniz.',
+    !ios && installEvt ? h('button', { class: 'primary', onclick: () => { installEvt?.prompt?.(); close(); } }, 'Ana ekrana ekle') : '', h('button', { onclick: close }, '✕'));
+  document.body.append(el);
+}
+setTimeout(showInstallHint, 8000);

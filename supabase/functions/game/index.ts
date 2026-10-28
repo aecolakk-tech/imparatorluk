@@ -18,6 +18,11 @@ const PROVIDER = (Deno.env.get('NPC_LLM_PROVIDER') ?? 'gemini').toLowerCase(); /
 const MODEL = Deno.env.get('NPC_LLM_MODEL') ?? (PROVIDER === 'gemini' ? 'gemini-3.5-flash-lite' : 'llama-3.1-8b-instant');
 const BASE = Deno.env.get('NPC_LLM_BASE_URL') ?? 'https://api.groq.com/openai/v1';
 const PER_MIN = Number(Deno.env.get('NPC_LLM_PER_MIN') ?? 12); const PER_DAY = Number(Deno.env.get('NPC_LLM_PER_DAY') ?? 900);
+// v1.7 budget: the model is for human players (DMs, Meydan replies) and trials; NPC↔NPC talk stays rule-based,
+// with one small batch every 20 min at most (≤15% of the day's budget). Similar questions reuse a cached answer.
+const TALK_EVERY_MS = Number(Deno.env.get('NPC_LLM_TALK_EVERY_MS') ?? 20 * 60_000);
+const replyCache = new Map<string, { t: number; v: string }>();
+const normQ = (s: string): string => s.toLocaleLowerCase('tr').replace(/[^a-zçğıöşü0-9 ]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
 const minuteCalls: number[] = []; const cache = new Map<string, { t: number; v: string }>(); let backoffUntil = 0;
 const today = (): string => new Date().toISOString().slice(0, 10);
 async function llm(p: { system: string; user: string }, json = false, maxTokens = 160): Promise<string | null> {
@@ -118,7 +123,7 @@ Deno.serve(async (req) => {
         let due = false; let batch: { idx: number[]; prompt: { system: string; user: string } } | null = null;
         const out = await mutate((w) => {
           const r = core.heartbeat(w, uid, now); due = r.snapshotDue; batch = null;
-          if (LLM_KEY && now - (w.llm?.talkAt ?? 0) > 75_000 && core.llmBudget(w, today(), PER_DAY)) { const b = core.talkBatch(w, now); if (b) { batch = b; w.llm!.talkAt = now; core.llmSpend(w, today()); } }
+          if (LLM_KEY && now - (w.llm?.talkAt ?? 0) > TALK_EVERY_MS && core.llmBudget(w, today(), Math.floor(PER_DAY * 0.15))) { const b = core.talkBatch(w, now); if (b) { batch = b; w.llm!.talkAt = now; core.llmSpend(w, today()); } }
           return { world: w, summary: r.summary };
         });
         if (due) await db.rpc('snapshot_world', { force: false });
@@ -152,7 +157,18 @@ Deno.serve(async (req) => {
         await db.from('messages').insert({ from_user: uid, from_person: m.fromPersonId, from_name: m.fromName, to_person: m.toPersonId, text: m.text });
         const out: string[] = [];
         for (const [i, rp] of (m.replies ?? []).entries()) {
-          const ai = allowed ? await llm(rp.prompt) : null;
+          let ai: string | null = null;
+          if (allowed && rp.prompt.json) {
+            const j = parseJson(await llm(rp.prompt, true, 400));
+            if (j?.action && typeof j.action === 'object') {
+              const res = await mutate((state) => core.llmOrder(state, uid, rp.npcId, j.action, m.text, Date.now()));
+              ai = res ? (res.ok ? j.reply_yes : j.reply_no) || res.reply : (j.reply || null);
+            } else ai = typeof j?.reply === 'string' ? j.reply : null;
+            if (ai) ai = String(ai).replace(/\s+/g, ' ').slice(0, 280);
+          } else if (allowed) {
+            const ck = `${rp.npcId}|${normQ(m.text)}|${rp.prompt.user.includes('KABUL') ? 'y' : rp.prompt.user.includes('REDDET') ? 'n' : ''}`; const hit = replyCache.get(ck);
+            if (hit && Date.now() - hit.t < 30 * 60_000) ai = hit.v; else { ai = await llm(rp.prompt); if (ai) { replyCache.set(ck, { t: Date.now(), v: ai }); if (replyCache.size > 500) replyCache.delete(replyCache.keys().next().value!); } }
+          }
           const text = (rp.to ? '' : `@${m.fromName.split(' ').slice(-1)[0]} `) + (ai ?? rp.fallback.replace(/^@\S+ /, ''));
           out.push(text);
           await db.from('messages').insert({ from_user: null, from_person: rp.npcId, from_name: rp.npcName, to_person: rp.to, text: text.slice(0, 280), created_at: new Date(Date.now() + 500 * (i + 1)).toISOString() });
@@ -169,6 +185,13 @@ Deno.serve(async (req) => {
         const r = body.req;
         if (r.t === 'setPassword') { if (String(r.password).length < 4) return json({ msg: 'En az 4 karakter.' }); await db.rpc('set_access_password', { pw: String(r.password) }); return json({ msg: 'Giriş şifresi değişti.' }); }
         if (r.t === 'snapshot') { await db.rpc('snapshot_world', { force: true }); return json({ msg: 'Yedek alındı.' }); }
+        if (r.t === 'resetWorld') {
+          if (r.confirm !== 'SIFIRLA') return json({ msg: 'Onay metni yanlış.' });
+          const ok = await db.rpc('snapshot_world', { force: true }); if (ok.error) return json({ msg: 'Yedek alınamadı; sıfırlama iptal.' });
+          const ids = await mutate((w) => core.resetWorld(w, now));
+          for (const [user_id, person_id] of Object.entries(ids)) await db.from('players').update({ person_id }).eq('user_id', user_id);
+          return json({ msg: 'Dünya sıfırlandı (önce yedek alındı).' });
+        }
         if (r.t === 'restoreSnapshot') {
           const { data: s } = await db.from('world_snapshots').select('state, day').eq('id', Number(r.id)).maybeSingle();
           if (!s) return json({ msg: 'Yedek yok.' });

@@ -1,4 +1,5 @@
 import { migrate4 } from './v16';
+import { migrate5 } from './realm';
 /**
  * Sarraf (moneylender) loans with interest and haciz; world migration for saved worlds; law previews.
  */
@@ -125,9 +126,9 @@ export function migrateWorld(w: World): World {
 
 /** Schema 3: custom laws, hoarding suspicion, treasury book, price history, bigger granary. */
 function migrate3(w: World): World {
-  if ((w.schema ?? 1) >= 3) return migrate4(w);
+  if ((w.schema ?? 1) >= 3) return migrate5(migrate4(w));
   const any = w as unknown as Record<string, unknown>;
   for (const [k, v] of Object.entries({ customLaws: [], suspicion: {}, treasuryBook: [], priceHist: {}, serving: [] })) if (any[k] === undefined) any[k] = v;
   if (w.granary < 800) w.granary = 800;
-  w.schema = 3; return migrate4(w);
+  w.schema = 3; return migrate5(migrate4(w));
 }

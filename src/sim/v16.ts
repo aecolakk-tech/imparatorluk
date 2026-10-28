@@ -9,16 +9,18 @@ import { findPerson } from './world';
 import { log, personal } from './log';
 import { chance, clamp, nextId, pick, rand } from './rng';
 import { placeOf, placePeople, ESCORT_MS } from './place';
-import { arrest } from './life';
+import { arrest, decideBribe, bribeAcceptChance } from './life';
 import { verdict } from './tick';
 import { CRIME_LABEL, fullAI } from './ai';
 import { addressOf, opinion } from './chat';
 import { marketPrice } from './economy';
 import { findPath, WALK_SPEED, walkPos, type Pt } from './move';
 import { playerWalking } from './place';
+import { runTasks } from './orders';
 
 export const CORPSE_MS = 5 * 60_000; // a body lies on the street for 5 real minutes
 export const TRIAL_MS = 150_000;
+export const CUSTODY_MS = 60_000; // a caught player waits 1 real minute in custody (bribe window) before the savcı acts
 
 /** A murder: the victim falls where he stood; who was close enough saw it. */
 export function makeCorpse(w: World, v: Person, killer: Person | null, now: number): Corpse {
@@ -54,6 +56,21 @@ function investigate(w: World, co: Corpse, now: number): void {
 
 /** Called on every heartbeat/action with the real time. Idempotent. */
 export function realtime(w: World, now: number): void {
+  runTasks(w, now);
+  // v1.7: a caught PLAYER goes arrest → custody (1 min bribe window) → savcı → live hearing; never straight to the zindan
+  for (const a of w.arrests) {
+    if (a.status !== 'bekliyor') continue; const cr = findPerson(w, a.criminalId); if (!cr?.playerId || cr.npc) continue;
+    if (now - (a.at ?? now) < CUSTODY_MS) continue;
+    const ca = findPerson(w, a.catcherId);
+    decideBribe(w, a, !!ca && a.offer > 0 && fullAI(ca) && rand(w) < bribeAcceptChance(ca, a.offer));
+  }
+  for (const c of w.cases) {
+    if (c.stage === 'kapandi' || c.trial) continue; const acc = findPerson(w, c.accusedId); if (!acc?.playerId || acc.npc) continue;
+    const hakim = w.people.find((p) => p.prof === 'hakim' && p.jailedDays === 0);
+    if (hakim?.playerId && !hakim.npc) continue; // a player judge rules himself
+    if (c.stage === 'savci') { if (c.evidence < 35) { c.stage = 'kapandi'; c.verdict = 'dusuruldu'; acc.jailedDays = 0; log(w, `Delil yetersiz: ${acc.name} serbest bırakıldı.`, acc.id, now); continue; } c.stage = 'hakim'; }
+    if (c.stage === 'hakim') startTrial(w, c, now);
+  }
   for (const co of w.corpses ?? []) {
     if (co.stage === 'yerde') {
       const delay = 20_000 + (parseInt(co.id.replace(/\D/g, ''), 10) % 5) * 6000;
@@ -136,7 +153,7 @@ export function finishTrial(w: World, c: CourtCase, now: number): void {
 // ---------------- movement ----------------
 export function startWalk(w: World, me: Person, to: Pt, now: number): void {
   const q = placeOf(w, me.id, now); const from = q ? { x: q.x, y: q.y } : to;
-  me.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED };
+  me.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * ((me.animals?.at ?? 0) > 0 ? 1.5 : 1) }; // 🐎 riders are faster
 }
 export function myPos(w: World, me: Person, now: number): Pt { if (playerWalking(w, me, now)) return walkPos(me.walk!, now).pt; const q = placeOf(w, me.id, now); return q ? { x: q.x, y: q.y } : { x: 0, y: 0 }; }
 
@@ -161,12 +178,12 @@ export function worldBrief(w: World): string {
   const ev = w.events.slice(-5).map((e) => e.text).join(' | ');
   return `Şehirde gün ${w.day}, saat ${w.hour}:00. Rejim: ${w.regime}. Vergi %${w.taxRate}. Ekmek ${marketPrice(w, 'ekmek').toFixed(2)}, su ${marketPrice(w, 'su').toFixed(2)}, et ${marketPrice(w, 'et').toFixed(2)} Dinar. ${w.nature ? `Doğal olay: ${w.nature.kind}.` : ''} Son olaylar: ${ev || 'sakin'}.`;
 }
-export function dmPrompt(w: World, npc: Person, from: Person, text: string, history: { from: string; text: string }[]): { system: string; user: string } {
+export function dmPrompt(w: World, npc: Person, from: Person, text: string, history: { from: string; text: string }[], outcome?: string): { system: string; user: string; json?: boolean } {
   const rel = npc.relations[from.id] ?? 0;
   const role = from.id === w.kayzerId ? (w.regime === 'cumhuriyet' ? 'şehrin Başkanı' : 'İmparator (Kayzer) – ona saygıyla "İmparatorum" diye hitap et') : `${PROF_LABEL[from.prof]} ${from.soylu ? '(soylu)' : ''}`;
   return {
     system: `${STYLE}\n${personaOf(w, npc)}\n${worldBrief(w)}`,
-    user: `Sana yazan: ${from.name}, ${role}. Ona hitabın: "${addressOf(w, from)}". Onunla ilişkin: ${rel > 30 ? 'dost' : rel < -30 ? 'düşman, soğuk davran' : 'tanıdık'}.\n${history.length ? `Önceki konuşma:\n${history.map((h) => `${h.from}: ${h.text}`).join('\n')}\n` : ''}${from.name}: ${text}\nSadece kendi cevabını yaz.`,
+    user: `Sana yazan: ${from.name}, ${role}. Ona hitabın: "${addressOf(w, from)}". Onunla ilişkin: ${rel > 30 ? 'dost' : rel < -30 ? 'düşman, soğuk davran' : 'tanıdık'}.\n${history.length ? `Önceki konuşma:\n${history.map((h) => `${h.from}: ${h.text}`).join('\n')}\n` : ''}${from.name}: ${text}\n${outcome ? `Bu bir istek/emir. Oyun kuralları karar verdi: ${outcome}. Cevabın bu sonuca KESİNLİKLE uygun olsun (reddettiysen karakterine uygun reddet, kabul ettiysen kabul et). Sadece kendi cevabını yaz.` : `Eğer mesaj senden bir şey yapmanı istiyorsa (bir yere git, takip et, saldır, öldür, tutukla, çal, ver, sat, satın al, çalış, oy ver, dedikodu yay, rüşvet götür, koru, git/ayrıl) bunu action olarak çıkar. Kabul edip etmemene OYUN karar verir; o yüzden iki cevap yaz. SADECE JSON döndür: {"action": null veya {"type": "go|follow|attack|kill|arrest|steal|give|sell|buy|work|vote|gossip|bribe|guard|leave", "target": "kişi adı veya 'ben'", "place": "yer adı", "item": "mal", "amount": 1, "text": "dedikodu metni"}, "reply": "istek yoksa cevabın", "reply_yes": "kabul edersen cevabın", "reply_no": "reddedersen cevabın"}`}`, json: !outcome,
   };
 }
 export function talksPrompt(w: World, pairs: { a: Person; b: Person }[]): { system: string; user: string } {

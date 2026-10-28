@@ -1,3 +1,4 @@
+import { migrate5 } from './realm';
 import type { Building, BuildingKind, Good, Law, Person, Profession, World } from './types';
 import { GOODS } from './types';
 import { BASE_PRICE, DEFAULT_SALARY, MAP_H, MAP_W } from './constants';
@@ -102,7 +103,7 @@ const COUNTS: [Profession, number][] = [
 export const WORKPLACE: Record<Profession, string> = {
   firinci: 'firin', sucu: 'kuyu', kasap: 'kasaphane', balikci: 'liman', terzi: 'atolye', demirci: 'atolye', marangoz: 'atolye',
   tuccar: 'pazar', hekim: 'hekimhane', hoca: 'okul', hamal: 'pazar', insaatci: 'santiye', kalemsor: 'kahve', imam: 'cami',
-  ciftci: 'ciftlik', dokumaci: 'dokuma', mobilyaci: 'mobilyahane', barci: 'bar',
+  ciftci: 'ciftlik', hayvanci: 'ciftlik', dokumaci: 'dokuma', mobilyaci: 'mobilyahane', barci: 'bar',
   memur: 'saray', tahsildar: 'kahve', bekci: 'zindan', savci: 'mahkeme', hakim: 'mahkeme', asker: 'kisla', kayzer: 'saray', naip: 'saray',
 };
 const TITLE: Partial<Record<Profession, string>> = { ciftci: 'Çiftçi', barci: 'Barcı', asker: 'Asker', bekci: 'Bekçi', hoca: 'Öğretmen', hekim: 'Hekim', savci: 'Savcı', hakim: 'Kadı', tuccar: 'Tüccar', hamal: 'Hamal', firinci: 'Fırıncı', kalemsor: 'Kalemşör' };
@@ -203,7 +204,7 @@ export function createWorld(seed = 42, now = Date.now()): World {
   const cem = w.people.find((p) => p.name === 'Tüccar Cemal'); if (cem) cem.faction = 'esnaf';
   meclisElection(w, [], {}, () => true); // the first Meclis sits from day 1
   w.todayEvents = [];
-  return w;
+  return migrate5(w);
 }
 
 export function findPerson(w: World, id: string | null | undefined): Person | undefined {

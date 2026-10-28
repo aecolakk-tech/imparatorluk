@@ -1,3 +1,4 @@
+import { goalsDay } from './goals';
 import type { Person, World } from './types';
 import { startTrial } from './v16';
 import { GOODS } from './types';
@@ -11,7 +12,8 @@ import { expirePetitions, naipPetitions, saraykorBonus } from './state';
 import { meclisDay, meclisElection } from './meclis';
 import { command, isyanHour, settleFate, startIsyan, strength } from './isyan';
 import { actingHead, familyDay } from './family';
-import { endOfDayLife, lifeHour, needsHour, rumor } from './life';
+import { endOfDayLife, lifeHour, rumor, eatMeal, drinkWater } from './life';
+import { needsDrain, seasonDay, animalsDay, hayvanciDay, nobilityDay, intrigueDay, orgsDay } from './realm';
 import { chatHour } from './chat';
 import { loansDay } from './extras';
 
@@ -72,7 +74,7 @@ export function stepHour(w: World, now: number): void {
     isyanHour(w, playerCommands ? null : () => isyanPolicy.fn(w));
     if (w.isyan) transfer(w, 'saray', 'dis', Math.min(w.treasury, 4), 'isyan masrafı (ordu seferberliği)'); // long rebellions drain the treasury
   }
-  needsHour(w); lifeHour(w);
+  needsDrain(w, (p) => eatMeal(w, p), (p) => drinkWater(w, p)); lifeHour(w);
   chatHour(w, now, (p) => isOnline(w, p.playerId, now, ONLINE_WINDOW_MS));
   if (w.hour === 10) campaign(w, now);
   switch (w.hour) {
@@ -262,7 +264,8 @@ function endOfDay(w: World, now: number): void {
   w.cumhuriyet = Math.round(clamp(avg((p) => p.republic)) * 10) / 10;
   revolution(w, avg((p) => (p.prof === 'asker' ? p.loyalty : 0)) * citizens.length / Math.max(1, citizens.filter((p) => p.prof === 'asker').length));
   familyDay(w, fullAI, now);
-  endOfDayLife(w); loansDay(w);
+  endOfDayLife(w); loansDay(w); goalsDay(w);
+  seasonDay(w); hayvanciDay(w); animalsDay(w); nobilityDay(w); intrigueDay(w); orgsDay(w);
   settleFate(w);
   for (const p of w.people) if (p.exiledDays > 0) { p.exiledDays -= 1; if (p.exiledDays === 0) { p.home = 'ev1'; log(w, `${p.name} sürgünden döndü.`, p.id); } }
   election(w);

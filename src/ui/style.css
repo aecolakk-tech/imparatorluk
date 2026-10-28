@@ -75,3 +75,11 @@ table.sign tr.on td { background:#3a2e10; color:var(--gold); font-weight:bold; }
 .simple-actions button { font-size:15px; padding:9px 14px; }
 .where { font-size:12px; color:var(--muted); margin:-2px 0 6px; }
 @media (max-width: 600px) { .hud .bar { width:30px; } .hud .stat.meter small { display:none; } }
+
+.hud .speed { display:inline-flex; gap:2px; align-items:center; margin-right:4px; }
+.hud .speed .on { background:#e8c14a; color:#222; }
+table.citizens { font-size:12px; width:100%; } table.citizens td, table.citizens th { padding:2px 4px; white-space:nowrap; }
+table.citizens .bar { width:40px; display:inline-block; }
+.task-row td { color:#e8c14a; }
+
+.a2hs{position:fixed;left:50%;top:calc(52px + env(safe-area-inset-top));transform:translateX(-50%);z-index:60;background:#2a1d15;color:#f3e6c8;border:1px solid #e8c14a;border-radius:10px;padding:8px 12px;display:flex;gap:8px;align-items:center;font-size:14px;max-width:92vw}

@@ -1,3 +1,5 @@
+import { interrogate } from './realm';
+import { revealOrder } from './orders';
 import { makeCorpse } from './v16';
 /**
  * Daily life: needs (3 meals + 5 water), health & doctors, religiosity (cami / meyhane / vaaz / devlet yönlendirmesi),
@@ -35,26 +37,27 @@ export function eatMeal(w: World, p: Person): boolean {
   if (palace(w, p)) { if (transfer(w, 'saray', 'dis', 1, 'saray mutfağı')) { p.meals += 1; p.hunger = clamp(p.hunger - 35); p.mood = clamp(p.mood + 1); return true; } }
   if (p.jailedDays > 0) { p.meals += 1; p.hunger = clamp(p.hunger - 30); return true; } // zindan ekmeği
   const prefs: Good[] = p.money > 30 && chance(w, 0.5) ? (chance(w, 0.5) ? ['et', 'balik', 'ekmek'] : ['balik', 'et', 'ekmek']) : ['ekmek', 'balik', 'et'];
+  if (p.inv.yumurta > 0) prefs.unshift('yumurta');
   for (const g of prefs) {
     if (p.inv[g] <= 0) buy(w, p.id, g, 1, Math.max(0, p.money * 0.6));
     if (p.inv[g] > 0) { p.inv[g] -= 1; p.meals += 1; p.hunger = clamp(p.hunger - 35); p.mood = clamp(p.mood + (FOOD_JOY[g] ?? 0.5)); return true; }
   }
   // askıda ekmek / state bread fallback handled elsewhere
-  p.hunger = clamp(p.hunger + 15); return false;
+  return false;
 }
 export function drinkWater(w: World, p: Person): boolean {
-  if (p.prof === 'naip' || p.jailedDays > 0) { p.drinks += 1; return true; }
-  if (palace(w, p) && transfer(w, 'saray', 'dis', 0.3, 'saray mutfağı')) { p.drinks += 1; p.thirst = clamp(p.thirst - 25); return true; }
+  if (p.prof === 'naip' || p.jailedDays > 0) { p.drinks += 1; p.thirst = clamp(p.thirst - 35); return true; }
+  if (palace(w, p) && transfer(w, 'saray', 'dis', 0.3, 'saray mutfağı')) { p.drinks += 1; p.thirst = clamp(p.thirst - 35); return true; }
   if (p.inv.su <= 0) buy(w, p.id, 'su', 2, Math.max(0, p.money * 0.5));
-  if (p.inv.su > 0) { p.inv.su -= 1; p.drinks += 1; p.thirst = clamp(p.thirst - 25); return true; }
-  p.thirst = clamp(p.thirst + 15); return false;
+  if (p.inv.su > 0) { p.inv.su -= 1; p.drinks += 1; p.thirst = clamp(p.thirst - 35); return true; }
+  return false;
 }
 /** End of day: anyone who missed 3 meals or 5 waters loses 10 health. Below 30 (or wounded) only a doctor helps. */
 export function needsEndOfDay(w: World, p: Person): void {
   if (p.prof === 'naip') { p.meals = 0; p.drinks = 0; return; }
   const fresh = w.day <= 1 || (p.protectedUntil ?? 0) > w.day + 4; // the first (partial) day never counts
-  const ok = fresh || (p.meals >= MEALS && p.drinks >= WATERS);
-  if (!ok) { p.health = clamp(p.health - 10); p.mood = clamp(p.mood - 3); }
+  const ok = fresh || (p.hunger < 85 && p.thirst < 85); // v1.8: continuous bars (damage while empty is hourly)
+  if (!ok) { p.health = clamp(p.health - 4); p.mood = clamp(p.mood - 3); }
   else if (p.health >= 30 && !p.wounded) p.health = clamp(p.health + 3);
   if ((p.health < 30 || p.wounded) && ok) p.health = clamp(p.health - 1);
   // crafts at home matter
@@ -312,20 +315,26 @@ function switchJobs(w: World): void {
 }
 
 // ---------------- crime ----------------
+/** Bekçis work in two shifts so the streets are never empty. */
+export function bekciShift(p: Person): 'gece' | 'gunduz' { let h = 0; for (const ch of p.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h % 2 ? 'gece' : 'gunduz'; }
 export const isProtected = (w: World, p: Person): boolean => p.protectedUntil >= w.day || p.id === w.kayzerId || p.prof === 'naip';
 function catcher(w: World, night: boolean): Person | undefined {
-  const pool = w.people.filter((x) => (x.prof === 'bekci' || (night && x.prof === 'asker')) && active(x));
-  const power = Math.min(0.85, 0.1 + pool.filter((x) => x.prof === 'bekci').length * 0.08 + (night ? 0.05 : 0.15));
+  // v1.7: only bekçis patrol (day and night shifts); soldiers stay in the kışla / at the Saray
+  const pool = w.people.filter((x) => x.prof === 'bekci' && active(x) && (night ? bekciShift(x) === 'gece' : bekciShift(x) === 'gunduz'));
+  const power = Math.min(0.85, 0.12 + pool.length * 0.12 + (night ? 0 : 0.1));
   return pool.length && chance(w, power) ? pick(w, pool) : undefined;
 }
 /** Caught! A pending arrest: until the next morning/evening window the criminal may offer the catcher a bribe. */
 export function arrest(w: World, criminal: Person, crime: CrimeKind, victimId: string | null, amount: number, by?: Person): Arrest | null {
   const c = by ?? catcher(w, w.hour >= 21 || w.hour < 6) ?? w.people.find((x) => x.prof === 'bekci' && active(x));
   if (!c) return null;
-  const a: Arrest = { id: nextId(w, 'A'), criminalId: criminal.id, catcherId: c.id, crime, victimId, amount, day: w.day, hour: w.hour, offer: 0, status: 'bekliyor' };
+  const a: Arrest = { id: nextId(w, 'A'), criminalId: criminal.id, catcherId: c.id, crime, victimId, amount, day: w.day, hour: w.hour, offer: 0, status: 'bekliyor', at: w.serverNow ?? w.lastTickAt };
   w.arrests.push(a); criminal.jailedDays = Math.max(criminal.jailedDays, 1);
+  if (criminal.orderedBy && chance(w, 0.65)) revealOrder(w, criminal); // the hired hand talks
+  interrogate(w, criminal);
+  if (criminal.task) { criminal.task.status = 'basarisiz'; criminal.task.note = 'Yakalandım.'; criminal.task.doneAt = w.serverNow ?? w.lastTickAt; }
   log(w, `${c.name}, ${criminal.name}'ı yakaladı (${CRIME_TEXT[crime]}). Sabah/akşam ya hâkime gidecek ya da…`, criminal.id);
-  if (criminal.playerId) personal(w, criminal.playerId, 'Yakalandınız! Bekçiye rüşvet teklif edebilirsiniz (Zindan → Tutuklama).');
+  if (criminal.playerId) personal(w, criminal.playerId, 'Yakalandınız! Gözaltındasınız (Mahkeme nezarethanesi). 1 dakika içinde bekçiye rüşvet teklif edebilirsiniz; sonra savcı dava açar ve duruşmanız görülür.');
   return a;
 }
 export const CRIME_TEXT: Record<CrimeKind, string> = { hirsizlik: 'hırsızlık', rusvet: 'rüşvet', zimmet: 'zimmet', isyan: 'isyan', saldiri: 'saldırı', cinayet: 'cinayet', kacakcilik: 'kaçakçılık' };
@@ -416,8 +425,8 @@ function achievements(w: World): void {
   }
 }
 export const QUESTS: { text: string; done: (w: World, p: Person) => boolean }[] = [
-  { text: 'Bir öğün yiyin (⚡ Ne yapabilirim → Ye)', done: (_w, p) => p.meals >= 1 },
-  { text: 'Su için (günde 5 su gerekir)', done: (_w, p) => p.drinks >= 1 },
+  { text: 'Karnınızı doyurun (⚡ Yap → Ye)', done: (_w, p) => p.meals >= 1 },
+  { text: 'Su için (susuzluk çubuğu boşalmasın)', done: (_w, p) => p.drinks >= 1 },
   { text: 'Pazardan bir şey alın (Pazar binasına dokunun)', done: (w, p) => w.ledger.some((l) => l.from === p.id && l.reason.endsWith('alımı')) },
   { text: 'Camide namaz kılın ya da meyhanede bir kadeh için', done: (_w, p) => p.lastAction.includes('namaz') || p.lastAction.includes('içti') },
   { text: 'Bir vatandaşla sohbet edin (birine dokunun → Sohbet)', done: (_w, p) => Object.values(p.relNote).some((x) => x.includes('sohbet')) },

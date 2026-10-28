@@ -10,6 +10,7 @@ import { findPerson } from './world';
 import { marketPrice } from './economy';
 import { fullAI } from './ai';
 import { relate } from './life';
+import { handleOrder, orderLabel, parseIntent } from './orders';
 
 const say = (w: World, from: Person, to: string | null, text: string, at: number): void => {
   w.chatOut.push({ fromPersonId: from.id, fromName: from.name, toPersonId: to, text: text.slice(0, 280), at });
@@ -20,8 +21,8 @@ const say = (w: World, from: Person, to: string | null, text: string, at: number
 export function opinion(w: World, p: Person): string {
   const bread = marketPrice(w, 'ekmek');
   const opts: string[] = [];
-  if (p.meals < 2 && w.hour > 14) opts.push('Bugün doğru dürüst bir şey yemedim, karnım zil çalıyor.');
-  if (p.drinks < 3 && w.hour > 14) opts.push('Susuzluktan dudaklarım çatladı, su da pahalı.');
+  if (p.hunger > 70) opts.push('Bugün doğru dürüst bir şey yemedim, karnım zil çalıyor.');
+  if (p.thirst > 70) opts.push('Susuzluktan dudaklarım çatladı, su da pahalı.');
   if (p.health < 30 || p.wounded) opts.push('Hastayım, hekime gidecek param yok.');
   if (bread > BASE_PRICE.ekmek * 1.6) opts.push(`Ekmek ${bread.toFixed(1)} Dinar olmuş, bu nasıl iş!`);
   else if (bread < BASE_PRICE.ekmek * 0.9) opts.push('Ekmek ucuzladı, şükür.');
@@ -54,7 +55,7 @@ export function addressOf(w: World, from: Person): string {
 }
 function moodLine(p: Person): string {
   if (p.health < 40) return 'hastayım, halim yok';
-  if (p.meals < 2) return 'karnım aç, idare ediyoruz';
+  if (p.hunger > 70) return 'karnım aç, idare ediyoruz';
   if (p.mood > 70) return 'çok şükür, keyfim yerinde';
   if (p.mood > 45) return 'iyidir, idare ediyoruz';
   return 'pek iyi değilim, işler kötü';
@@ -92,7 +93,7 @@ export function replyTo(w: World, npc: Person, from: Person, text: string): stri
   if (/evlen|sevgili|aşk|güzelsin|yakışıklı/.test(t)) parts.push(npc.spouse ? 'Ben evliyim, haddini bil!' : npc.female === from.female ? 'Hayırdır? Öyle şeylerden anlamam.' : warm ? 'Hmm… Ailemle konuşman lazım.' : 'Seni pek tanımıyorum.');
   if (/adın|kimsin|tanış/.test(t)) parts.push(`Ben ${npc.name}, ${PROF_LABEL[npc.prof].toLocaleLowerCase('tr')}. ${findPerson(w, npc.spouse) ? `Eşim ${findPerson(w, npc.spouse)!.name}.` : 'Bekârım.'}`);
   if (/hava|yağmur|kurak|sıcak/.test(t)) parts.push(w.nature?.kind === 'kuraklik' ? 'Kuraklık var, tarlalar kurudu.' : w.nature?.kind === 'sel' ? 'Sel suları evleri bastı.' : 'Hava güzel, şükür.');
-  if (/yemek|aç|karnın|ekmek/.test(t) && !g) parts.push(npc.meals >= 2 ? 'Bugün karnım tok.' : 'Bugün doğru dürüst yemedim.');
+  if (/yemek|aç|karnın|ekmek/.test(t) && !g) parts.push(npc.hunger < 60 ? 'Bugün karnım tok.' : 'Bugün doğru dürüst yemedim.');
   if (/görüşürüz|hoşça|allaha ısmarladık|bay bay|iyi geceler/.test(t)) parts.push(`Güle güle ${ad}, yolun açık olsun.`);
   if (/\?$/.test(text.trim()) && parts.length <= (greet ? 1 : 0)) parts.push(pick(w, ['Vallahi bilemedim.', 'Onu bir düşüneyim.', 'Bunu sarayda sormak lazım.']) + ' ' + opinion(w, npc));
   if (!parts.length) return cold ? 'Seninle konuşacak bir şeyim yok.' : `${opinion(w, npc)}`;
@@ -145,11 +146,13 @@ function approach(w: World, n: Person, p: Person, now: number): void {
 }
 
 /** A player wrote something: NPC replies (DM → the addressee; Meydan → mentioned names or a bystander). Returns the replying NPCs. */
-export function playerSaid(w: World, from: Person, text: string, toPersonId: string | null, now: number, defer = false): { npc: Person; fallback: string }[] {
-  const out: { npc: Person; fallback: string }[] = [];
-  const emit = (npc: Person, to: string | null, line: string, delay: number): void => { out.push({ npc, fallback: line }); if (!defer) say(w, npc, to, line, now + delay); };
+export function playerSaid(w: World, from: Person, text: string, toPersonId: string | null, now: number, defer = false): { npc: Person; fallback: string; outcome?: string }[] {
+  const out: { npc: Person; fallback: string; outcome?: string }[] = [];
+  const emit = (npc: Person, to: string | null, line: string, delay: number, outcome?: string): void => { out.push({ npc, fallback: line, outcome }); if (!defer) say(w, npc, to, line, now + delay); };
   if (toPersonId) {
     const npc = findPerson(w, toPersonId); if (!npc || npc.playerId) return out;
+    const ord = npc.prof !== 'naip' || from.id === w.kayzerId ? parseIntent(w, npc, from, text) : null;
+    if (ord) { const r = handleOrder(w, from, npc, ord, text, now); emit(npc, from.id, r.reply, 1200, `${r.d.ok ? 'KABUL ETTİN ve şimdi yapmaya gidiyorsun' : 'REDDETTİN (' + r.d.code + ')'}: ${orderLabel(w, r.o)}`); return out; }
     if (npc.prof === 'naip') emit(npc, from.id, from.id === w.kayzerId ? `${/nab|nası|naber|merhaba|selam/i.test(text) ? 'İyiyim ' + addressOf(w, from) + ', sağ olun. ' : ''}Buyurun ${addressOf(w, from)}, emrinizdeyim. Devlet işleri yolunda; dilekçeler Saray’da bekliyor.` : 'Devlet işlerinde size yardımcı olmak görevimdir. Dilekçelerinizi Saray’a yazın.', 1200);
     else if (npc.jailedDays > 0) emit(npc, from.id, `Zindandayım ${addressOf(w, from)}… ${replyTo(w, npc, from, text)}`, 1200);
     else emit(npc, from.id, replyTo(w, npc, from, text), 1200);

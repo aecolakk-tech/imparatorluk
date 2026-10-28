@@ -1,3 +1,4 @@
+import { handleOrder, sanitizeOrder } from '../sim/orders';
 /**
  * Authoritative server logic, shared by the in-browser mock backend and the Supabase Edge Function
  * (bundled to supabase/functions/game/core.js by `npm run build:edge`).
@@ -8,7 +9,7 @@ import { advanceWorld } from '../sim/tick';
 import { applyAction, filterProfanity, joinWorld, rateOk, touchPlayer, personOf, takeoverCandidates, officeOf } from '../sim/actions';
 import { applyAdmin, type AdminOp } from '../sim/admin';
 import { createWorld } from '../sim/world';
-import { SNAPSHOT_EVERY_MS } from '../sim/constants';
+import { SNAPSHOT_EVERY_MS, PLAYER_PROFS } from '../sim/constants';
 import { migrateWorld } from '../sim/extras';
 import { playerSaid } from '../sim/chat';
 import { questReward } from '../sim/life';
@@ -62,12 +63,18 @@ export function makeChat(w: World, playerId: string, text: string, toPersonId: s
   if (toPersonId && !w.people.some((p) => p.id === toPersonId)) return 'Alıcı yok.';
   const replies = playerSaid(w, me, clean, toPersonId, now, defer); // NPCs answer (into w.chatOut unless deferred)
   const msg: ChatMsg = { id: `${now}-${Math.round(Math.random() * 1e6)}`, fromPersonId: me.id, fromName: me.name, toPersonId, text: clean, at: now };
-  if (defer) msg.replies = replies.map((r) => ({ npcId: r.npc.id, npcName: r.npc.name, to: toPersonId ? me.id : null, fallback: r.fallback, prompt: dmPrompt(w, r.npc, me, clean, history ?? []) }));
+  if (defer) msg.replies = replies.map((r) => ({ npcId: r.npc.id, npcName: r.npc.name, to: toPersonId ? me.id : null, fallback: r.fallback, prompt: dmPrompt(w, r.npc, me, clean, toPersonId ? history ?? [] : [], toPersonId ? r.outcome : 'Meydanda konuşuyorsun'), order: !!r.outcome }));
   return msg;
 }
 
 // ---------- LLM helpers (server) ----------
-export interface LlmReply { npcId: string; npcName: string; to: string | null; fallback: string; prompt: { system: string; user: string } }
+export interface LlmReply { npcId: string; npcName: string; to: string | null; fallback: string; order?: boolean; prompt: { system: string; user: string; json?: boolean } }
+/** The model saw an order the rule parser missed: game rules decide, the matching reply is chosen. */
+export function llmOrder(w: World, playerId: string, npcId: string, raw: unknown, text: string, now: number): { ok: boolean; reply: string } | null {
+  const me = personOf(w, playerId); const npc = findPerson(w, npcId); if (!me || !npc) return null;
+  const o = sanitizeOrder(w, npc, me, raw); if (!o) return null;
+  const r = handleOrder(w, me, npc, o, text, now); return { ok: r.d.ok, reply: r.reply };
+}
 /** Talks generated this hour that the model may rewrite (batched, max 3). */
 export function talkBatch(w: World, now: number): { idx: number[]; prompt: { system: string; user: string } } | null {
   const idx: number[] = []; (w.talks ?? []).forEach((t, i) => { if (!t.ai && t.at && t.at > now - 20_000) idx.push(i); });
@@ -94,3 +101,19 @@ export function llmBudget(w: World, today: string, perDay: number): boolean { w.
 export function llmSpend(w: World, today: string, n = 1): void { w.llm = w.llm ?? { day: today, n: 0, talkAt: 0 }; if (w.llm.day !== today) { w.llm.day = today; w.llm.n = 0; } w.llm.n += n; }
 
 export function admin(w: World, op: AdminOp): string { return applyAdmin(w, op); }
+/** Founder-only full reset: a brand-new world, every existing account re-joins with its name and trade. Returns playerId → new personId. */
+export function resetWorld(w: World, now: number): Record<string, string> {
+  const old = w.players; const oldPeople = w.people;
+  const nw = createWorld(Math.floor(Math.random() * 1e9), now);
+  const ids: Record<string, string> = {};
+  const list = Object.values(old).sort((a, b) => Number(b.founder) - Number(a.founder));
+  for (const pl of list) {
+    const p = oldPeople.find((x) => x.id === pl.personId);
+    const prof = (pl.founder ? 'kayzer' : p && PLAYER_PROFS.includes(p.prof) ? p.prof : 'hamal') as Profession;
+    const np = joinWorld(nw, pl.playerId, pl.name, prof, !!pl.founder, now); ids[pl.playerId] = np.id;
+    if (nw.players[pl.playerId]) nw.players[pl.playerId]!.banned = pl.banned;
+  }
+  for (const k of Object.keys(w)) delete (w as unknown as Record<string, unknown>)[k];
+  Object.assign(w, nw);
+  return ids;
+}

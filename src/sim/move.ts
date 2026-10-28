@@ -8,9 +8,9 @@ import { MAP_H, MAP_W } from './constants';
 
 export interface Pt { x: number; y: number }
 export interface Walk { path: Pt[]; t0: number; speed: number }
-export const WALK_SPEED = 4; // tiles per real second
+export const WALK_SPEED = 3.6; // tiles per real second
 export const REACH = 2.2; // tiles from a building's outline that count as "at the building"
-export const PERSON_REACH = 3.2;
+export const PERSON_REACH = 1.3; // v1.7: you must stand right next to someone (~1 tile)
 /** Tests and the long simulation may switch distance checks off. */
 export const rules = { reach: true };
 
@@ -102,6 +102,9 @@ export function actionNeed(w: World, me: Person, a: Action): Need {
     case 'caravanBuy': return B([...MARKET_IDS(w), 'liman'], 'pazara ya da limana');
     case 'eat': return B([...MARKET_IDS(w), 'firin', 'kasaphane', 'bar', me.home], 'evinize, fırına ya da bir pazara');
     case 'askida': return B(['firin'], 'Fırın’a');
+    case 'buyFarm': case 'buyAnimal': return B(['ciftlik'], 'Buğday Tarlaları’na (hayvan tüccarı)');
+    case 'grantTitle': case 'stripTitle': case 'assignSpy': case 'warrant': case 'raidOrg': case 'informantPay': return B(['saray'], 'Saray’a');
+    case 'searchHouse': { const t = w.people.find((p) => p.id === a.personId); return t ? B([t.home], 'şüphelinin evine') : null; }
     case 'drinkWater': return B(['kuyu', 'gida', 'pazar', me.home], 'kuyuya, evinize ya da pazara');
     case 'pray': case 'sermon': return B(['cami'], 'Cami’ye');
     case 'drink': return B(['bar'], 'Meyhane’ye');

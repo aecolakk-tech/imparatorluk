@@ -1,0 +1,25 @@
+import puppeteer from 'puppeteer-core';
+const url = process.env.URL ?? 'http://localhost:5173/';
+const OUT = '/workspace/imparatorluk/shots17';
+const browser = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox'] });
+const errors = []; const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const p = await browser.newPage(); await p.setViewport({ width: 1280, height: 800 });
+p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); }); p.on('pageerror', (e) => errors.push('pageerror: ' + e.message)); p.on('dialog', (d) => void d.accept(d.type() === 'prompt' ? 'SIFIRLA' : undefined));
+const click = async (t) => { const ok = await p.evaluate((t) => { const b = [...document.querySelectorAll('button')].find((x) => x.textContent?.includes(t)); b?.click(); return !!b; }, t); await sleep(350); return ok; };
+const dismiss = async () => { for (let i = 0; i < 12; i++) { if (!(await p.$('.modal:not(.trialm)'))) break; if (!(await click('Tamam'))) break; } };
+const I = (f, ...a) => p.evaluate(f, ...a);
+const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+await p.goto(url, { waitUntil: 'networkidle0' }); await I(() => localStorage.clear()); await p.reload({ waitUntil: 'networkidle0' });
+// ---- Kayzer ----
+await click('Davetle kayıt'); let ins = await p.$$('.login input');
+await ins[0].type('imparator'); await ins[1].type('Ahmet Enes'); await ins[2].type('kurucu@imparatorluk.local'); await ins[3].type('gizli123');
+await click('Hesap aç'); await sleep(1500); await dismiss();
+const N = () => I(() => window.__sfxN ?? 0);
+const realClick = async (t) => { const r = await I((t) => { const b = [...document.querySelectorAll('button')].find((x) => x.textContent?.includes(t)); if (!b) return null; const q = b.getBoundingClientRect(); return [q.x + q.width / 2, q.y + q.height / 2]; }, t); if (r) await p.mouse.click(r[0], r[1]); await sleep(300); return !!r; };
+await I(() => window.__imp().mute(false));
+let n = await N(); await realClick('Menü'); log('menu click found/played:', await N() - n, JSON.stringify((await I(() => window.__sfx ?? [])).slice(-1)));
+n = await N(); await realClick('Tarih'); log('tab:', await N() - n, JSON.stringify((await I(() => window.__sfx)).slice(-1)));
+n = await N(); await realClick('✕'); log('close:', await N() - n, JSON.stringify((await I(() => window.__sfx)).slice(-1)));
+n = await N(); await p.mouse.click(640, 450); await sleep(300); log('map tap:', await N() - n, JSON.stringify((await I(() => window.__sfx)).slice(-1)));
+await I(() => window.__imp().mute(true)); n = await N(); await realClick('Menü'); await realClick('Tarih'); await p.mouse.click(640, 450); log('muted played:', await N() - n);
+log('errors:', errors.length ? errors : 'none'); await browser.close();
