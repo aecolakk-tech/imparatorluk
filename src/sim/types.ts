@@ -25,7 +25,7 @@ export interface Building {
 
 export interface Person {
   goal?: GoalId; goalsDone?: GoalId[];
-  rank?: import('./realm').Rank | null; fief?: string | null; favor?: number; homeUntil?: number; sleeping?: boolean; renting?: string | null; energy?: number; farm?: boolean; barn?: { ahir: number; kumes: number }; farmStock?: Partial<Record<Good, number>>; fedDay?: number; riding?: boolean; animals?: Record<import('./realm').Animal, number>;
+  rank?: import('./realm').Rank | null; fief?: string | null; favor?: number; homeUntil?: number; sleeping?: boolean; renting?: string | null; energy?: number; look?: import('./look').Look; lookSet?: boolean; farm?: boolean; barn?: { ahir: number; kumes: number }; farmStock?: Partial<Record<Good, number>>; fedDay?: number; riding?: boolean; animals?: Record<import('./realm').Animal, number>;
   task?: import('./orders').Task; // v1.7: an order the NPC is carrying out
   orderedBy?: { by: string; crime: CrimeKind; victimId: string | null; day: number };
   id: string;
@@ -303,7 +303,7 @@ export type Action =
   | { t: 'directive'; topic: 'namaz' | 'icki' | 'laik' }
   | { t: 'granary'; op: 'buy' | 'release'; qty: number }
   | { t: 'priceCap'; good: Good; price: number | null }
-  | { t: 'defend'; caseId: string } | { t: 'witness'; caseId: string; against: boolean; text?: string }
+  | { t: 'defend'; caseId: string } | { t: 'witness'; caseId: string; against: boolean; text?: string } | { t: 'customize'; look: import('./look').Look; where: 'ilk' | 'terzi' | 'berber' }
   | { t: 'smuggle'; on: boolean }
   | { t: 'borrow'; amount: number } | { t: 'repay'; loanId: string } | { t: 'festivalOpen'; cost: number } | { t: 'buildAt'; plotId: string; kind: string }
   | { t: 'move'; x: number; y: number } | { t: 'report'; corpseId: string } | { t: 'defense'; caseId: string; text: string } | { t: 'restCase'; caseId: string }

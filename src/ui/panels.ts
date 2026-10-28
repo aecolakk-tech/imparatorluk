@@ -20,7 +20,7 @@ import { buildingExtras, caseRoles, electionBlock, personActions, personExtras, 
 
 export interface Ctx {
   w: World; me: Person | null; founder: boolean;
-  act: (a: Action) => void; dm: (personId: string) => void; openPerson: (id: string) => void; openCitizens?: () => void; atSaray?: boolean; say?: (personId: string, text: string) => void;
+  act: (a: Action) => void; dm: (personId: string) => void; openPerson: (id: string) => void; openCitizens?: () => void; openLook?: (mode: 'ilk' | 'terzi' | 'berber') => void; atSaray?: boolean; say?: (personId: string, text: string) => void;
 }
 
 const isK = (c: Ctx): boolean => !!c.me && canRule(c.w, c.me, Date.now(), ONLINE_WINDOW_MS);

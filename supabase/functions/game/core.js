@@ -4,9 +4,9 @@ var FRONT = "ei\xF6\xFC";
 var VOW = BACK + FRONT;
 var HARD = "\xE7fhkps\u015Ft";
 function ek(name, base) {
-  const n = (name ?? "").trim();
-  if (!n) return n;
-  const low2 = n.toLocaleLowerCase("tr");
+  const n2 = (name ?? "").trim();
+  if (!n2) return n2;
+  const low2 = n2.toLocaleLowerCase("tr");
   let lv = "a";
   for (let i = low2.length - 1; i >= 0; i--) if (VOW.includes(low2[i])) {
     lv = low2[i];
@@ -37,7 +37,7 @@ function ek(name, base) {
       s = (endsV ? "y" : "") + "l" + two;
       break;
   }
-  return `${n}\u2019${s}`;
+  return `${n2}\u2019${s}`;
 }
 
 // src/sim/types.ts
@@ -277,13 +277,13 @@ function resetMarketDay(w) {
   }
 }
 function natureMult(w, g) {
-  const n = w.nature;
-  if (!n || w.day < n.start || w.day > n.until) return 1;
-  if (n.kind === "kuraklik" && g === "bugday") return 0.35;
-  if (n.kind === "kuraklik" && g === "su") return 0.85;
-  if (n.kind === "bereket" && g === "bugday") return 1.4;
-  if (n.kind === "sel" && (g === "balik" || g === "bugday")) return 0.6;
-  if (n.kind === "balik" && g === "balik") return 1.6;
+  const n2 = w.nature;
+  if (!n2 || w.day < n2.start || w.day > n2.until) return 1;
+  if (n2.kind === "kuraklik" && g === "bugday") return 0.35;
+  if (n2.kind === "kuraklik" && g === "su") return 0.85;
+  if (n2.kind === "bereket" && g === "bugday") return 1.4;
+  if (n2.kind === "sel" && (g === "balik" || g === "bugday")) return 0.6;
+  if (n2.kind === "balik" && g === "balik") return 1.6;
   return 1;
 }
 function produce(w, p) {
@@ -319,7 +319,7 @@ function produce(w, p) {
 }
 function sellerPrice(w, p, g, inputs, out = 1) {
   const ref = marketPrice(w, g);
-  const cost = Object.entries(inputs ?? {}).reduce((s, [ig, n]) => s + w.prices[ig] * n, 0) / Math.max(1, out);
+  const cost = Object.entries(inputs ?? {}).reduce((s, [ig, n2]) => s + w.prices[ig] * n2, 0) / Math.max(1, out);
   const unsold = listedQty(w, p.id, g);
   const stockAdj = unsold > STOCK_LIMIT[g] * 0.5 ? 0.92 : unsold === 0 ? 1.03 : 1;
   const greed = 1 + (50 - p.honesty) / 500;
@@ -356,8 +356,8 @@ function settleMarket(w) {
   }
   const lose = (q, rate) => {
     const x = q * rate;
-    const n = Math.floor(x);
-    return n + (rand(w) < x - n ? 1 : 0);
+    const n2 = Math.floor(x);
+    return n2 + (rand(w) < x - n2 ? 1 : 0);
   };
   for (const l of w.listings) l.qty = Math.max(0, l.qty - lose(l.qty, DECAY[l.good]));
   w.listings = w.listings.filter((l) => l.qty > 0);
@@ -597,9 +597,9 @@ function placeAnimals(w, now) {
     if (!hd) continue;
     const area = p.prof === "hayvanci" ? pen : p.farm ? farm : null;
     for (const kind of ["inek", "koyun", "tavuk", "at"]) {
-      const n = Math.min(kind === "tavuk" ? 8 : 5, hd[kind] - (kind === "at" && p.riding ? 1 : 0));
-      if (n <= 0) continue;
-      for (let i = 0; i < n; i++) {
+      const n2 = Math.min(kind === "tavuk" ? 8 : 5, hd[kind] - (kind === "at" && p.riding ? 1 : 0));
+      if (n2 <= 0) continue;
+      for (let i = 0; i < n2; i++) {
         const h = hash(p.id + kind + i);
         let bx, by, bw, bh;
         if (area) {
@@ -1658,34 +1658,34 @@ function chatHour(w, now, online) {
   for (const p of w.people.filter((x) => x.playerId && online(x))) {
     if (!chance(w, 0.12)) continue;
     const friends = awake.filter((x) => (x.relations[p.id] ?? 0) > 10);
-    const n = friends.length && chance(w, 0.6) ? pick(w, friends) : pick(w, awake);
-    approach(w, n, p, now);
+    const n2 = friends.length && chance(w, 0.6) ? pick(w, friends) : pick(w, awake);
+    approach(w, n2, p, now);
   }
 }
-function approach(w, n, p, now) {
+function approach(w, n2, p, now) {
   const kind = pick(w, ["sohbet", "sohbet", "rica", "mal", "davet", "rusvet"]);
-  if (kind === "rica" && n.money < 20) {
-    w.offers.push({ id: nextId(w, "O"), from: n.id, to: p.id, kind: "borc", amount: 10, day: w.day, text: `${n.name} 10 Dinar bor\xE7 istiyor` });
-    say(w, n, p.id, `${p.name.split(" ")[0]}, ay\u0131pt\u0131r s\xF6ylemesi kesem bo\u015F. 10 Dinar verir misin? Geri \xF6derim, bu iyili\u011Fi unutmam. (Aile/Teklifler)`, now);
+  if (kind === "rica" && n2.money < 20) {
+    w.offers.push({ id: nextId(w, "O"), from: n2.id, to: p.id, kind: "borc", amount: 10, day: w.day, text: `${n2.name} 10 Dinar bor\xE7 istiyor` });
+    say(w, n2, p.id, `${p.name.split(" ")[0]}, ay\u0131pt\u0131r s\xF6ylemesi kesem bo\u015F. 10 Dinar verir misin? Geri \xF6derim, bu iyili\u011Fi unutmam. (Aile/Teklifler)`, now);
     return;
   }
-  const g = PRODUCES[n.prof]?.good;
-  if (kind === "mal" && g && n.inv[g] + w.listings.filter((l) => l.sellerId === n.id && l.good === g).reduce((s, l) => s + l.qty, 0) > 2) {
+  const g = PRODUCES[n2.prof]?.good;
+  if (kind === "mal" && g && n2.inv[g] + w.listings.filter((l) => l.sellerId === n2.id && l.good === g).reduce((s, l) => s + l.qty, 0) > 2) {
     const price = Math.round(marketPrice(w, g) * 0.9 * 100) / 100;
-    w.offers.push({ id: nextId(w, "O"), from: n.id, to: p.id, kind: "mal", good: g, qty: 3, price, day: w.day, text: `${n.name}: 3 ${GOOD_LABEL[g]}, tanesi ${price}` });
-    say(w, n, p.id, `Sana \xF6zel: 3 ${GOOD_LABEL[g]} tanesi ${price} Dinar, pazardan ucuz. \u0130ster misin? (Teklifler)`, now);
+    w.offers.push({ id: nextId(w, "O"), from: n2.id, to: p.id, kind: "mal", good: g, qty: 3, price, day: w.day, text: `${n2.name}: 3 ${GOOD_LABEL[g]}, tanesi ${price}` });
+    say(w, n2, p.id, `Sana \xF6zel: 3 ${GOOD_LABEL[g]} tanesi ${price} Dinar, pazardan ucuz. \u0130ster misin? (Teklifler)`, now);
     return;
   }
-  if (kind === "rusvet" && ["bekci", "tahsildar", "savci", "hakim", "memur"].includes(p.prof) && n.honesty < 45 && n.money > 40) {
-    w.offers.push({ id: nextId(w, "O"), from: n.id, to: p.id, kind: "rusvet", amount: 15, day: w.day, text: `${n.name} 15 Dinar kar\u015F\u0131l\u0131\u011F\u0131 g\xF6z yumman\u0131z\u0131 istiyor` });
-    say(w, n, p.id, `Psst\u2026 ${PROF_LABEL[p.prof]} efendi, 15 Dinar'\u0131m var; benim i\u015Flere biraz g\xF6z yumsan? (Teklifler)`, now);
+  if (kind === "rusvet" && ["bekci", "tahsildar", "savci", "hakim", "memur"].includes(p.prof) && n2.honesty < 45 && n2.money > 40) {
+    w.offers.push({ id: nextId(w, "O"), from: n2.id, to: p.id, kind: "rusvet", amount: 15, day: w.day, text: `${n2.name} 15 Dinar kar\u015F\u0131l\u0131\u011F\u0131 g\xF6z yumman\u0131z\u0131 istiyor` });
+    say(w, n2, p.id, `Psst\u2026 ${PROF_LABEL[p.prof]} efendi, 15 Dinar'\u0131m var; benim i\u015Flere biraz g\xF6z yumsan? (Teklifler)`, now);
     return;
   }
   if (kind === "davet") {
-    say(w, n, p.id, n.din > 55 ? "\xD6\u011Fle namaz\u0131nda camide bulu\u015Fal\u0131m m\u0131?" : "Ak\u015Fam meyhanede bir kadeh i\xE7elim mi? Benden!", now);
+    say(w, n2, p.id, n2.din > 55 ? "\xD6\u011Fle namaz\u0131nda camide bulu\u015Fal\u0131m m\u0131?" : "Ak\u015Fam meyhanede bir kadeh i\xE7elim mi? Benden!", now);
     return;
   }
-  say(w, n, p.id, `${pick(w, GREET)}! ${opinion(w, n)}`, now);
+  say(w, n2, p.id, `${pick(w, GREET)}! ${opinion(w, n2)}`, now);
   void clamp;
 }
 function playerSaid(w, from, text, toPersonId, now, defer = false) {
@@ -1820,8 +1820,8 @@ function migrateWorld(w) {
   const TARGET = { ciftci: 5, firinci: 5, sucu: 8, dokumaci: 3, mobilyaci: 2, barci: 2, kasap: 4, balikci: 6, terzi: 3, demirci: 3, marangoz: 4, hamal: 6, insaatci: 8 };
   const count = (pr) => w.people.filter((x) => x.prof === pr).length;
   const titled = (p) => / /.test(p.name) && Object.values(PROF_LABEL).some((l) => p.name.startsWith(l + " "));
-  for (const [need, n] of Object.entries(TARGET)) {
-    while (count(need) < n) {
+  for (const [need, n2] of Object.entries(TARGET)) {
+    while (count(need) < n2) {
       const donor = w.people.find((x) => !x.playerId && !x.meclis && !titled(x) && TARGET[x.prof] !== void 0 && count(x.prof) > (TARGET[x.prof] ?? 0) && x.prof !== need) ?? w.people.find((x) => !x.playerId && !x.meclis && TARGET[x.prof] !== void 0 && count(x.prof) > (TARGET[x.prof] ?? 0) && x.prof !== need);
       if (!donor) break;
       donor.prof = need;
@@ -1862,17 +1862,17 @@ var startIsyanHook = { fn: () => {
 var hourMs = (w) => HOUR_MS / (w.speed > 0 ? w.speed : 1);
 var ELECTION_EVERY = 40;
 function electionDates(w) {
-  const n = w.election.nextDay;
-  return { adayFrom: n - 11, adayTo: n - 7, propFrom: n - 6, propTo: n - 1, vote: n };
+  const n2 = w.election.nextDay;
+  return { adayFrom: n2 - 11, adayTo: n2 - 7, propFrom: n2 - 6, propTo: n2 - 1, vote: n2 };
 }
 function electionPhase(w) {
-  const n = w.election.nextDay;
+  const n2 = w.election.nextDay;
   const d = w.day;
   const s = electionDates(w);
-  if (d >= s.adayFrom && d <= s.adayTo) return { phase: "aday", label: `Meclis: adayl\u0131k a\xE7\u0131k (${s.adayTo}. g\xFCne kadar), se\xE7im ${n}. g\xFCn` };
-  if (d >= s.propFrom && d <= s.propTo) return { phase: "propaganda", label: `Meclis: propaganda d\xF6nemi (${s.propTo}. g\xFCne kadar), se\xE7im ${n}. g\xFCn` };
-  if (d === n) return { phase: "oylama", label: "Meclis: BUG\xDCN SE\xC7\u0130M \u2014 oy verin!" };
-  return { phase: "bekleme", label: `Meclis se\xE7imi ${n}. g\xFCn (adayl\u0131k ${s.adayFrom}. g\xFCn a\xE7\u0131l\u0131r)` };
+  if (d >= s.adayFrom && d <= s.adayTo) return { phase: "aday", label: `Meclis: adayl\u0131k a\xE7\u0131k (${s.adayTo}. g\xFCne kadar), se\xE7im ${n2}. g\xFCn` };
+  if (d >= s.propFrom && d <= s.propTo) return { phase: "propaganda", label: `Meclis: propaganda d\xF6nemi (${s.propTo}. g\xFCne kadar), se\xE7im ${n2}. g\xFCn` };
+  if (d === n2) return { phase: "oylama", label: "Meclis: BUG\xDCN SE\xC7\u0130M \u2014 oy verin!" };
+  return { phase: "bekleme", label: `Meclis se\xE7imi ${n2}. g\xFCn (adayl\u0131k ${s.adayFrom}. g\xFCn a\xE7\u0131l\u0131r)` };
 }
 var isyanPolicy = {
   fn: (w) => {
@@ -2088,15 +2088,15 @@ function campaign(w, now) {
 }
 function stateBread(w) {
   if (!lawOn(w, "devletekmegi")) return;
-  let n = lawParam(w, "devletekmegi", 12);
+  let n2 = lawParam(w, "devletekmegi", 12);
   const needy = [...w.people].filter((p) => p.prof !== "naip" && p.prof !== "kayzer").sort((a, b2) => a.money - a.hunger - (b2.money - b2.hunger));
   for (const p of needy) {
-    if (n <= 0 || p.money > 30) break;
+    if (n2 <= 0 || p.money > 30) break;
     const before = w.treasury;
     const got = buy(w, "saray", "ekmek", 1, 6);
     if (!got) break;
     p.inv.ekmek += 1;
-    n -= 1;
+    n2 -= 1;
     void before;
   }
 }
@@ -2412,9 +2412,9 @@ function findPath(w, from, to) {
   raw.reverse();
   const clear = (a, b2) => {
     const d = Math.hypot(b2.x - a.x, b2.y - a.y);
-    const n = Math.ceil(d * 3);
-    for (let k = 0; k <= n; k += 1) {
-      const x = a.x + (b2.x - a.x) * k / n, y = a.y + (b2.y - a.y) * k / n;
+    const n2 = Math.ceil(d * 3);
+    for (let k = 0; k <= n2; k += 1) {
+      const x = a.x + (b2.x - a.x) * k / n2, y = a.y + (b2.y - a.y) * k / n2;
       if (!ok(g, Math.floor(x), Math.floor(y)) || !ok(g, Math.floor(x + 0.3), Math.floor(y)) || !ok(g, Math.floor(x - 0.3), Math.floor(y))) return false;
     }
     return true;
@@ -2525,6 +2525,8 @@ function actionNeed(w, me, a) {
     case "caseDecision":
     case "defend":
       return B(["mahkeme"], "Mahkeme\u2019ye");
+    case "customize":
+      return a.where === "terzi" ? B(["dokuma"], "Terzi\u2019ye (Dokuma Tezg\xE2h\u0131)") : a.where === "berber" ? B(["atolye"], "Berber\u2019e (Zanaat At\xF6lyesi)") : null;
     case "runForMeclis":
     case "castVote":
     case "speak":
@@ -3061,9 +3063,9 @@ function summonBlamed(w, c, me, text, now) {
   if (!/yaptı|öldürdü|suçlu|o vurdu|katil|çaldı|saldırdı|o idi|oydu/.test(t)) return;
   const skip = /* @__PURE__ */ new Set([me.id, tr.judgeId, tr.prosecutorId, c.victimId]);
   const hit = w.people.filter((p) => !skip.has(p.id) && p.prof !== "naip").find((p) => {
-    const n = p.name.toLocaleLowerCase("tr");
-    const last = n.split(" ").slice(-1)[0];
-    return t.includes(n) || last.length >= 4 && new RegExp(`(^|[^a-z\xE7\u011F\u0131\xF6\u015F\xFC])${last}`).test(t);
+    const n2 = p.name.toLocaleLowerCase("tr");
+    const last = n2.split(" ").slice(-1)[0];
+    return t.includes(n2) || last.length >= 4 && new RegExp(`(^|[^a-z\xE7\u011F\u0131\xF6\u015F\xFC])${last}`).test(t);
   });
   if (!hit) return;
   tr.blamedId = hit.id;
@@ -3250,8 +3252,8 @@ function patrolDay(w) {
       s += Math.min(40, x / LIMIT(g) * 40);
       if (spiked.includes(g)) s += 25;
     }
-    const neighbours = w.people.filter((n) => n.home === p.home || (n.relations[p.id] ?? 0) < -30);
-    const tipsters = neighbours.filter((n) => n.id !== p.id && (n.relations[p.id] ?? 0) < 0 && n.honesty > 40);
+    const neighbours = w.people.filter((n2) => n2.home === p.home || (n2.relations[p.id] ?? 0) < -30);
+    const tipsters = neighbours.filter((n2) => n2.id !== p.id && (n2.relations[p.id] ?? 0) < 0 && n2.honesty > 40);
     if (tipsters.length && chance(w, 0.5)) {
       s += 15 * Math.min(3, tipsters.length);
       if (chance(w, 0.4)) w.rumors.push({ day: w.day, text: `${ek(p.name, "\u0131n")} mahzeni ${GOOD_LABEL[ex[0][0]]} dolu diyorlar\u2026`, about: p.id });
@@ -3548,9 +3550,9 @@ function disaster(w, kind, text) {
   log(w, `\u26A0 ${text}`);
 }
 function nature(w) {
-  const n = w.nature;
-  if (n && w.day > n.until) {
-    log(w, `${n.kind === "kuraklik" ? "Kurakl\u0131k" : n.kind === "salgin" ? "Salg\u0131n" : n.kind === "sel" ? "Sel" : n.kind === "bereket" ? "Bereket" : "Bal\u0131k bollu\u011Fu"} sona erdi.`);
+  const n2 = w.nature;
+  if (n2 && w.day > n2.until) {
+    log(w, `${n2.kind === "kuraklik" ? "Kurakl\u0131k" : n2.kind === "salgin" ? "Salg\u0131n" : n2.kind === "sel" ? "Sel" : n2.kind === "bereket" ? "Bereket" : "Bal\u0131k bollu\u011Fu"} sona erdi.`);
     w.nature = null;
   }
   if (!w.nature && w.day >= w.nextDrought) {
@@ -4278,9 +4280,9 @@ function meclisElection(w, playerCandidates, playerVotes, npcAI) {
     if (best) tally2[best] = (tally2[best] ?? 0) + 1;
   }
   const ranked = Object.entries(tally2).sort((a, b2) => b2[1] - a[1] || (findPerson(w, b2[0])?.ambition ?? 0) - (findPerson(w, a[0])?.ambition ?? 0));
-  const winners = ranked.slice(0, SEAT_COUNT).filter(([, n]) => n > 0).map(([id]) => id);
+  const winners = ranked.slice(0, SEAT_COUNT).filter(([, n2]) => n2 > 0).map(([id]) => id);
   w.meclis.seats = SEATS.map((s, i) => ({ ...s, holder: winners[i] ?? null }));
-  w.election.last = { day: w.day, results: ranked.slice(0, 40).map(([id, n]) => ({ id, votes: n, won: winners.includes(id) })) };
+  w.election.last = { day: w.day, results: ranked.slice(0, 40).map(([id, n2]) => ({ id, votes: n2, won: winners.includes(id) })) };
   for (const p of w.people) {
     const was = p.meclis;
     p.meclis = winners.includes(p.id);
@@ -4725,14 +4727,14 @@ function kayzerBill(w, k, kind, value, target) {
 }
 function foundFaction(w, p, name) {
   if (!p.meclis) return "Parti kurmak i\xE7in milletvekili olmal\u0131s\u0131n\u0131z.";
-  const n = name.trim().slice(0, 30);
-  if (n.length < 3) return "Parti ad\u0131 en az 3 harf.";
+  const n2 = name.trim().slice(0, 30);
+  if (n2.length < 3) return "Parti ad\u0131 en az 3 harf.";
   if (w.meclis.factions.length >= 8) return "\xC7ok fazla parti var.";
   const id = `f${w.idSeq++}`;
-  w.meclis.factions.push({ id, name: n, ideology: p.republic > 55 ? "cumhuriyetci" : p.loyalty > 70 ? "saltanatci" : profGroup(p) === "esnaf" ? "esnaf" : "halkci", leaderId: p.id, color: ["#2a9d8f", "#e76f51", "#8ab17d", "#b56576"][w.meclis.factions.length % 4] });
+  w.meclis.factions.push({ id, name: n2, ideology: p.republic > 55 ? "cumhuriyetci" : p.loyalty > 70 ? "saltanatci" : profGroup(p) === "esnaf" ? "esnaf" : "halkci", leaderId: p.id, color: ["#2a9d8f", "#e76f51", "#8ab17d", "#b56576"][w.meclis.factions.length % 4] });
   p.faction = id;
-  mlog(w, `${p.name} yeni bir parti kurdu: ${n}.`, p.id);
-  return `${n} kuruldu; lideri sizsiniz.`;
+  mlog(w, `${p.name} yeni bir parti kurdu: ${n2}.`, p.id);
+  return `${n2} kuruldu; lideri sizsiniz.`;
 }
 function migrateMeclis16(w) {
   if (w.meclis.seats.length === SEAT_COUNT && w.meclis.seats[0]?.kind === "genel") return;
@@ -4792,20 +4794,20 @@ function makeBuildings() {
     b("arsa4", "Arsa (bo\u015F)", "arsa", 46, 37, 8, 5)
   ];
   const occupied = (x, y, w, h) => list.some((o) => x < o.x + o.w + 1 && x + w + 1 > o.x && y < o.y + o.h + 2 && y + h + 2 > o.y) || ROADS_Y.some((ry) => ry >= y && ry < y + h + 1) || ROADS_X.some((rx) => rx >= x && rx < x + w);
-  let n = 0;
+  let n2 = 0;
   for (let y = 30; y <= 46; y += 5) {
     for (let x = 1; x <= MAP_W - 5; x += 4) {
-      if (!occupied(x, y, 3, 3) && x + 3 < MAP_W && y + 3 < MAP_H - 6 && n < 70) {
-        n += 1;
-        list.push(b(`ev${n}`, `Ev ${n}`, "ev", x, y, 3, 3));
+      if (!occupied(x, y, 3, 3) && x + 3 < MAP_W && y + 3 < MAP_H - 6 && n2 < 70) {
+        n2 += 1;
+        list.push(b(`ev${n2}`, `Ev ${n2}`, "ev", x, y, 3, 3));
       }
     }
   }
   for (let y = 14; y <= 26; y += 5) {
     for (let x = 1; x <= MAP_W - 5; x += 4) {
-      if (!occupied(x, y, 3, 3) && n < 90) {
-        n += 1;
-        list.push(b(`ev${n}`, `Ev ${n}`, "ev", x, y, 3, 3));
+      if (!occupied(x, y, 3, 3) && n2 < 90) {
+        n2 += 1;
+        list.push(b(`ev${n2}`, `Ev ${n2}`, "ev", x, y, 3, 3));
       }
     }
   }
@@ -5389,22 +5391,22 @@ function buyFarm(w, p) {
   log(w, `\u{1F3E1} ${p.name} bir arsa al\u0131p \xE7iftlik kurdu.`, p.id);
   return "\xC7iftlik arsan\u0131z haz\u0131r (Bu\u011Fday Tarlalar\u0131\u2019n\u0131n yan\u0131nda). \u015Eimdi ah\u0131r ya da k\xFCmes yap\u0131n, sonra hayvan al\u0131n.";
 }
-function buyAnimal(w, p, a, n = 1) {
+function buyAnimal(w, p, a, n2 = 1) {
   if (!ANIMALS.includes(a)) return "B\xF6yle hayvan yok.";
   if (needsFarm(a) && !p.farm) return `${ANIMAL_LABEL[a]} i\xE7in \xF6nce bir \xE7iftlik arsas\u0131 almal\u0131s\u0131n\u0131z.`;
   if (p.prof !== "hayvanci") {
     const room = barnRoom(p, a);
-    if (room < n) return a === "tavuk" ? `K\xFCmesinizde yer yok (${room}). \xC7iftli\u011Finize k\xFCmes yap\u0131n.` : a === "at" && !p.farm ? "\xC7iftliksiz yaln\u0131zca bir at besleyebilirsiniz (handa)." : `Ah\u0131r\u0131n\u0131zda yer yok (${room}). \xC7iftli\u011Finize ah\u0131r yap\u0131n.`;
+    if (room < n2) return a === "tavuk" ? `K\xFCmesinizde yer yok (${room}). \xC7iftli\u011Finize k\xFCmes yap\u0131n.` : a === "at" && !p.farm ? "\xC7iftliksiz yaln\u0131zca bir at besleyebilirsiniz (handa)." : `Ah\u0131r\u0131n\u0131zda yer yok (${room}). \xC7iftli\u011Finize ah\u0131r yap\u0131n.`;
   }
   const seller = w.people.find((x) => x.prof === "hayvanci" && x.jailedDays === 0 && x.id !== p.id);
-  const cost = ANIMAL_PRICE[a] * n;
-  if (!transfer(w, p.id, seller?.id ?? "saray", cost, `${a} al\u0131m\u0131`)) return `${n} ${ANIMAL_LABEL[a]} ${cost} Dinar; paran\u0131z yetmiyor.`;
+  const cost = ANIMAL_PRICE[a] * n2;
+  if (!transfer(w, p.id, seller?.id ?? "saray", cost, `${a} al\u0131m\u0131`)) return `${n2} ${ANIMAL_LABEL[a]} ${cost} Dinar; paran\u0131z yetmiyor.`;
   if (seller) {
     seller.incomeToday += cost * 0.4;
     transfer(w, seller.id, "dis", cost * 0.55, "hayvan tedariki");
   }
-  herd(p)[a] += n;
-  return `${n} ${ANIMAL_LABEL[a]} ald\u0131n\u0131z${seller ? ` (${seller.name})` : ""}. G\xFCnl\xFCk yem: ${Math.round(ANIMAL_FEED[a] * n * 10) / 10} bu\u011Fday.`;
+  herd(p)[a] += n2;
+  return `${n2} ${ANIMAL_LABEL[a]} ald\u0131n\u0131z${seller ? ` (${seller.name})` : ""}. G\xFCnl\xFCk yem: ${Math.round(ANIMAL_FEED[a] * n2 * 10) / 10} bu\u011Fday.`;
 }
 function slaughter(w, p, a) {
   const hd = herd(p);
@@ -6045,7 +6047,7 @@ function orderLabel(w, o) {
   const t = findPerson(w, o.targetId)?.name ?? "";
   const pl = w.buildings.find((b2) => b2.id === o.place)?.name ?? "";
   const it = o.item ? GOOD_LABEL[o.item] : "";
-  const n = o.amount ?? 1;
+  const n2 = o.amount ?? 1;
   switch (o.type) {
     case "go":
       return `${pl || t || "bir yere"} gidiyor`;
@@ -6060,11 +6062,11 @@ function orderLabel(w, o) {
     case "steal":
       return `${t} ki\u015Fisinden \xE7almaya gidiyor`;
     case "give":
-      return `${t}'a ${n} ${it} g\xF6t\xFCr\xFCyor`;
+      return `${t}'a ${n2} ${it} g\xF6t\xFCr\xFCyor`;
     case "sell":
-      return `${t}'a ${n} ${it} sat\u0131yor`;
+      return `${t}'a ${n2} ${it} sat\u0131yor`;
     case "buy":
-      return `Pazardan ${n} ${it} almaya gidiyor`;
+      return `Pazardan ${n2} ${it} almaya gidiyor`;
     case "work":
       return `${pl || "i\u015Fyerinde"} \xE7al\u0131\u015Fmaya gidiyor`;
     case "vote":
@@ -6352,7 +6354,7 @@ function execute(w, npc, now) {
   const tk = npc.task;
   const t = findPerson(w, tk.targetId);
   const by = findPerson(w, tk.byId);
-  const n = tk.amount ?? 1;
+  const n2 = tk.amount ?? 1;
   const it = tk.item ? GOOD_LABEL[tk.item] : "";
   w.serverNow = now;
   switch (tk.type) {
@@ -6392,26 +6394,26 @@ function execute(w, npc, now) {
       return finish(w, npc, !!r, r ? `${t.name} tutukland\u0131.` : "Tutuklayamad\u0131m.", now);
     }
     case "give": {
-      if (!t || !tk.item || npc.inv[tk.item] < n) return finish(w, npc, false, `Elimde ${it} kalmad\u0131.`, now);
-      npc.inv[tk.item] -= n;
-      t.inv[tk.item] += n;
+      if (!t || !tk.item || npc.inv[tk.item] < n2) return finish(w, npc, false, `Elimde ${it} kalmad\u0131.`, now);
+      npc.inv[tk.item] -= n2;
+      t.inv[tk.item] += n2;
       rel(t, npc, 4, "bana hediye getirdi");
-      return finish(w, npc, true, `${ek(t.name, "a")} ${n} ${it} verdim.`, now);
+      return finish(w, npc, true, `${ek(t.name, "a")} ${n2} ${it} verdim.`, now);
     }
     case "sell": {
-      if (!t || !tk.item || npc.inv[tk.item] < n) return finish(w, npc, false, `${it} kalmad\u0131.`, now);
-      const price = Math.round(marketPrice(w, tk.item) * n * 100) / 100;
+      if (!t || !tk.item || npc.inv[tk.item] < n2) return finish(w, npc, false, `${it} kalmad\u0131.`, now);
+      const price = Math.round(marketPrice(w, tk.item) * n2 * 100) / 100;
       if (!transfer(w, t.id, npc.id, price, `${it} sat\u0131\u015F\u0131`)) return finish(w, npc, false, "Paran\u0131z yetmedi.", now);
-      npc.inv[tk.item] -= n;
-      t.inv[tk.item] += n;
+      npc.inv[tk.item] -= n2;
+      t.inv[tk.item] += n2;
       npc.incomeToday += price;
-      return finish(w, npc, true, `${n} ${it} teslim; ${price} Dinar ald\u0131m.`, now);
+      return finish(w, npc, true, `${n2} ${it} teslim; ${price} Dinar ald\u0131m.`, now);
     }
     case "buy": {
       if (!tk.item) return finish(w, npc, false, "Ne alaca\u011F\u0131m\u0131 bilmiyorum.", now);
-      const price = marketPrice(w, tk.item) * n * 1.2;
+      const price = marketPrice(w, tk.item) * n2 * 1.2;
       if (by && by.id !== npc.id) transfer(w, by.id, npc.id, Math.min(by.money, price), "al\u0131\u015Fveri\u015F paras\u0131");
-      const got = buy(w, npc.id, tk.item, n);
+      const got = buy(w, npc.id, tk.item, n2);
       if (got > 0 && by && by.id !== npc.id) {
         npc.inv[tk.item] -= got;
         by.inv[tk.item] += got;
@@ -6554,6 +6556,29 @@ function revealOrder(w, criminal) {
   }
 }
 
+// src/sim/look.ts
+var SKIN_TONES = ["#f6d7bd", "#f1c9a5", "#e8b88f", "#e0ac7e", "#d39a6a", "#c68a5a", "#a8714a", "#8d5a3b", "#6e4329", "#4f2f1c"];
+var HAIR_COLORS = ["#151515", "#2b1a10", "#3d2314", "#4a2c17", "#6b3a1e", "#7a4a22", "#9a5a2a", "#b07a3b", "#c8a060", "#e0c890", "#a83224", "#6b6b6b", "#b8b8b8", "#efefef"];
+var BEARDS = ["Yok", "B\u0131y\u0131k", "Pala b\u0131y\u0131k", "Ke\xE7i sakal\u0131", "K\u0131sa sakal", "G\xFCr sakal"];
+var EYES = ["#1a1410", "#3b2414", "#5a3a1a", "#3a6a3a", "#3a5a8a", "#6a6a6a"];
+var BUILDS = ["\u0130nce", "Orta", "\u0130ri"];
+var HEIGHTS = ["K\u0131sa", "Uzun"];
+var CLOTHS = ["#b8492f", "#3f6fb0", "#4f8a3a", "#b08a2f", "#7a4fa0", "#a0603a", "#2f8a86", "#8a2f55", "#d8d0c0", "#2a2a2a", "#c86a1a", "#1f4a6a", "#6a7a2a", "#a02a2a", "#d0a0b0", "#4a3a2a", "#e0c040"];
+var OUTFITS = ["G\xF6mlek", "Entari", "Yelek", "Kaftan", "\u0130\u015F \xF6nl\xFC\u011F\xFC", "C\xFCppe"];
+var HEADS = ["Yok", "Fes", "Sar\u0131k", "Kalpak", "Ba\u015F\xF6rt\xFCs\xFC", "Has\u0131r \u015Fapka", "Takke"];
+var TERZI_PRICE = 15;
+var BERBER_PRICE = 8;
+var n = (v, max) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v < max ? v : null;
+function cleanLook(x) {
+  if (!x || typeof x !== "object") return null;
+  const o = { skin: n(x.skin, SKIN_TONES.length), hair: n(x.hair, 12), hairColor: n(x.hairColor, HAIR_COLORS.length), beard: n(x.beard, BEARDS.length), eye: n(x.eye, EYES.length), build: n(x.build, BUILDS.length), height: n(x.height, HEIGHTS.length), cloth: n(x.cloth, CLOTHS.length), outfit: n(x.outfit, OUTFITS.length), head: n(x.head, HEADS.length) };
+  if (Object.values(o).some((v) => v === null)) return null;
+  return { ...o, scarf: !!x.scarf, belt: !!x.belt, jewel: !!x.jewel };
+}
+function lookFromSeeds(p) {
+  return { skin: [1, 3, 5, 7][p.skin % 4], hair: 0, hairColor: [1, 3, 5, 7, 0, 11, 8, 2][p.hairColor % 8], beard: !p.female && p.hairColor % 3 === 0 ? 1 : 0, eye: 1, build: 1, height: 1, cloth: p.shirt % 8, outfit: 0, head: 0, scarf: false, belt: false, jewel: false };
+}
+
 // src/sim/actions.ts
 var ok2 = (msg) => ({ ok: true, msg });
 var no = (msg) => ({ ok: false, msg });
@@ -6630,7 +6655,7 @@ function applyAction(w, playerId, a, now) {
   const isKayzer = (ww, p) => canRule(ww, p, now, ONLINE_WINDOW_MS);
   if ((me.homeUntil ?? 0) > now && !["goHome", "setSpeed", "setGoal", "petition", "answerProposal", "defense", "restCase"].includes(a.t)) leaveHome(me);
   const jailedOk = ["petition", "eat", "divorce", "answerProposal", "defense", "restCase", "offerBribe", "setSpeed", "setGoal"];
-  const cellRising = a.t === "orgAct" && a.deed === "ayaklanma";
+  const cellRising = a.t === "orgAct" && a.deed === "ayaklanma" || a.t === "customize" && a.where === "ilk";
   if (me.jailedDays > 0 && !jailedOk.includes(a.t) && !cellRising) return no("Zindandas\u0131n\u0131z; \u015Fimdilik sadece dilek\xE7e yazabilirsiniz.");
   const exileOk = [...jailedOk, "restore", "buy", "sell", "marry", "haveChild", "school", "cure"];
   if (me.exiledDays > 0 && !exileOk.includes(a.t)) return no(`S\xFCrg\xFCndesiniz (${me.exiledDays} g\xFCn kald\u0131).`);
@@ -7370,6 +7395,29 @@ function applyAction(w, playerId, a, now) {
       if (acc) rel(acc, me, 15, "beni mahkemede savundu");
       return ok2("Savunmay\u0131 \xFCstlendiniz; delil zay\u0131flad\u0131.");
     }
+    case "customize": {
+      const L = cleanLook(a.look);
+      if (!L) return no("Ge\xE7ersiz g\xF6r\xFCn\xFCm.");
+      const cur = me.look ?? lookFromSeeds(me);
+      if (!me.lookSet || a.where === "ilk") {
+        if (me.lookSet) return no("\u0130lk g\xF6r\xFCn\xFCm zaten se\xE7ildi; Terzi ya da Berber\u2019e gidin.");
+        me.look = L;
+        me.lookSet = true;
+        return ok2("G\xF6r\xFCn\xFCm\xFCn\xFCz kaydedildi.");
+      }
+      if (a.where === "terzi") {
+        const nl2 = { ...cur, cloth: L.cloth, outfit: L.outfit, head: L.head, scarf: L.scarf, belt: L.belt, jewel: L.jewel };
+        const tailor = w.people.find((p) => p.prof === "dokumaci" && p.jailedDays === 0 && p.id !== me.id);
+        if (!transfer(w, me.id, tailor?.id ?? "saray", TERZI_PRICE, "terzi (yeni k\u0131yafet)")) return no(`Terzi ${TERZI_PRICE} Dinar ister.`);
+        if (tailor) tailor.incomeToday += TERZI_PRICE;
+        me.look = nl2;
+        return ok2(`Yeni k\u0131yafetiniz haz\u0131r (${TERZI_PRICE} D).`);
+      }
+      const nl = { ...cur, hair: L.hair, hairColor: L.hairColor, beard: L.beard };
+      if (!transfer(w, me.id, "saray", BERBER_PRICE, "berber")) return no(`Berber ${BERBER_PRICE} Dinar ister.`);
+      me.look = nl;
+      return ok2(`Berber i\u015Fini bitirdi (${BERBER_PRICE} D).`);
+    }
     case "witness": {
       const c = w.cases.find((x) => x.id === a.caseId && x.stage !== "kapandi");
       if (!c || c.accusedId === me.id) return no("Dava yok.");
@@ -7533,9 +7581,9 @@ function filterProfanity(s) {
     return BAD.some((b2) => lw === b2 || b2.length >= 4 && lw.startsWith(b2)) ? "*".repeat(word.length) : word;
   });
 }
-function rateOk(times, now, n = 5, windowMs = 3e4) {
+function rateOk(times, now, n2 = 5, windowMs = 3e4) {
   while (times.length && now - (times[0] ?? 0) > windowMs) times.shift();
-  if (times.length >= n) return false;
+  if (times.length >= n2) return false;
   times.push(now);
   return true;
 }
@@ -7739,13 +7787,13 @@ function llmBudget(w, today, perDay) {
   }
   return w.llm.n < perDay;
 }
-function llmSpend(w, today, n = 1) {
+function llmSpend(w, today, n2 = 1) {
   w.llm = w.llm ?? { day: today, n: 0, talkAt: 0 };
   if (w.llm.day !== today) {
     w.llm.day = today;
     w.llm.n = 0;
   }
-  w.llm.n += n;
+  w.llm.n += n2;
 }
 function admin(w, op) {
   return applyAdmin(w, op);

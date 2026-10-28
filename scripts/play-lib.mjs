@@ -24,5 +24,6 @@ export async function boot(name = 'Oyuncu Test', extra = '') {
     tapWorld: async (x, y) => { const [sx, sy] = await I((x, y) => window.__imp().toScreen(x, y), x, y); await p.touchscreen.tap(sx, sy); await sleep(600); },
     tick: async (ms) => sleep(ms),
   };
+  await sleep(800); await I(() => [...document.querySelectorAll('.look-modal button')].find((x) => x.textContent.includes('Kaydet'))?.click()); await sleep(1500);
   await T.dismiss(); return T;
 }

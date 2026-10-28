@@ -1,3 +1,4 @@
+import { cleanLook, lookFromSeeds, TERZI_PRICE, BERBER_PRICE } from './look';
 import { ek } from './tr';
 import { moveIn, goInside, leaveHome, atHomeSafe } from './housing';
 import { kayzerBill, foundFaction, members } from './meclis';
@@ -100,7 +101,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
   const isKayzer = (ww: World, p: Person): boolean => canRule(ww, p, now, ONLINE_WINDOW_MS);
   if ((me.homeUntil ?? 0) > now && !['goHome', 'setSpeed', 'setGoal', 'petition', 'answerProposal', 'defense', 'restCase'].includes(a.t)) leaveHome(me); // any other action = you step outside
   const jailedOk: Action['t'][] = ['petition', 'eat', 'divorce', 'answerProposal', 'defense', 'restCase', 'offerBribe', 'setSpeed', 'setGoal'];
-  const cellRising = a.t === 'orgAct' && a.deed === 'ayaklanma'; // v1.9.6: a jailed leader can still give the signal
+  const cellRising = (a.t === 'orgAct' && a.deed === 'ayaklanma') || (a.t === 'customize' && a.where === 'ilk'); // v1.9.6: a jailed leader can still give the signal
   if (me.jailedDays > 0 && !jailedOk.includes(a.t) && !cellRising) return no('Zindandasınız; şimdilik sadece dilekçe yazabilirsiniz.');
   const exileOk: Action['t'][] = [...jailedOk, 'restore', 'buy', 'sell', 'marry', 'haveChild', 'school', 'cure'];
   if (me.exiledDays > 0 && !exileOk.includes(a.t)) return no(`Sürgündesiniz (${me.exiledDays} gün kaldı).`);
@@ -432,6 +433,20 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       c.defenders.push(me.id); c.evidence = Math.max(0, c.evidence - 12 - me.school / 3); const acc = findPerson(w, c.accusedId);
       if (acc && transfer(w, acc.id, me.id, Math.min(acc.money, 8), 'avukatlık ücreti')) me.incomeToday += 8;
       if (acc) relate(acc, me, 15, 'beni mahkemede savundu'); return ok('Savunmayı üstlendiniz; delil zayıfladı.');
+    }
+    case 'customize': {
+      const L = cleanLook(a.look); if (!L) return no('Geçersiz görünüm.');
+      const cur = me.look ?? lookFromSeeds(me);
+      if (!me.lookSet || a.where === 'ilk') { if (me.lookSet) return no('İlk görünüm zaten seçildi; Terzi ya da Berber’e gidin.'); me.look = L; me.lookSet = true; return ok('Görünümünüz kaydedildi.'); }
+      if (a.where === 'terzi') {
+        const nl = { ...cur, cloth: L.cloth, outfit: L.outfit, head: L.head, scarf: L.scarf, belt: L.belt, jewel: L.jewel };
+        const tailor = w.people.find((p) => p.prof === 'dokumaci' && p.jailedDays === 0 && p.id !== me.id);
+        if (!transfer(w, me.id, tailor?.id ?? 'saray', TERZI_PRICE, 'terzi (yeni kıyafet)')) return no(`Terzi ${TERZI_PRICE} Dinar ister.`);
+        if (tailor) tailor.incomeToday += TERZI_PRICE; me.look = nl; return ok(`Yeni kıyafetiniz hazır (${TERZI_PRICE} D).`);
+      }
+      const nl = { ...cur, hair: L.hair, hairColor: L.hairColor, beard: L.beard };
+      if (!transfer(w, me.id, 'saray', BERBER_PRICE, 'berber')) return no(`Berber ${BERBER_PRICE} Dinar ister.`);
+      me.look = nl; return ok(`Berber işini bitirdi (${BERBER_PRICE} D).`);
     }
     case 'witness': {
       const c = w.cases.find((x) => x.id === a.caseId && x.stage !== 'kapandi'); if (!c || c.accusedId === me.id) return no('Dava yok.');

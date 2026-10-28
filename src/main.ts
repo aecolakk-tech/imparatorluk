@@ -16,7 +16,8 @@ import { GUIDE, RULES } from './ui/texts';
 import { feedPanel, hudChips, quickPanel } from './ui/life';
 import { rulerScreen } from './ui/ruler';
 import type { Candidate, ChatMsg } from './server/core';
-import { makeSprite } from './ui/sprites';
+import { makeSprite, setRuler } from './ui/sprites';
+import { SKIN_NAMES, HAIR_COLOR_NAMES, HAIR_STYLES_M, HAIR_STYLES_F, BEARDS, EYE_NAMES, BUILDS, HEIGHTS, CLOTH_NAMES, OUTFITS, HEADS, TERZI_PRICE, BERBER_PRICE, randomLook, lookFromSeeds, type Look } from './sim/look';
 import { GOALS } from './sim/goals';
 import { season, SEASON_LABEL, ANIMALS, ANIMAL_LABEL, ANIMAL_PRICE, ANIMAL_FEED, FARM_PRICE, BARN, RANKS_N, RANK_INFO, FIEFS, ORG_LABEL, ORG_GOAL, orgGoalProgress, ROLE_LABEL, type OrgRole, type OrgKind, type Rank } from './sim/realm';
 import type { GoalId } from './sim/types';
@@ -104,7 +105,7 @@ const canvas = h('canvas', { id: 'map' });
 const ctx2d = canvas.getContext('2d')!;
 
 function ctx(): Ctx {
-  return { w: world!, me: me(), founder: !!be.session()?.founder, act: (a) => void doAct(a), dm: (id) => { dmTarget = id; openChat(); }, openPerson: (id) => openPersonSheet(id), openCitizens: () => openCitizens(), atSaray: atSaray(), say: (id, text) => { dmTarget = id; pendingSay = text; openChat(); } };
+  return { w: world!, me: me(), founder: !!be.session()?.founder, act: (a) => void doAct(a), dm: (id) => { dmTarget = id; openChat(); }, openPerson: (id) => openPersonSheet(id), openCitizens: () => openCitizens(), openLook: (mode) => openLook(mode), atSaray: atSaray(), say: (id, text) => { dmTarget = id; pendingSay = text; openChat(); } };
 }
 let pending: { a: Action; label: string; since: number; retarget: number } | null = null;
 let walkTarget: Pt | null = null;
@@ -181,8 +182,41 @@ function guide(step = 0): void {
 }
 
 const SEASON_IC: Record<string, string> = { ilkbahar: 'spring', yaz: 'summer', sonbahar: 'autumn', kis: 'winter' };
+// ---------------- v1.9.7 character creator / Terzi / Berber ----------------
+let lookOpen = false;
+function openLook(mode: 'ilk' | 'terzi' | 'berber'): void {
+  const m0 = me(); if (!m0 || lookOpen) return; lookOpen = true;
+  let L: Look = { ...(m0.look ?? lookFromSeeds(m0)) };
+  const female = m0.female;
+  type Row = [keyof Look, string, string[]];
+  const all: Row[] = [['skin', 'Ten rengi', SKIN_NAMES], ['hair', 'Saç modeli', female ? HAIR_STYLES_F : HAIR_STYLES_M], ['hairColor', 'Saç rengi', HAIR_COLOR_NAMES], ...(female ? [] : [['beard', 'Sakal / bıyık', BEARDS] as Row]), ['eye', 'Göz rengi', EYE_NAMES], ['build', 'Yapı', BUILDS], ['height', 'Boy', HEIGHTS], ['cloth', 'Kıyafet rengi', CLOTH_NAMES], ['outfit', 'Kıyafet', OUTFITS], ['head', 'Başlık', HEADS]];
+  const rows = all.filter(([k]) => mode === 'ilk' || (mode === 'terzi' ? ['cloth', 'outfit', 'head'].includes(k) : ['hair', 'hairColor', 'beard'].includes(k)));
+  const toggles: [keyof Look, string][] = mode === 'berber' ? [] : [['scarf', '🧣 Atkı'], ['belt', '🪢 Kuşak'], ['jewel', '💍 Takı']];
+  const prev = h('canvas', { width: '16', height: '16', class: 'look-prev', style: 'width:112px;height:112px;image-rendering:pixelated;background:#3a5a2a;border-radius:10px' }) as HTMLCanvasElement;
+  let fr = 0; const draw = (): void => { const g = prev.getContext('2d')!; g.clearRect(0, 0, 16, 16); g.drawImage(makeSprite({ ...m0, id: m0.id + ':prev', look: L })[fr]!, 0, 0); };
+  const timer = setInterval(() => { if (!prev.isConnected) { clearInterval(timer); return; } fr = 1 - fr; draw(); }, 300);
+  const body = h('div', {});
+  const paint = (): void => {
+    body.replaceChildren(...rows.map(([k, label, names]) => { const v = L[k] as number; const set = (d: number): void => { L = { ...L, [k]: (v + d + names.length) % names.length }; paint(); draw(); };
+      return h('div', { class: 'row look-row' }, h('span', { style: 'width:110px' }, label), h('button', { class: 'sm', onclick: () => set(-1) }, '‹'), h('b', { class: 'grow', style: 'text-align:center' }, `${names[v]} (${v + 1}/${names.length})`), h('button', { class: 'sm', onclick: () => set(1) }, '›')); }),
+      toggles.length ? h('div', { class: 'row' }, ...toggles.map(([k, label]) => h('button', { class: `sm${L[k] ? ' primary' : ''}`, onclick: () => { L = { ...L, [k]: !L[k] }; paint(); draw(); } }, label))) : '');
+  };
+  paint(); draw();
+  const price = mode === 'terzi' ? TERZI_PRICE : mode === 'berber' ? BERBER_PRICE : 0;
+  const close = (): void => { lookOpen = false; el.remove(); };
+  const el = h('div', { class: 'modal look-modal' }, h('div', { class: 'box', style: 'max-height:92vh;overflow:auto' },
+    h('h2', {}, mode === 'ilk' ? '🎨 Karakterinizi oluşturun' : mode === 'terzi' ? `🧵 Terzi – yeni kıyafet (${price} D)` : `✂ Berber – saç ve sakal (${price} D)`),
+    h('div', { class: 'row', style: 'align-items:flex-start;gap:12px' }, h('div', {}, prev, h('div', { class: 'muted', style: 'text-align:center' }, 'canlı önizleme')), body),
+    h('div', { class: 'row' }, mode === 'ilk' ? h('button', { onclick: () => { L = randomLook(Math.random, female); paint(); draw(); } }, '🎲 Rastgele') : '',
+      h('button', { class: 'primary', onclick: () => { const act: Action = { t: 'customize', look: L, where: mode }; if (mode === 'ilk') void send(act).then(close); else { close(); void doAct(act); } } }, mode === 'ilk' ? 'Kaydet' : `Öde ve değiştir (${price} D)`),
+      mode === 'ilk' ? '' : h('button', { onclick: close }, 'Vazgeç')),
+    mode === 'ilk' ? h('div', { class: 'muted' }, 'Bu seçim ücretsiz ve bir kez yapılır. Sonra kıyafeti Terzi’de (Dokuma Tezgâhı), saç/sakalı Berber’de (Zanaat Atölyesi) para ile değiştirebilirsiniz.') : ''));
+  app.append(el);
+}
+(window as unknown as { __openLook: typeof openLook }).__openLook = openLook;
 function renderHud(): void {
-  const w = world; if (!w) return; const m = me();
+  const w = world; if (!w) return; const m = me(); setRuler(w.kayzerId);
+  if (m && !m.lookSet && !m.npc && !document.querySelector('.modal:not(.look-modal)')) openLook('ilk');
   const k = findPerson(w, w.kayzerId); const ruler = !!m && w.kayzerId === m.id;
   const chips = hudChips(ctx()); // [clock, meals, water, health, mood, din, ...events]
   const events = chips.slice(m ? 6 : 1);
