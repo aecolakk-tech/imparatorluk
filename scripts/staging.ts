@@ -38,7 +38,7 @@ if (cmd === 'init') {
     if (!p) break;
     if (p.hunger > 50) act(w, BOT, { t: 'eat' } as never, now);
     if (p.thirst > 50) act(w, BOT, { t: 'drinkWater' } as never, now);
-    if (p.energy > 25 && w.hour >= 8 && w.hour < 17 && n % 3 === 0) act(w, BOT, { t: 'work' } as never, now);
+    if ((p.energy ?? 100) > 25 && w.hour >= 8 && w.hour < 17 && n % 3 === 0) act(w, BOT, { t: 'work' } as never, now);
   }
   save(w, now); const p = me(); console.log(`Gün ${w.day} saat ${w.hour}: Test Botu ${p ? `açlık ${Math.round(p.hunger)} susuzluk ${Math.round(p.thirst)} sağlık ${Math.round(p.health)} kese ${p.money.toFixed(1)} D` : 'öldü'}.`);
 } else if (cmd === 'status') {
