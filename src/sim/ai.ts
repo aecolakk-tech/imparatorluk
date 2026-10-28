@@ -80,8 +80,8 @@ export function feel(w: World, p: Person): void {
 
 export function think(w: World, p: Person): string {
   if (p.jailedDays > 0) return 'Zindandayım… Hâkim insaf etsin.';
-  if (p.hunger > 60) return marketPrice(w, 'ekmek') > 4.5 ? 'Ekmek pahalı, saraya dilekçe yazayım.' : 'Karnım aç, bir lokma ekmek…';
-  if (p.thirst > 60) return 'Su lazım, kuyuya gideyim.';
+  if (p.hunger > 75) return marketPrice(w, 'ekmek') > 4.5 ? 'Ekmek pahalı, saraya dilekçe yazayım.' : 'Karnım aç, bir lokma ekmek…';
+  if (p.thirst > 75) return 'Su lazım, kuyuya gideyim.';
   if (p.money < 5) return 'Cebimde metelik yok.';
   if (p.unemployedDays > 2) return 'İş yok, şantiyede iş arayayım.';
   if (p.plotting !== 'none') return p.plotting === 'coup' ? 'Askerlerle konuşmak lazım…' : 'Halk uyanmalı, cumhuriyet!';

@@ -12,7 +12,8 @@ import { disaster } from './life';
 import { log, personal } from './log';
 import { die } from './family';
 import { arms, bestWeapon, isUniformed, kislaKit, ARM_LABEL } from './arms';
-import { placePeople } from './place';
+import { combatTick, startRaidCombat, startWarCombat } from './combat';
+import { SAIL_MS } from './combatpos';
 
 export const RAID_N = 10; export const RAID_COOLDOWN = 10;
 export const WAR_COOLDOWN = 30; export const RECRUIT_MAX = 15; export const RECRUIT_PAY = 6; export const RANSOM = 40; export const CAPTIVE_MAX = 5;
@@ -32,53 +33,35 @@ function hitDefender(w: World, p: Person, by: string, out: { dead: string[]; wou
 function useAmmo(p: Person): void { const a = arms(p); if ((a.yay ?? 0) && (a.ok ?? 0)) a.ok = Math.max(0, (a.ok ?? 0) - 2); } // a volley of arrows
 
 // ---------------- eşkıya baskını ----------------
-export function raidHour(w: World, now: number): void {
+export function raidHour(w: World, _now: number): void {
   const r = w.raid;
   if (!r) {
     if (w.hour === 9 && w.day >= (w.raidNext ?? 12) && !w.foreign?.landed && chance(w, 0.04)) startRaidWarning(w);
     return;
   }
-  if (r.phase === 'uyari' && w.hour === 22) {
-    r.phase = 'gece'; r.robbers = Array.from({ length: RAID_N }, (_, i) => ({ id: `R${i}`, hp: 2 })); r.startAt = now;
-    for (const p of w.people) if (!p.playerId || p.npc) p.nightOut = false;
-    disaster(w, 'baskin', `EŞKIYA ŞEHİRDE! ${RAID_N} kılıçlı, yaylı eşkıya sokaklarda. Dışarıda yakaladıklarını soyup öldürüyorlar. Evinize girin (Eve git) – evdekilere dokunamazlar. Asker ve bekçiler savaşıyor; silahlı asker/bekçiyseniz sokakta kalıp savaşabilirsiniz.`);
-    return;
-  }
-  if (r.phase !== 'gece') return;
-  const alive = (r.robbers ?? []).filter((x) => x.hp > 0);
-  const defenders = w.people.filter(fighting);
-  const res = { dead: [] as string[], wounded: [] as string[] };
-  // defenders strike (half the soldiers are on the walls, all bekçis patrol)
-  for (const d of defenders) {
-    const target = alive.find((x) => x.hp > 0); if (!target) break;
-    if (d.prof === 'asker' && rand(w) < 0.35) continue;
-    if (rand(w) < unitPower(d) * 0.3) { target.hp -= 1; useAmmo(d); if (target.hp <= 0) { r.killed = (r.killed ?? 0) + 1; d.xp += 2; } }
-  }
-  const still = alive.filter((x) => x.hp > 0);
-  // robbers strike back
-  for (const _ of still) { const live = w.people.filter(fighting); if (!live.length || rand(w) > 0.2) continue; hitDefender(w, pick(w, live), 'Eşkıya', res); }
-  // victims on the street
-  const placed = placePeople(w, now);
-  for (const q of placed) {
-    const p = q.p; if (!q.visible || isUniformed(p) || p.jailedDays > 0 || p.prof === 'naip' || (p.homeUntil ?? 0) > now) continue;
-    if (!still.length || rand(w) > 0.12 * still.length / RAID_N + (p.playerId ? 0.1 : 0)) continue;
-    const take = Math.round(p.money * 0.6 * 100) / 100; if (take > 0) { transfer(w, p.id, 'dis', take, 'eşkıya soygunu'); r.stolen = (r.stolen ?? 0) + take; }
-    const hr = arms(p); for (const k of ['yay', 'kilic', 'hancer', 'ok', 'kalkan'] as const) if (hr[k]) { hr[k] = 0; } p.drawn = null; w.armsReg = (w.armsReg ?? []).filter((x) => x.ownerId !== p.id); // they take the weapons too
-    if (p.playerId && !p.npc) {
-      if (p.health < 30 && rand(w) < 0.25) { (r.dead ??= []).push(p.name); die(w, p, `${p.name} eşkıya baskınında öldürüldü.`); continue; }
-      p.health = 5; p.wounded = true; (r.hurt ??= []).push(p.name);
-      personal(w, p.playerId, `🗡 Eşkıya sizi soydu (${take} D) ve ağır yaraladı! Hemen Hekimhane’ye gidin.`);
-    } else { (r.dead ??= []).push(p.name); die(w, p, `${p.name} eşkıya baskınında öldürüldü.`); }
-  }
-  r.defDead = [...(r.defDead ?? []), ...res.dead]; r.defHurt = [...(r.defHurt ?? []), ...res.wounded];
-  if (!still.length || w.hour === 6) endRaid(w, !still.length);
+  // v2.0.1: the night itself (and its real-time fight) is run by raidRealtime()
+}
+/** v2.0.1: called on every request – starts the raid night at 22:00 sharp and runs real-time combat. */
+export function bigEventsRealtime(w: World, now: number): void {
+  const r = w.raid;
+  if (r?.phase === 'uyari' && ((w.day === r.day && w.hour >= 22) || w.day > r.day)) startNight(w, now);
+  if (r?.phase === 'gece' && !w.combat) startRaidCombat(w, now, (r.robbers ?? []).filter((x) => x.hp > 0).length || RAID_N); // deployed mid-raid
+  const f = w.foreign; if (f && f.phase === 'savas' && !f.landed && f.landReal && now >= f.landReal) landNow(w, now); // admin-scheduled landing at a real time
+  if (f?.landed && f.phase === 'savas' && !w.combat) { startWarCombat(w, now - SAIL_MS, f.alive ?? f.troops); }
+  combatTick(w, now, (kind, won) => { if (kind === 'raid' && w.raid) endRaid(w, won); else if (kind === 'war' && w.foreign) warEnd(w, won); else w.combat = null; });
+}
+function startNight(w: World, now: number): void {
+  const r = w.raid!; r.phase = 'gece'; r.robbers = Array.from({ length: RAID_N }, (_, i) => ({ id: `R${i}`, hp: 2 })); r.startAt = now;
+  for (const p of w.people) if (!p.playerId || p.npc) p.nightOut = false;
+  startRaidCombat(w, now, RAID_N);
+  disaster(w, 'baskin', `EŞKIYA ŞEHİRDE! (saat ${String(w.hour).padStart(2, '0')}:00) ${RAID_N} kılıçlı, yaylı eşkıya sokaklarda. Dışarıda yakaladıklarını soyuyorlar. Evinize girin (Eve git) – evdekilere dokunamazlar. Asker ve bekçiler savaşıyor. Silahınız varsa alttaki hızlı çubuktan seçin ve eşkıyaya dokunun ya da ‘Saldır’a basın.`);
 }
 export function startRaidWarning(w: World): void {
   w.raid = { phase: 'uyari', day: w.day };
   disaster(w, 'baskin_uyari', `Bu gece silahlı eşkıya bekleniyor! ${RAID_N} eşkıya saat 22:00’de şehre girecek, sabaha kadar sokakta yakaladıklarını soyup öldürecek. Yapılacaklar: gece dışarıda kalmayın (eve gidin); paranızı sandığa koyun; asker/bekçiyseniz Kışla’dan teçhizat alın. NPC’ler bu gece evden çıkmayacak.`);
 }
 function endRaid(w: World, won: boolean): void {
-  const r = w.raid!; const killed = r.killed ?? 0;
+  const r = w.raid!; const cb = w.combat as (NonNullable<World['combat']> & { fallen?: string[]; hurt?: string[] }) | null | undefined; if (cb) { r.defDead = [...(r.defDead ?? []), ...(cb.fallen ?? [])]; r.defHurt = [...new Set([...(r.defHurt ?? []), ...(cb.hurt ?? [])])]; } w.combat = null; const killed = r.killed ?? 0; r.hurt = [...new Set(r.hurt ?? [])]; r.defHurt = [...new Set(r.defHurt ?? [])]; r.dead = [...new Set(r.dead ?? [])];
   let recovered = 0; if (r.stolen) { recovered = Math.round(r.stolen * killed / RAID_N * 100) / 100; if (recovered > 0) transfer(w, 'dis', 'saray', recovered, 'eşkıyadan geri alınan ganimet'); }
   for (const p of w.people) if (isUniformed(p)) { p.loyalty = clamp(p.loyalty + (won ? 5 : -3)); }
   disaster(w, won ? 'baskin_zafer' : 'baskin_sonu', `${won ? 'EŞKIYA PÜSKÜRTÜLDÜ!' : 'Eşkıya sabah çekildi.'} Öldürülen eşkıya: ${killed}/${RAID_N}. Çalınan: ${Math.round(r.stolen ?? 0)} D, geri alınıp hazineye konan: ${Math.round(recovered)} D. Ölen siviller: ${(r.dead ?? []).join(', ') || 'yok'}. Ağır yaralı: ${(r.hurt ?? []).join(', ') || 'yok'}. Şehit asker/bekçi: ${(r.defDead ?? []).join(', ') || 'yok'}; yaralı: ${(r.defHurt ?? []).length}.`);
@@ -93,11 +76,16 @@ export function foreignHour(w: World, now: number): void {
     return;
   }
   if (f.phase === 'talep' && w.day >= f.deadline && w.hour >= 12) answerForeign(w, 'war', true);
-  if (f.phase === 'savas' && w.day >= f.landDay! && w.hour >= 8 && !f.landed) {
-    f.landed = true; f.landAt = now; f.alive = f.troops;
-    disaster(w, 'cikarma', `${f.name} ordusu nehirden gemilerle çıkarma yaptı! ${f.troops} düşman askeri Liman’dan şehre yürüyor. Asker ve bekçilerimiz savaşıyor. Siviller evlerine girsin. Hepsi öldürülürse zafer; askerlerimizin hepsi düşerse ${f.name} haraç, mal ve esir alır.`);
+  if (f.phase === 'savas' && !f.landReal && w.day >= f.landDay! && w.hour >= 8 && !f.landed) landNow(w, now);
+  if (f.landed && f.phase === 'savas' && !w.combat) battleHour(w);
+}
+/** The ships enter the river: they sail up to the Liman (SAIL_MS), then the troops land and march (combat.ts). */
+function landNow(w: World, now: number): void {
+  const f = w.foreign!;
+  {
+    f.landed = true; f.landAt = now; f.alive = f.troops; startWarCombat(w, now, f.troops);
+    disaster(w, 'cikarma', `${f.name} gemileri nehirden Liman’a yanaşıyor! ~${Math.round(SAIL_MS / 1000)} saniye içinde ${f.troops} düşman askeri karaya çıkıp şehre yürüyecek. Asker ve bekçilerimiz savaşıyor. Siviller evlerine girsin. Hepsi öldürülürse zafer; askerlerimizin hepsi düşerse ${f.name} haraç, mal ve esir alır.`);
   }
-  if (f.landed && f.phase === 'savas') battleHour(w);
 }
 export function startForeign(w: World): void {
   const wars = w.wars ?? 0; const ours = w.people.filter(fighting).reduce((s, p) => s + unitPower(p), 0); // difficulty follows our real strength
@@ -148,7 +136,7 @@ function battleHour(w: World): void {
   if (f.alive === 0) warEnd(w, true); else if (!w.people.some(fighting)) warEnd(w, false);
 }
 function warEnd(w: World, won: boolean): void {
-  const f = w.foreign!;
+  const f = w.foreign!; const cb = w.combat as (NonNullable<World['combat']> & { fallen?: string[]; hurt?: string[] }) | null | undefined; if (cb) { f.ourDead = [...(f.ourDead ?? []), ...(cb.fallen ?? [])]; f.ourHurt = (f.ourHurt ?? 0) + (cb.hurt ?? []).length; } w.combat = null;
   if (won) {
     const loot = Math.round(f.demand * 0.3); transfer(w, 'dis', 'saray', loot, 'savaş ganimeti');
     for (const p of w.people) { if (isUniformed(p)) p.loyalty = clamp(p.loyalty + 8); p.mood = clamp(p.mood + 5); }

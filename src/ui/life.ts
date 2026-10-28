@@ -3,7 +3,7 @@ import { GOODS } from '../sim/types';
 import { BASE_PRICE, GOOD_LABEL, PROF_LABEL } from '../sim/constants';
 import { findPerson } from '../sim/world';
 import { electionDates, electionPhase } from '../sim/tick';
-import { rankOf } from '../sim/economy';
+import { rankOf, marketPrice } from '../sim/economy';
 import { QUESTS, armyPower } from '../sim/life';
 import { lawPreview } from '../sim/extras';
 import { CRIME_LABEL } from '../sim/ai';
@@ -23,7 +23,7 @@ export function activeEvents(w: World): { text: string; tip: string }[] {
   if ((w.festivalUntil ?? 0) >= w.day) out.push({ text: '🎉 Festival', tip: 'Festival Alanı açık: oraya gidin, mutluluk artar.' });
   if (w.caravan && w.day <= w.caravan.until) out.push({ text: `🐪 ${w.caravan.name}`, tip: 'Limanda kervan: pahalı ama bol mal; şehrin fazlasını da alır.' });
   if (w.raid) out.push({ text: w.raid.phase === 'gece' ? `🗡 Eşkıya baskını! (${(w.raid.robbers ?? []).filter((r) => r.hp > 0).length} eşkıya)` : '🗡 Bu gece eşkıya bekleniyor', tip: 'Gece dışarıda kalmayın; asker ve bekçiler savaşır.' });
-  if (w.foreign) out.push({ text: w.foreign.landed ? `⚔ ${w.foreign.name}: ${w.foreign.alive} düşman askeri şehirde` : w.foreign.phase === 'savas' ? `⚔ ${w.foreign.name} ${w.foreign.landDay}. gün çıkarma yapacak` : `📜 ${w.foreign.name} elçisi cevap bekliyor`, tip: 'Yabancı devlet.' });
+  if (w.foreign) out.push({ text: w.foreign.landed ? (w.combat && !w.combat.spawned ? `⛵ ${w.foreign.name} gemileri Liman’a yanaşıyor` : `⚔ ${w.foreign.name}: ${w.combat ? w.combat.foes.filter((f) => f.hp > 0).length : w.foreign.alive} düşman askeri şehirde`) : w.foreign.phase === 'savas' ? `⚔ ${w.foreign.name} ${w.foreign.landDay}. gün çıkarma yapacak` : `📜 ${w.foreign.name} elçisi cevap bekliyor`, tip: 'Yabancı devlet.' });
   if (w.fire) out.push({ text: `🔥 ${w.buildings.find((b) => b.id === w.fire!.bid)?.name ?? ''} yanıyor`, tip: 'İçerideyseniz hemen çıkın.' });
   if (w.threat) out.push({ text: `⚔️ ${w.threat.name}: ${w.threat.demand} D haraç (${w.threat.deadline}. gün)`, tip: 'Sınırda tehdit. Kayzer haraç öder ya da ordu savaşır.' });
   const ph = electionPhase(w); if (ph.phase !== 'bekleme' || w.election.nextDay - w.day <= 9) out.push({ text: `🗳 ${ph.label}`, tip: 'Seçim takvimi: adaylık → propaganda (afiş, konuşma) → oylama günü.' });
@@ -34,11 +34,11 @@ export function activeEvents(w: World): { text: string; tip: string }[] {
 /** HUD chips: clock + speed, my needs, events. */
 export function hudChips(c: Ctx): HTMLElement[] {
   const w = c.w; const m = c.me; const out: HTMLElement[] = [];
-  out.push(chip(`${dayPart(w.hour)} · Gün ${w.day} · ${String(w.hour).padStart(2, '0')}:00${w.speed !== 1 ? ` · ${w.speed}x` : ''}`, '1 oyun günü = 6 gerçek dakika (1x). Hızı sadece Kayzer değiştirir.'));
+  out.push(chip(`${dayPart(w.hour)} · Gün ${w.day} · ${String(w.hour).padStart(2, '0')}:00${w.speed !== 1 ? ` · ${w.speed}x` : ''}`, '1 oyun günü = 20 gerçek dakika (1x): gündüz (06–22) 1 oyun saati = 1 dakika, gece (22–06) 30 saniye. Kimse çevrimiçi değilken saat durur. Hızı sadece Kayzer değiştirir.'));
   if (m) {
-    const mealOk = m.meals >= 3, waterOk = m.drinks >= 5;
-    out.push(chip(`🍞 ${m.meals}/3`, 'Bugünkü öğünler. 3 olmazsa gün sonunda −10 sağlık.', mealOk ? 'ok' : 'warn'));
-    out.push(chip(`💧 ${m.drinks}/5`, 'Bugün içilen su. 5 olmazsa gün sonunda −10 sağlık.', waterOk ? 'ok' : 'warn'));
+    const mealOk = m.meals >= 3, waterOk = m.drinks >= 3;
+    out.push(chip(`🍞 Öğün ${Math.min(m.meals, 3)}/3`, 'Bugün yediğiniz öğün sayısı (günde 3 gerekli). 3 olmazsa gün sonunda −10 sağlık.', mealOk ? 'ok' : 'warn'));
+    out.push(chip(`💧 Su ${Math.min(m.drinks, 3)}/3 kez`, 'Bugün kaç kez su içtiğiniz (günde 3 gerekli). 3 olmazsa gün sonunda −10 sağlık.', waterOk ? 'ok' : 'warn'));
     out.push(chip(`❤️ ${Math.round(m.health)}${m.wounded ? ' 🩸' : ''}`, m.health < 30 || m.wounded ? 'Hekime gitmeniz lazım (Hekimhane ya da ⚡).' : 'Sağlık', m.health < 30 || m.wounded ? 'warn' : ''));
     out.push(chip(`😊 ${Math.round(m.mood)}`, 'Mutluluk: kişisel hayatınız (yemek, aile, eğlence).'));
     out.push(chip(`🕌 ${Math.round(m.din)}`, 'Dindarlık (0–100): namaz artırır, içki düşürür.'));
@@ -54,14 +54,17 @@ function questBox(c: Ctx): HTMLElement | '' {
 }
 
 /** “Ne yapabilirim?” – everything a player can do right now, always available. */
+/** v2.0.1: the Ye / Su iç button says what it will cost (bag = free). */
+export function eatLabel(w: World, me: Person): string { const bag = (['ekmek', 'et', 'balik', 'yumurta', 'sut'] as Good[]).find((g) => (me.inv[g] ?? 0) > 0); return bag ? `🍞 Ye (çantadan ${GOOD_LABEL[bag]}, ücretsiz)` : `🍞 Ye (~${marketPrice(w, 'ekmek').toFixed(2)} D)`; }
+export function drinkLabel(w: World, me: Person): string { return (me.inv.su ?? 0) > 0 ? '💧 Su iç (çantadan, ücretsiz)' : `💧 Su iç (~${(marketPrice(w, 'su') * 2).toFixed(2)} D, 2 su)`; }
 export function quickPanel(c: Ctx): HTMLElement {
   const w = c.w; const me = c.me; const box = h('div', {}, h('h2', {}, '⚡ Ne yapabilirim?'));
   if (!me) return box;
   box.append(questBox(c));
   const btn = (label: string, tip: string, a: Parameters<Ctx['act']>[0], dis = false): HTMLElement => h('button', { title: tip, disabled: dis, onclick: () => c.act(a) }, label);
   box.append(h('h3', {}, 'İhtiyaçlar'), h('div', { class: 'row' },
-    btn(`🍞 Ye (${me.meals}/3)`, 'Elinizdeki ya da pazardaki en uygun yemeği yer. Et/balık daha çok mutlu eder.', { t: 'eat' }),
-    btn(`💧 Su iç (${me.drinks}/5)`, 'Kuyudan/pazardan su alıp içer.', { t: 'drinkWater' }),
+    btn(eatLabel(w, me), `Önce Çanta’daki yiyecek (ücretsiz), yoksa pazardan alıp yer. Bugün ${me.meals} öğün yediniz (günde 3 gerekli).`, { t: 'eat' }),
+    btn(drinkLabel(w, me), `Önce Çanta’daki su (ücretsiz), yoksa kuyudan/pazardan alır. Bugün ${me.drinks} kez su içtiniz (günde 3 gerekli).`, { t: 'drinkWater' }),
     btn('🩺 Hekime git', 'Sağlık 30 altı ya da yara varsa şart. Ücretlidir.', { t: 'doctor' }, !(me.health < 100 || me.wounded)),
   ));
   box.append(h('h3', {}, 'Gündelik hayat'), h('div', { class: 'row' },
@@ -88,7 +91,7 @@ export function quickPanel(c: Ctx): HTMLElement {
   // offers from NPCs
   const offers = w.offers.filter((o) => o.to === me.id);
   if (offers.length) box.append(h('h3', {}, `📨 Size gelen teklifler (${offers.length})`));
-  for (const o of offers) box.append(h('div', { class: 'card' }, h('b', {}, findPerson(w, o.from)?.name ?? '?'), `: ${o.text}`,
+  for (const o of offers) box.append(h('div', { class: 'card' }, h('b', {}, findPerson(w, o.from)?.name ?? '?'), `: ${o.text.replace(/^[^:]{1,40}:\s*/, (m) => (m.trim().slice(0, -1) === (findPerson(w, o.from)?.name ?? '') ? '' : m))}`,
     h('div', { class: 'row' }, h('button', { class: 'primary', onclick: () => c.act({ t: 'answerOffer', offerId: o.id, accept: true }) }, '✔ Kabul'), h('button', { onclick: () => c.act({ t: 'answerOffer', offerId: o.id, accept: false }) }, '✖ Ret'))));
   // trade hint
   const r = rankOf(me);
@@ -119,7 +122,7 @@ export function personExtras(c: Ctx, p: Person): HTMLElement {
   const line = ([id, v]: [string, number]): HTMLElement => h('div', { class: 'msg', style: 'cursor:pointer', onclick: () => c.openPerson(id) }, `${v > 0 ? '💚' : '💢'} ${findPerson(w, id)?.name ?? '?'} (${Math.round(v)})${p.relNote?.[id] ? ` — ${p.relNote[id]}` : ''}`);
   return h('div', {},
     h('div', { class: 'muted' }, `${p.female ? '♀ Kadın' : '♂ Erkek'} · ${r.label} ${PROF_LABEL[p.prof]} · itibar ${Math.round(p.rep ?? 0)} · dindarlık ${Math.round(p.din ?? 50)}${p.wounded ? ' · 🩸 yaralı' : ''}${p.titles?.length ? ` · 🎖 ${p.titles.join(', ')}` : ''}`),
-    h('div', { class: 'muted' }, `Bugün: 🍞 ${p.meals}/3 · 💧 ${p.drinks}/5`),
+    h('div', { class: 'muted' }, `Bugün: 🍞 ${p.meals}/3 öğün · 💧 ${p.drinks}/3 kez su (günlük gereken)`),
     rels.length ? h('details', {}, h('summary', {}, `Dostlar ve düşmanlar (${rels.length}) — nedenleriyle`), ...rels.slice(0, 6).map(line), ...rels.slice(-4).filter((x) => x[1] < 0 && !rels.slice(0, 6).includes(x)).map(line)) : h('div', { class: 'muted' }, 'Henüz güçlü bir dostluğu ya da düşmanlığı yok. Sohbet, yardım ve alışveriş dostluk; hakaret ve suç düşmanlık getirir.'),
   );
 }
@@ -177,7 +180,7 @@ export function buildingExtras(c: Ctx, b: Building): HTMLElement | null {
       me && (me.prof === 'imam' || me.prof === 'hoca') ? h('div', { class: 'row' }, ...(['namaz', 'icki', 'sabir'] as const).map((t) => h('button', { onclick: () => c.act({ t: 'sermon', topic: t }) }, `Vaaz: ${t}`))) : '');
     case 'bar': return h('div', {}, h('div', { class: 'muted' }, w.bans.includes('icki') ? 'İçki Yasağı yürürlükte: meyhane kapalı.' : 'Barcı buğdaydan içki yapar. İçmek mutluluk verir, dindarlığı düşürür.'), act('🍺 Bir kadeh iç', { t: 'drink' }));
     case 'hekimhane': return h('div', {}, h('div', { class: 'muted' }, 'Sağlık 30’un altındaysa ya da yaralıysanız ancak hekim iyileştirir. Ücret hekimin rütbesine göre.'), act('🩺 Muayene ol', { t: 'doctor' }));
-    case 'kuyu': return h('div', {}, h('div', { class: 'muted' }, 'Günde 5 su gerekir.'), act('💧 Su iç', { t: 'drinkWater' }));
+    case 'kuyu': return h('div', {}, h('div', { class: 'muted' }, 'Günde 3 kez su gerekir.'), act('💧 Su iç', { t: 'drinkWater' }));
     case 'festival': return h('div', {}, h('div', { class: 'muted' }, (w.festivalUntil ?? 0) >= w.day ? '🎉 Festival sürüyor! Halk burada eğleniyor.' : 'Festival Alanı sadece devlet festivali ilan edilince açılır (Saray).'));
     case 'ambar': return h('div', {}, h('div', { class: 'muted' }, `Tahıl ambarında ${Math.round(w.granary)} buğday var. Kuraklıkta sabit fiyatla satılır.`));
     case 'ciftlik': return h('div', {}, h('div', { class: 'muted' }, `Çiftçiler günde ~30 buğday biçer.${w.nature?.kind === 'kuraklik' ? ' Kuraklık: hasat yarıya düştü!' : ''}`));

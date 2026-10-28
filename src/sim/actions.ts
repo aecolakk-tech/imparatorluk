@@ -1,4 +1,7 @@
+import { shelf, fulfillOrder, granaryDistribute } from './market2';
+import { groupOf } from './economy';
 import { cleanLook, lookFromSeeds, TERZI_PRICE, BERBER_PRICE } from './look';
+import { attackFoe } from './combat';
 import { rebuild, nameEmpire } from './events3';
 import { buyArm, kislaKit, draw, stash, searchPerson, armsLine, ARM_LABEL } from './arms';
 import { answerForeign, recruit, ransom, RECRUIT_MAX } from './events2';
@@ -28,6 +31,8 @@ import { borrow, repay } from './extras';
 import { enactLaw, repealLaw, validateLaw } from './laws';
 import { inspectPerson } from './hoard';
 import { electionPhase, hourMs } from './tick';
+import { applyProfile, bribeMul } from './profile';
+import { continueAsChild } from './family';
 import { produce } from './economy';
 import { nearestOwnAnimal, ANIMAL_REACH } from './herdpos';
 import { actionNeed, distToBuilding, PERSON_REACH, REACH, rules } from './move';
@@ -62,18 +67,25 @@ export function joinWorld(w: World, playerId: string, name: string, prof: Profes
     p.name = `Kayzer ${clean(name).replace(/^(Kayzer\s+)+/i, '')}`; w.founderPersonId = p.id;
   } else {
     const safeProf = PLAYER_PROFS.includes(prof) ? prof : 'hamal';
+    const nm = clean(name).toLocaleLowerCase('tr'); // v2.0.1: no two characters with the same name (case-insensitive)
+    if (w.people.some((x) => x.name.toLocaleLowerCase('tr') === nm || (!!x.playerId && x.name.toLocaleLowerCase('tr').replace(/^\S+\s/, '') === nm))) throw new Error('Bu isimde biri zaten var; başka bir isim seçin.');
     const houses = w.buildings.filter((b) => b.kind === 'ev');
     const counts = new Map<string, number>(); for (const x of w.people) counts.set(x.home, (counts.get(x.home) ?? 0) + 1);
     const best = [...houses].sort((a, b) => (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0))[0]; const home = best && (counts.get(best.id) ?? 0) < 5 ? best.id : ''; // v1.9: full city = homeless until you buy/rent
     p = makePerson(w, { name: clean(name), prof: safeProf, money: 40, honesty: 60, ambition: 50, loyalty: 60 }, home);
+    p.profile = { fresh: true }; // the creation screen still sets Köken → meslek and money
     w.people.push(p);
   }
   p.playerId = playerId; p.npc = false; p.protectedUntil = w.day + 5;
+  // v2.0.1: a newcomer starts fed, watered and rested, with bread and water in the bag; needs pause during the intro
+  p.hunger = 0; p.thirst = 0; p.energy = 100; p.health = Math.max(p.health, 90); p.mood = Math.max(p.mood, 70); p.meals = Math.max(p.meals, 3); p.drinks = Math.max(p.drinks, 5); p.wounded = false;
+  if (!target && !founder) { p.inv.ekmek = 2; p.inv.su = 1; } else { p.inv.ekmek = Math.max(p.inv.ekmek ?? 0, 2); p.inv.su = Math.max(p.inv.su ?? 0, 1); } /* v2.0.1 starting kit: 2 Ekmek + 1 Su */ p.onboardUntil = now + ONBOARD_MS;
   w.players[playerId] = { playerId, personId: p.id, name: p.name, founder, banned: false, lastSeen: now, lastSeenDay: w.day, awayLog: [], awayMoney: p.money };
   log(w, `${p.name} şehre geldi.`, p.id);
   return p;
 }
 
+export const ONBOARD_MS = 15 * 60_000;
 export function clean(s: string): string { return s.replace(/[<>]/g, '').trim().slice(0, 24) || 'Yolcu'; }
 
 /** Heartbeat: marks presence; returns a 'siz yokken' summary when the player comes back. */
@@ -101,10 +113,20 @@ export function touchPlayer(w: World, playerId: string, now: number): string | n
 
 export function applyAction(w: World, playerId: string, a: Action, now: number): ActionResult {
   const pl = w.players[playerId]; if (!pl || pl.banned) return no('Hesap bulunamadı.');
-  const me = findPerson(w, pl.personId); if (!me) return no('Karakter bulunamadı.');
+  // v2.0.1 death flow: a dead player's account stays; he continues as an adult child or starts a new character
+  if (a.t === 'continueAs') { const e = continueAsChild(w, playerId, a.childId); return e ? no(e) : ok('Ailenizin yeni reisi olarak devam ediyorsunuz.'); }
+  if (a.t === 'newCharacter') {
+    const d = pl.dead; if (!d || findPerson(w, pl.personId)) return no('Karakteriniz yaşıyor.');
+    if (d.heirs.some((id) => { const c = findPerson(w, id); return c && (!c.playerId || c.npc); })) return no('Yetişkin bir çocuğunuz var; onunla devam edin.');
+    const keep = { ...pl }; delete w.players[playerId];
+    try { joinWorld(w, playerId, a.name, 'hamal', false, now); } catch (err) { w.players[playerId] = keep; return no((err as Error).message); }
+    const np = w.players[playerId]!; np.founder = keep.founder; np.banned = keep.banned; np.qf = { ctlPause: true }; np.quest = 0;
+    return ok('Yeni karakteriniz şehre geldi. Şimdi onu oluşturun.');
+  }
+  const me = findPerson(w, pl.personId); if (!me) return no(pl.dead ? 'Karakteriniz öldü. Cenaze ekranından bir çocuğunuzla devam edin ya da yeni karakter oluşturun.' : 'Karakter bulunamadı.');
   const isKayzer = (ww: World, p: Person): boolean => canRule(ww, p, now, ONLINE_WINDOW_MS);
-  if ((me.homeUntil ?? 0) > now && !['goHome', 'setSpeed', 'setGoal', 'petition', 'answerProposal', 'defense', 'callWitness', 'restCase'].includes(a.t)) leaveHome(me); // any other action = you step outside
-  const jailedOk: Action['t'][] = ['petition', 'eat', 'useItem', 'seenNews', 'nameEmpire', 'divorce', 'answerProposal', 'defense', 'callWitness', 'restCase', 'offerBribe', 'setSpeed', 'setGoal'];
+  if ((me.homeUntil ?? 0) > now && !['goHome', 'setSpeed', 'setGoal', 'onboardDone', 'onboardPause', 'seenNews', 'customize', 'useItem', 'petition', 'answerProposal', 'defense', 'callWitness', 'restCase'].includes(a.t)) leaveHome(me); // any other action = you step outside
+  const jailedOk: Action['t'][] = ['petition', 'eat', 'useItem', 'seenNews', 'onboardDone', 'onboardPause', 'customize', 'nameEmpire', 'divorce', 'answerProposal', 'defense', 'callWitness', 'restCase', 'offerBribe', 'setSpeed', 'setGoal'];
   const cellRising = (a.t === 'orgAct' && a.deed === 'ayaklanma') || (a.t === 'customize' && a.where === 'ilk'); // v1.9.6: a jailed leader can still give the signal
   if (me.jailedDays > 0 && !jailedOk.includes(a.t) && !cellRising) return no('Zindandasınız; şimdilik sadece dilekçe yazabilirsiniz.');
   const exileOk: Action['t'][] = [...jailedOk, 'restore', 'buy', 'sell', 'marry', 'haveChild', 'school', 'cure'];
@@ -127,17 +149,28 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
   switch (a.t) {
     case 'buy': {
       const q = num(a.qty, 1, 20); if (q === null || !GOODS.includes(a.good)) return no('Geçersiz miktar.');
-      const got = buy(w, me.id, a.good, Math.floor(q)); if (got) { me.bought = me.bought ?? {}; me.bought[a.good] = (me.bought[a.good] ?? 0) + got; } return got ? ok(`${got} ${GOOD_LABEL[a.good]} aldınız.`) : no('Pazarda yok ya da paranız yetmiyor.');
+      const grp = a.market ? groupOf(a.market) : undefined; /* v2.0.1: buy in the market you stand in; the Liman toptancısı sells wholesale there */
+      const got = buy(w, me.id, a.good, Math.floor(q), Infinity, { group: grp, wholesale: grp === 'liman' }); if (got) { me.bought = me.bought ?? {}; me.bought[a.good] = (me.bought[a.good] ?? 0) + got; } return got ? ok(`${got} ${GOOD_LABEL[a.good]} aldınız.`) : no(shelf(w, a.good, grp, grp === 'liman').price === null ? `${GOOD_LABEL[a.good]} tükendi.` : 'Paranız yetmiyor.');
+    }
+    case 'fulfillOrder': { const e = fulfillOrder(w, me, a.orderId); return e ? no(e) : ok('Sipariş teslim edildi, ödülü aldınız.'); }
+    case 'imports': {
+      if (!isKayzer(w, me)) return no('İthalatı devlet yönetir.'); w.imports = !!a.on;
+      if (!a.on) { w.listings = w.listings.filter((l) => !(l.wholesale && l.sellerId === 'dis')); for (const p of w.people) if (['ciftci', 'degirmenci', 'dokumaci', 'demirci', 'marangoz'].includes(p.prof)) p.mood = clamp(p.mood + 3); }
+      log(w, a.on ? 'Ferman: ithalat serbest. Liman toptancısı ve kervanlar yine geliyor; fiyatlar düşer, yerli üretici biraz zorlanır.' : 'Ferman: ithalat yasak! Liman toptancısı ve kervanlar gelmeyecek; yerli üretici memnun ama fiyatlar artabilir.');
+      return ok(a.on ? 'İthalat serbest.' : 'İthalat yasaklandı.');
     }
     case 'sell': {
       const q = num(a.qty, 1, 500); const pr = num(a.price, 0.1, 1000);
       if (q === null || pr === null || !GOODS.includes(a.good) || me.inv[a.good] < q) return no('Elinizde o kadar mal yok.');
       if (me.inv[a.good] - (me.bought?.[a.good] ?? 0) < q) return no('Bugün aldığınız malı aynı gün yeniden satamazsınız (karaborsa önlemi).');
-      me.inv[a.good] -= Math.floor(q); addListing(w, me, a.good, Math.floor(q), pr, 'pazar'); return ok('Tezgâha koydunuz.');
+      me.inv[a.good] -= Math.floor(q); addListing(w, me, a.good, Math.floor(q), pr, a.market === 'liman' ? 'liman' : 'pazar'); return ok(`Tezgâha koydunuz (${a.market === 'liman' ? 'Liman' : 'Çarşı'}).`);
     }
     case 'eat': {
-      if (me.hunger < 15) return no('Karnınız tok.');
-      return eatMeal(w, me) ? ok(`Yemek yediniz (açlık ${Math.round(me.hunger)}/100).`) : no('Yiyecek alacak paranız yok ya da pazarda yemek kalmadı.');
+      if (me.hunger < 15) return no('Karnınız tok (Tokluk çubuğu dolu).');
+      { const bag = (['ekmek', 'et', 'balik', 'yumurta', 'sut'] as const).find((g) => (me.inv[g] ?? 0) > 0); // v2.0.1: the Çanta first, free
+        if (bag) { me.inv[bag] -= 1; me.meals += 1; me.hunger = clamp(me.hunger - 35); me.mood = clamp(me.mood + 0.5); me.thought = ''; return ok(`Çantadan ${GOOD_LABEL[bag]} yediniz (ücretsiz). Tokluk ${Math.round(100 - me.hunger)}/100.`); } }
+      { const m0 = me.money; if (!eatMeal(w, me)) return no('Çantanızda yiyecek yok; satın alacak paranız ya da pazarda yemek yok.'); me.thought = ''; const paid = Math.round((m0 - me.money) * 100) / 100;
+        return ok(`Yemek yediniz${paid > 0 ? ` – ödenen: ${paid} D` : ''}. Tokluk ${Math.round(100 - me.hunger)}/100.`); }
     }
     case 'askida': {
       const q = num(a.qty, 1, 20); if (q === null) return no('Geçersiz.');
@@ -303,7 +336,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'haveChild': { const r = requestChild(w, me, decides); return { ok: r.startsWith('Müjde') || r.startsWith('Eşinize'), msg: r }; }
     case 'school': {
       const c = findChild(w, a.childId); if (!c || !c.parents.includes(me.id)) return no('Bu sizin çocuğunuz değil.');
-      const st = stage(w, c); if (a.on && st !== 'cocuk' && st !== 'genc') return no('Okul çocuk ve gençler içindir.');
+      const st = stage(w, c); if (a.on && st !== 'genc') return no('Okul 7–15 yaş gençler içindir.');
       c.inSchool = a.on; return ok(a.on ? `${c.name} okula başladı (günde 1 Dinar).` : `${c.name} okuldan alındı.`);
     }
     case 'cure': { const c = findChild(w, a.childId); if (!c || !c.parents.includes(me.id)) return no('Bu sizin çocuğunuz değil.'); const r = cureChild(w, c, me); return { ok: r.endsWith('iyileşti.'), msg: r }; }
@@ -361,11 +394,18 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'setSpeed': {
       if (w.kayzerId !== me.id) return no('Oyun hızını sadece hükümdar değiştirir.');
       if (![0.5, 1, 2].includes(a.speed)) return no('0.5x, 1x ya da 2x.');
+      if (w.combat) { w.speedBefore = a.speed; log(w, `Ferman: saldırı bitince zaman ${a.speed}x akacak.`); return ok(`Saldırı sürerken oyun 0.25x; bitince ${a.speed}x olacak.`); }
       const f = Math.min(0.999, Math.max(0, (now - w.lastTickAt) / hourMs(w)));
       w.speed = a.speed; w.lastTickAt = now - f * hourMs(w); // keep the clock continuous
       log(w, `Ferman: zaman ${a.speed}x hızla akıyor.`); return ok(`Hız ${a.speed}x.`);
     }
-    case 'drinkWater': if (me.thirst < 15) return no('Susamadınız.'); return drinkWater(w, me) ? ok(`Su içtiniz (susuzluk ${Math.round(me.thirst)}/100).`) : no('Su alacak paranız yok ya da kuyuda su kalmadı.');
+    case 'drinkWater': { if (me.thirst < 15) return no('Susamadınız (Su çubuğu dolu).'); const fromBag = (me.inv.su ?? 0) > 0; const m0 = me.money;
+      if (!drinkWater(w, me)) return no('Çantanızda su yok; alacak paranız ya da kuyuda su yok.'); me.thought = ''; const paid = Math.round((m0 - me.money) * 100) / 100;
+      return ok(`${fromBag ? 'Çantadan su içtiniz (ücretsiz)' : `Su içtiniz${paid > 0 ? ` – ödenen: ${paid} D, çantada ${me.inv.su} su kaldı` : ''}`}. Su ${Math.round(100 - me.thirst)}/100.`); }
+    case 'buyBag': { const g = a.good; if (g !== 'ekmek' && g !== 'su') return no('Geçersiz.'); const q = Math.max(1, Math.min(10, Math.floor(a.qty || 1))); const m0 = me.money; const got = buy(w, me.id, g, q);
+      return got ? ok(`${got} ${GOOD_LABEL[g]} çantaya kondu – ödenen: ${Math.round((m0 - me.money) * 100) / 100} D.`) : no('Satın alınamadı (para ya da stok yok).'); }
+    case 'holdNpc': { const t = findPerson(w, a.personId); if (!t || t.id === me.id) return no(''); if (!a.on) { if (t.hold?.by === me.id) t.hold = undefined; return ok(''); }
+      const q = placeOf(w, t.id, now); if (!q) return no(''); t.hold = { by: me.id, x: q.x, y: q.y, until: now + 90_000 }; return ok(''); }
     case 'pray': return ok(pray(w, me));
     case 'drink': { const r = drinkAlcohol(w, me); return { ok: r.startsWith('Meyhanede bir'), msg: r }; }
     case 'doctor': { const r = seeDoctor(w, me, false); return { ok: r.includes('iyileştirdi'), msg: r }; }
@@ -393,7 +433,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       const ar = w.arrests.find((x) => x.id === a.arrestId && x.criminalId === me.id && x.status === 'bekliyor'); const amt = num(a.amount, 1, 1000);
       if (!ar || amt === null) return no('Bekleyen bir tutuklamanız yok.'); if (me.money < amt) return no('Paranız yetmiyor.');
       ar.offer = amt; const ca = findPerson(w, ar.catcherId);
-      if (ca && fullAI(ca)) { const r = decideBribe(w, ar, chance(w, bribeAcceptChance(ca, amt))); return { ok: r.includes('saldı'), msg: r }; }
+      if (ca && fullAI(ca)) { const r = decideBribe(w, ar, chance(w, Math.min(0.97, bribeAcceptChance(ca, amt) * bribeMul(me)))); return { ok: r.includes('saldı'), msg: r }; }
       return ok(`${ca?.name ?? 'Bekçi'} teklifinizi düşünüyor…`);
     }
     case 'answerBribe': { const ar = w.arrests.find((x) => x.id === a.arrestId && x.catcherId === me.id && x.status === 'bekliyor'); if (!ar) return no('Teklif yok.'); return ok(decideBribe(w, ar, a.accept)); }
@@ -422,6 +462,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'directive': { if (!isKayzer(w, me)) return no('Yönlendirmeyi devlet yapar.'); return ok(directive(w, a.topic)); }
     case 'granary': {
       if (!isKayzer(w, me)) return no('Ambarı devlet yönetir.'); const q = num(a.qty, 1, 500); if (q === null) return no('Geçersiz.');
+      if (a.op === 'dagit') { const n = granaryDistribute(w, q); return n ? ok(`Ambardan ${n} buğday değirmenlere dağıtıldı.`) : no('Ambar boş ya da değirmenci yok.'); }
       return a.op === 'buy' ? ok(`Ambara ${granaryBuy(w, q)} buğday alındı (sadece ucuz buğday).`) : ok(`Ambardan ${granaryRelease(w, q)} buğday sabit fiyatla satışa çıktı.`);
     }
     case 'priceCap': {
@@ -441,7 +482,23 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'customize': {
       const L = cleanLook(a.look); if (!L) return no('Geçersiz görünüm.');
       const cur = me.look ?? lookFromSeeds(me);
-      if (!me.lookSet || a.where === 'ilk') { if (me.lookSet) return no('İlk görünüm zaten seçildi; Terzi ya da Berber’e gidin.'); me.look = L; me.lookSet = true; return ok('Görünümünüz kaydedildi.'); }
+      if (!me.lookSet || a.where === 'ilk') {
+        const firstGender = !me.genderSet && me.playerId && !me.npc; // v2.0.1: every player picks Erkek/Kadın once (new and existing characters)
+        if (me.lookSet && !firstGender) return no('İlk görünüm zaten seçildi; Terzi ya da Berber’e gidin.');
+        const needProfile = !me.profile?.set && me.playerId && !me.npc && me.prof !== 'kayzer' && me.id !== w.kayzerId;
+        if (needProfile && !a.profile) return no('Lütfen soyadı, yaş grubu, köken ve mizaç seçin.');
+        if (firstGender && typeof a.female !== 'boolean') return no('Lütfen cinsiyet seçin (Erkek / Kadın).');
+        if (firstGender && me.spouse && a.female !== me.female) return no('Evli olduğunuz için cinsiyetiniz eşinizinkinin karşıtı kalmalı (evlilik yalnız erkek ile kadın arasında).');
+        if (needProfile) { const e = applyProfile(w, me, a.profile!, !!me.profile?.fresh); if (e) return no(e); if (me.profile) delete me.profile.fresh; }
+        else if (a.profile && !me.profile?.set && me.playerId) { const e = applyProfile(w, me, a.profile, false); if (e) return no(e); } // the ruler may add a surname/traits, never a new meslek
+        if (firstGender) {
+          if (me.spouse && a.female !== me.female) return no('Evli olduğunuz için cinsiyetiniz eşinizinkinin karşıtı kalmalı (evlilik yalnız erkek ile kadın arasında).');
+          me.female = !!a.female; me.genderSet = true;
+          w.proposals = w.proposals.filter((x) => x.kind !== 'evlilik' || (x.from !== me.id && x.to !== me.id) || findPerson(w, x.from === me.id ? x.to : x.from)?.female !== me.female);
+        }
+        if (me.female) L.beard = 0;
+        me.look = L; me.lookSet = true; return ok('Karakteriniz kaydedildi.'); }
+      if (me.female) L.beard = 0;
       if (a.where === 'terzi') {
         const nl = { ...cur, cloth: L.cloth, outfit: L.outfit, head: L.head, scarf: L.scarf, belt: L.belt, jewel: L.jewel };
         const tailor = w.people.find((p) => p.prof === 'dokumaci' && p.jailedDays === 0 && p.id !== me.id);
@@ -466,6 +523,10 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'foreignAnswer': { if (!isKayzer(w, me)) return no('Kararı Kayzer verir.'); return ok(answerForeign(w, a.choice)); }
     case 'recruit': { if (!isKayzer(w, me)) return no('Asker toplamayı Kayzer emreder.'); const n = num(Math.min(Number(a.n) || 0, RECRUIT_MAX), 1, RECRUIT_MAX); if (n === null) return no('Geçersiz.'); return ok(recruit(w, n)); }
     case 'ransom': { if (!isKayzer(w, me)) return no('Fidyeyi Kayzer öder.'); return ok(ransom(w, a.personId)); }
+    case 'attack': { const r = attackFoe(w, me, a.foeId, now); return r.ok ? ok(r.msg) : no(r.msg); }
+    case 'onboardDone': { if ((me.onboardUntil ?? 0) > now) me.onboardUntil = now; return ok(''); }
+    case 'onboardPause': { // v2.0.1: while the one-time controls/creation screens are open the player's needs stand still (once per character)
+      const pl = w.players[playerId]; if (!pl || pl.qf?.ctlPause) return ok(''); (pl.qf ??= {}).ctlPause = true; me.onboardUntil = Math.max(me.onboardUntil ?? 0, now + 5 * 60_000); return ok(''); }
     case 'seenNews': { (w.whatsNew ??= {})[playerId] = String(a.v).slice(0, 10); return ok(''); }
     case 'rebuild': return ((r) => /yeniden yapıldı/.test(r) ? ok(r) : no(r))(rebuild(w, me, a.buildingId));
     case 'nameEmpire': { if (!isKayzer(w, me) && !pl.founder) return no('Devlete adı Kayzer koyar.'); const e = nameEmpire(w, me, String(a.name ?? '')); return e ? no(e) : ok(`Devletin adı: ${w.empireName}`); }

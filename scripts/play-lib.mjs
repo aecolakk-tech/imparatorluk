@@ -14,7 +14,7 @@ export async function boot(name = 'Oyuncu Test', extra = '') {
   await I(() => [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Hesap aç')).click()); await sleep(3000);
   const T = {
     p, b, I, errors,
-    dismiss: async () => { for (let i = 0; i < 12; i++) { const ok = await I(() => { const x = [...document.querySelectorAll('.modal:not(.trial-modal) button, .a2hs button')].find((x) => /Tamam|Kapat|Atla|Geç|✕/.test(x.textContent)); x?.click(); return !!x; }); if (!ok) break; await sleep(200); } },
+    dismiss: async () => { for (let i = 0; i < 12; i++) { const ok = await I(() => { const x = [...document.querySelectorAll('.modal:not(.trial-modal) button, .a2hs button')].find((x) => /Tamam|Kapat|Atla|Geç|Harika|Sonra|Anladım|✕/.test(x.textContent)); x?.click(); return !!x; }); if (!ok) break; await sleep(200); } },
     W: (code, arg) => I((code, arg) => { const k = 'imparatorluk-mock-v1'; const st = JSON.parse(localStorage.getItem(k)); const r = new Function('w', 'arg', code)(st.world, arg); localStorage.setItem(k, JSON.stringify(st)); return r; }, code, arg),
     me: () => I(() => { const S = window.__imp(); const w = S.world; const pid = Object.values(w.players).find((x) => x.name === S.me)?.personId; return w.people.find((q) => q.id === pid); }),
     act: async (a, wait = 1200) => { await I((a) => window.__imp().act(a), a); await sleep(wait); },

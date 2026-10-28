@@ -133,7 +133,7 @@ function approach(w: World, n: Person, p: Person, now: number): void {
   const g = PRODUCES[n.prof]?.good;
   if (kind === 'mal' && g && n.inv[g] + w.listings.filter((l) => l.sellerId === n.id && l.good === g).reduce((s, l) => s + l.qty, 0) > 2) {
     const price = Math.round(marketPrice(w, g) * 0.9 * 100) / 100;
-    w.offers.push({ id: nextId(w, 'O'), from: n.id, to: p.id, kind: 'mal', good: g, qty: 3, price, day: w.day, text: `${n.name}: 3 ${GOOD_LABEL[g]}, tanesi ${price}` });
+    w.offers.push({ id: nextId(w, 'O'), from: n.id, to: p.id, kind: 'mal', good: g, qty: 3, price, day: w.day, text: `3 ${GOOD_LABEL[g]}, tanesi ${price}` });
     say(w, n, p.id, `Sana özel: 3 ${GOOD_LABEL[g]} tanesi ${price} Dinar, pazardan ucuz. İster misin? (Teklifler)`, now); return;
   }
   if (kind === 'rusvet' && ['bekci', 'tahsildar', 'savci', 'hakim', 'memur'].includes(p.prof) && n.honesty < 45 && n.money > 40) {

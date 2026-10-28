@@ -1,3 +1,5 @@
+import { energyMul } from './profile';
+import { oldHeal } from './age';
 import { ek } from './tr';
 /** v1.9 housing: 5 people per house, buy or rent a spot, go home and sleep, home = safe zone. */
 import type { Person, World } from './types';
@@ -53,10 +55,11 @@ export function energyHour(w: World, now: number): void {
     // v1.9.6: zindan rations – inmates get bread and water at 08:00 and 18:00, and can rest on the cell bench
     if (p.jailedDays > 0 && (w.hour === 8 || w.hour === 18)) { p.hunger = Math.min(p.hunger, 25); p.thirst = Math.min(p.thirst, 20); }
     if (!p.playerId || p.npc) { p.energy = 80; continue; }
+    if ((p.onboardUntil ?? 0) > now) { p.energy = Math.max(p.energy ?? 100, 90); continue; }
     if (p.jailedDays > 0) { p.energy = clamp((p.energy ?? 80) + 3); continue; }
     const inside = (p.homeUntil ?? 0) > now;
-    if (inside) { p.energy = clamp((p.energy ?? 80) + (p.sleeping ? 14 : 6)); p.health = clamp(p.health + (p.sleeping ? 1.5 : 0.5)); }
-    else { p.energy = clamp((p.energy ?? 80) - 4); if ((p.energy ?? 0) < 15) p.mood = clamp(p.mood - 1); }
+    if (inside) { p.energy = clamp((p.energy ?? 80) + (p.sleeping ? 14 : 6)); p.health = clamp(p.health + (p.sleeping ? 1.5 : 0.5) * oldHeal(w, p)); }
+    else { p.energy = clamp((p.energy ?? 80) - 4 * energyMul(p, w)); if ((p.energy ?? 0) < 15) p.mood = clamp(p.mood - 1); }
     if (!inside && p.sleeping) { p.sleeping = false; if (p.playerId) personal(w, p.playerId, 'Günaydın! Dinlenmiş uyandınız.'); }
   }
 }

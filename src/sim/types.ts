@@ -1,11 +1,11 @@
-export type Good = 'ekmek' | 'su' | 'et' | 'balik' | 'kumas' | 'alet' | 'odun' | 'bugday' | 'yun' | 'elbise' | 'mobilya' | 'icki' | 'sut' | 'yumurta';
-export const GOODS: Good[] = ['ekmek', 'su', 'et', 'balik', 'kumas', 'alet', 'odun', 'bugday', 'yun', 'elbise', 'mobilya', 'icki', 'sut', 'yumurta'];
+export type Good = 'ekmek' | 'su' | 'et' | 'balik' | 'kumas' | 'alet' | 'odun' | 'bugday' | 'yun' | 'elbise' | 'mobilya' | 'icki' | 'sut' | 'yumurta' | 'un';
+export const GOODS: Good[] = ['ekmek', 'su', 'et', 'balik', 'kumas', 'alet', 'odun', 'bugday', 'yun', 'elbise', 'mobilya', 'icki', 'sut', 'yumurta', 'un'];
 
 export type Profession =
   | 'firinci' | 'sucu' | 'kasap' | 'balikci' | 'terzi' | 'demirci' | 'marangoz'
   | 'tuccar' | 'hekim' | 'hoca' | 'hamal' | 'insaatci' | 'kalemsor' | 'imam'
   | 'memur' | 'tahsildar' | 'bekci' | 'savci' | 'hakim' | 'asker' | 'kayzer' | 'naip' | 'hayvanci'
-  | 'ciftci' | 'dokumaci' | 'mobilyaci' | 'barci';
+  | 'ciftci' | 'dokumaci' | 'mobilyaci' | 'barci' | 'degirmenci';
 
 export type Office = 'meclis';
 
@@ -25,7 +25,7 @@ export interface Building {
 
 export interface Person {
   goal?: GoalId; goalsDone?: GoalId[];
-  rank?: import('./realm').Rank | null; fief?: string | null; favor?: number; homeUntil?: number; sleeping?: boolean; renting?: string | null; energy?: number; look?: import('./look').Look; lookSet?: boolean; farm?: boolean; barn?: { ahir: number; kumes: number }; farmStock?: Partial<Record<Good, number>>; fedDay?: number; riding?: boolean; animals?: Record<import('./realm').Animal, number>;
+  rank?: import('./realm').Rank | null; fief?: string | null; favor?: number; homeUntil?: number; sleeping?: boolean; renting?: string | null; energy?: number; look?: import('./look').Look; lookSet?: boolean; genderSet?: boolean; /* v2.0.1: the player chose Erkek/Kadın (once) */ profile?: { surname?: string; age?: import('./profile').AgeGroup; origin?: import('./profile').Origin; temper?: import('./profile').Temper; set?: boolean; fresh?: boolean }; farm?: boolean; barn?: { ahir: number; kumes: number }; farmStock?: Partial<Record<Good, number>>; fedDay?: number; riding?: boolean; animals?: Record<import('./realm').Animal, number>;
   task?: import('./orders').Task; // v1.7: an order the NPC is carrying out
   orderedBy?: { by: string; crime: CrimeKind; victimId: string | null; day: number };
   id: string;
@@ -60,6 +60,7 @@ export interface Person {
   immune: boolean; // parliamentary immunity (members only)
   sidedWith: string | null; // soldiers: who they back in a coup
   born: number; // game day of birth (adults start with a past birthday)
+  poorDays?: number; cantAfford?: number; // v2.0.1: days in a row the person could not afford basics
   parents: string[]; // person/child ids
   soylu: boolean; // nobility (Kayzer's spouse, royal children)
   school: number; // days of schooling (children who grew up)
@@ -76,7 +77,7 @@ export interface Person {
   nightOut: boolean;
   bought?: Partial<Record<Good, number>>; // bought today – cannot be resold the same day
   arms?: Partial<Record<'hancer' | 'kilic' | 'yay' | 'ok' | 'kalkan', number>>; drawn?: 'hancer' | 'kilic' | 'yay' | null; kitDay?: number; armsFines?: number; // v1.9.9 weapons
-  recruit?: { prof: string; work: string }; infected?: { day: number }; captive?: { by: string; day: number }; // v1.9.9 war
+  recruit?: { prof: string; work: string }; infected?: { day: number }; onboardUntil?: number; atkAt?: number; hold?: { by: string; x: number; y: number; until: number }; captive?: { by: string; day: number }; // v1.9.9 war; v2.0.1 onboardUntil pauses a newcomer's needs
   walk?: import('./move').Walk; // player characters: current walk (real-time path)
 }
 
@@ -95,7 +96,7 @@ export interface Threat { name: string; demand: number; day: number; deadline: n
 
 /** A minor (bebek/çocuk/genç). Becomes a full Person (same id) at ADULT_AGE game days. */
 export interface Child {
-  id: string; name: string; female: boolean; born: number; parents: string[];
+  id: string; name: string; female: boolean; born: number; parents: string[]; apprentice?: number; surname?: string;
   honesty: number; ambition: number; hairColor: number; skin: number; shirt: number;
   school: number; inSchool: boolean; sick: number; hunger: number; orphan: boolean; soylu: boolean;
 }
@@ -107,7 +108,9 @@ export interface Isyan {
 }
 export interface Deposed { personId: string; until: number; killed: number; votes: Record<string, Fate>; voters: string[] }
 
-export interface Listing { id: string; sellerId: string; good: Good; qty: number; price: number; market: string; }
+export interface Listing { id: string; sellerId: string; good: Good; qty: number; price: number; market: string; wholesale?: boolean; }
+/** v2.0.1 sipariş ilanı: 'qty good getirene reward D' (an NPC producer or the saray pays on delivery). */
+export interface Order { id: string; good: Good; qty: number; reward: number; byId: string; day: number; until: number; }
 
 export interface LedgerEntry { day: number; from: string; to: string; amount: number; reason: string; }
 
@@ -135,7 +138,7 @@ export interface Gazette { day: number; headline: string; lines: string[]; mecli
 export interface PlayerInfo {
   playerId: string; personId: string; name: string; founder: boolean; banned: boolean;
   lastSeen: number; // ms
-  lastSeenDay: number; awayLog: string[]; awayMoney: number; quest?: number;
+  lastSeenDay: number; dead?: { day: number; name: string; years: number; text: string; heirs: string[]; estate?: { houses: string[]; inv: Person['inv']; arms: NonNullable<Person['arms']> } }; awayLog: string[]; awayMoney: number; quest?: number; qf?: Record<string, boolean>; // v2.0.1 quest flags (what the player really did)
 }
 
 export type Ideology = 'saltanatci' | 'cumhuriyetci' | 'esnaf' | 'halkci';
@@ -161,6 +164,15 @@ export interface Coup { leaderId: string; kind: 'coup' | 'revolution'; day: numb
 export type GoalId = 'tuccar' | 'meclisbaskani' | 'vezir' | 'asi';
 export interface Mission { id: string; text: string; reward: number; to: string | null; by: string; day: number; status: 'acik' | 'bildirildi' | 'odendi' | 'iptal'; claimedBy?: string }
 export interface World {
+  ageV?: number; // 2 = ages in years (v2.0.1)
+  popTarget?: number; // v2.0.1 demography: newcomers arrive while the city is below this
+  econV?: number; // v2.0.1 economy migration
+  wageIdx?: number; // v2.0.1 wages follow sustained bread prices and fall with unemployment (1 = normal)
+  orders?: Order[]; // v2.0.1 sipariş ilanları
+  imports?: boolean; // v2.0.1 Kayzer: ithalat izni (Liman toptancısı + kervanlar); default true
+  pazarGunu?: number; // v2.0.1 day of the current Pazar Günü
+  cityHist?: number[][]; // v2.0.1 Şehir Göstergesi: [day, hour, pop, unemployed, bread*100, mood, treasury] hourly, 5 days
+  karaborsaToday?: number;
   cruelOrders?: number; missions?: Mission[];
   orgs?: import('./realm').Org[]; spies?: import('./realm').Spy[]; plots?: import('./realm').Plot[]; warrants?: string[]; history?: import('./realm').Chronicle[]; informantPay?: number;
   version: number;
@@ -204,7 +216,8 @@ export interface World {
   isyan: Isyan | null;
   deposed: Deposed | null;
   schema: number;
-  speed: number; // 0.5 | 1 | 2 (Kayzer only)
+  speed: number; // 0.5 | 1 | 2 (Kayzer only); 0.25 automatically during a raid/landing (v2.0.1)
+  speedBefore?: number | null;
   nature: Nature | null; nextDrought: number;
   festivalUntil: number; // game day (inclusive) the festival ground is open
   granary: number; // state wheat store (tahıl ambarı)
@@ -214,8 +227,9 @@ export interface World {
   talks: Talk[];
   chests?: Record<string, { goods: Partial<Record<Good, number>>; arms: Partial<Record<'hancer' | 'kilic' | 'yay' | 'ok' | 'kalkan', number>> }>;
   armsReg?: { ownerId: string; kind: 'hancer' | 'kilic' | 'yay'; day: number; by: 'demirci' | 'kisla' }[]; armsV?: number;
-  raid?: { phase: 'uyari' | 'gece'; day: number; robbers?: { id: string; hp: number }[]; startAt?: number; killed?: number; stolen?: number; dead?: string[]; hurt?: string[]; defDead?: string[]; defHurt?: string[] } | null; raidNext?: number;
-  foreign?: { name: string; demand: number; troops: number; phase: 'talep' | 'savas'; day: number; deadline: number; landDay?: number; landed?: boolean; landAt?: number; alive?: number; killed?: number; ourDead?: string[]; ourHurt?: number; recruits: string[] } | null;
+  combat?: import('./combatpos').Combat | null; // v2.0.1 real-time fight (raid night / landing)
+  raid?: { phase: 'uyari' | 'gece'; day: number; robbers?: { id: string; hp: number }[]; startAt?: number; killed?: number; stolen?: number; dead?: string[]; hurt?: string[]; fought?: string[]; defDead?: string[]; defHurt?: string[] } | null; raidNext?: number;
+  foreign?: { name: string; demand: number; troops: number; phase: 'talep' | 'savas'; day: number; deadline: number; landDay?: number; landReal?: number; landed?: boolean; landAt?: number; alive?: number; killed?: number; ourDead?: string[]; ourHurt?: number; recruits: string[] } | null;
   notices?: { id: number; kind: string; text: string; day: number }[]; whatsNew?: Record<string, string>;
   fire?: { bid: string; startH: number; cause: string } | null; empireName?: string; empireNamedBy?: string;
   warNext?: number; wars?: number; vassal?: { name: string; until: number } | null;
@@ -249,8 +263,9 @@ export interface World {
 }
 
 export type Action =
-  | { t: 'buy'; good: Good; qty: number }
-  | { t: 'sell'; good: Good; qty: number; price: number }
+  | { t: 'buy'; good: Good; qty: number; market?: string }
+  | { t: 'sell'; good: Good; qty: number; price: number; market?: string }
+  | { t: 'fulfillOrder'; orderId: string } | { t: 'imports'; on: boolean }
   | { t: 'eat' }
   | { t: 'askida'; qty: number }
   | { t: 'petition'; kind: PetitionKind; text: string; amount?: number; payload?: string }
@@ -311,12 +326,12 @@ export type Action =
   | { t: 'poster' } | { t: 'campaign'; text: string }
   | { t: 'sermon'; topic: 'namaz' | 'icki' | 'sabir' }
   | { t: 'directive'; topic: 'namaz' | 'icki' | 'laik' }
-  | { t: 'granary'; op: 'buy' | 'release'; qty: number }
+  | { t: 'granary'; op: 'buy' | 'release' | 'dagit'; qty: number }
   | { t: 'priceCap'; good: Good; price: number | null }
-  | { t: 'defend'; caseId: string } | { t: 'witness'; caseId: string; against: boolean; text?: string } | { t: 'callWitness'; caseId: string; personId: string } | { t: 'customize'; look: import('./look').Look; where: 'ilk' | 'terzi' | 'berber' }
+  | { t: 'defend'; caseId: string } | { t: 'witness'; caseId: string; against: boolean; text?: string } | { t: 'callWitness'; caseId: string; personId: string } | { t: 'customize'; look: import('./look').Look; where: 'ilk' | 'terzi' | 'berber'; female?: boolean; profile?: import('./profile').ProfileChoice }
   | { t: 'smuggle'; on: boolean }
   | { t: 'borrow'; amount: number } | { t: 'repay'; loanId: string } | { t: 'festivalOpen'; cost: number } | { t: 'buildAt'; plotId: string; kind: string }
   | { t: 'move'; x: number; y: number } | { t: 'report'; corpseId: string } | { t: 'defense'; caseId: string; text: string } | { t: 'restCase'; caseId: string }
-  | { t: 'tribute'; pay: boolean } | { t: 'buyArm'; item: 'hancer' | 'kilic' | 'yay' | 'ok' | 'kalkan'; qty?: number } | { t: 'kislaKit' } | { t: 'drawWeapon'; kind: 'hancer' | 'kilic' | 'yay' | null } | { t: 'stash'; item: string; qty: number; toChest: boolean } | { t: 'useItem'; good: Good } | { t: 'searchPerson'; personId: string } | { t: 'foreignAnswer'; choice: 'pay' | 'vassal' | 'war' } | { t: 'recruit'; n: number } | { t: 'ransom'; personId: string } | { t: 'rebuild'; buildingId: string } | { t: 'nameEmpire'; name: string } | { t: 'seenNews'; v: string } | { t: 'caravanBuy'; good: Good; qty: number };
+  | { t: 'tribute'; pay: boolean } | { t: 'buyArm'; item: 'hancer' | 'kilic' | 'yay' | 'ok' | 'kalkan'; qty?: number } | { t: 'kislaKit' } | { t: 'onboardPause' } | { t: 'continueAs'; childId: string } | { t: 'newCharacter'; name: string } | { t: 'drawWeapon'; kind: 'hancer' | 'kilic' | 'yay' | null } | { t: 'stash'; item: string; qty: number; toChest: boolean } | { t: 'useItem'; good: Good } | { t: 'searchPerson'; personId: string } | { t: 'foreignAnswer'; choice: 'pay' | 'vassal' | 'war' } | { t: 'recruit'; n: number } | { t: 'ransom'; personId: string } | { t: 'rebuild'; buildingId: string } | { t: 'nameEmpire'; name: string } | { t: 'seenNews'; v: string } | { t: 'onboardDone' } | { t: 'attack'; foeId: string } | { t: 'buyBag'; good: Good; qty: number } | { t: 'holdNpc'; personId: string; on: boolean } | { t: 'caravanBuy'; good: Good; qty: number };
 
 export interface ActionResult { ok: boolean; msg: string; }

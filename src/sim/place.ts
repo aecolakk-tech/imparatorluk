@@ -6,6 +6,7 @@
 import type { Person, World } from './types';
 import { ROADS_X, ROADS_Y } from './world';
 import { hourMs } from './tick';
+import { engagedPos } from './combatpos';
 import { walkPos, type Pt } from './move';
 import { bekciShift } from './life';
 
@@ -152,8 +153,10 @@ export function placePeople(w: World, now: number): Placed[] {
     else if (p.playerId && (p.homeUntil ?? 0) > now && c.B.get(p.home)) { const hb = c.B.get(p.home)!; q = { p, x: hb.door.x + 0.5, y: hb.door.y + 0.4, moving: false, visible: false, dir: 1 }; }
     else if (playerWalking(w, p, now)) { const r = walkPos(p.walk!, now); q = { p, x: r.pt.x, y: r.pt.y, moving: r.moving, visible: true, dir: r.dir }; }
     else q = scheduled(w, p, now, c);
+    if (p.hold && p.hold.until > now && (!p.playerId || p.npc)) { q.x = p.hold.x; q.y = p.hold.y; q.moving = false; q.visible = true; } // v2.0.1: NPC waits while a player talks to them
     if (p.exiledDays > 0) q.visible = false;
     if ((w.raid?.phase === 'gece' || w.foreign?.landed) && (!p.playerId || p.npc) && p.prof !== 'asker' && p.prof !== 'bekci' && p.jailedDays === 0) { const hb = c.B.get(p.home); if (hb) { q.x = hb.door.x + 0.5; q.y = hb.door.y + 0.4; } q.visible = false; q.moving = false; } // v1.9.9: NPCs hide at home
+    if (w.combat && (!p.playerId || p.npc)) { const e = engagedPos(w, p.id, now); if (e) { q.x = e.x; q.y = e.y; q.moving = e.moving; q.visible = true; } } // v2.0.1: soldiers/bekçis walk up to their foe
     if (w.isyan && !playerWalking(w, p, now)) {
       if (w.isyan.rebels.includes(p.id)) { const at = w.isyan.occupied[w.isyan.occupied.length - 1] ?? 'pazar'; const d = c.door(at, p, 3); q.x = d.x + Math.sin(now / 2300 + hash(p.id)) * 2; q.y = d.y; q.visible = true; q.moving = true; }
       else if (p.prof === 'asker') { const d = c.door('saray', p, 3); q.x = d.x; q.y = d.y + 1; q.visible = true; q.moving = false; }

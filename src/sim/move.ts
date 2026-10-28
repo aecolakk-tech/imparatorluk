@@ -98,10 +98,12 @@ const RULER: Action['t'][] = ['answer', 'setTax', 'setHeadTax', 'setSalary', 'to
 export function actionNeed(w: World, me: Person, a: Action): Need {
   const B = (ids: string[], label: string): Need => ({ kind: 'building', ids: ids.filter((id) => w.buildings.some((b) => b.id === id)), label });
   switch (a.t) {
-    case 'buy': case 'sell': return B(MARKET_IDS(w), 'bir pazara');
+    case 'buy': case 'sell': return a.market === 'liman' ? B(['liman'], 'Liman’a') : B(MARKET_IDS(w), 'bir pazara');
+    case 'fulfillOrder': return B(MARKET_IDS(w), 'Pazar’a (ilan tahtası)');
     case 'caravanBuy': return B([...MARKET_IDS(w), 'liman'], 'pazara ya da limana');
-    case 'eat': return B([...MARKET_IDS(w), 'firin', 'kasaphane', 'bar', me.home], 'evinize, fırına ya da bir pazara');
+    case 'eat': return (['ekmek', 'et', 'balik', 'yumurta', 'sut'] as const).some((g) => (me.inv[g] ?? 0) > 0) ? null : B([...MARKET_IDS(w), 'firin', 'kasaphane', 'bar', me.home], 'evinize, fırına ya da bir pazara');
     case 'askida': return B(['firin'], 'Fırın’a');
+    case 'buyBag': return a.good === 'su' ? B([...MARKET_IDS(w), 'kuyu'], 'Kuyu’ya ya da bir pazara') : B([...MARKET_IDS(w), 'firin'], 'Fırın’a ya da bir pazara');
     case 'buyHome': case 'rentHome': return B([a.houseId], 'eve');
     case 'goHome': return me.home ? B([me.home], 'evinize') : null;
     case 'buyFarm': case 'buyAnimal': return B(['hayvan'], 'Hayvan Pazarı’na');
@@ -110,7 +112,7 @@ export function actionNeed(w: World, me: Person, a: Action): Need {
     case 'buildBarn': case 'feedAnimals': case 'collectFarm': return B(['ciftlik'], 'çiftliğinize (Buğday Tarlaları)');
     case 'grantTitle': case 'stripTitle': case 'assignSpy': case 'warrant': case 'raidOrg': case 'informantPay': return B(['saray'], 'Saray’a');
     case 'searchHouse': { const t = w.people.find((p) => p.id === a.personId); return t ? B([t.home], 'şüphelinin evine') : null; }
-    case 'drinkWater': return B(['kuyu', 'gida', 'pazar', me.home], 'kuyuya, evinize ya da pazara');
+    case 'drinkWater': return (me.inv.su ?? 0) > 0 ? null : B(['kuyu', 'gida', 'pazar', me.home], 'kuyuya, evinize ya da pazara');
     case 'pray': case 'sermon': return B(['cami'], 'Cami’ye');
     case 'drink': return B(['bar'], 'Meyhane’ye');
     case 'doctor': case 'cure': return B(['hekimhane'], 'Hekimhane’ye');

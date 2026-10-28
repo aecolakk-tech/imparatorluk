@@ -12,7 +12,7 @@ import { createWorld } from '../sim/world';
 import { SNAPSHOT_EVERY_MS, PLAYER_PROFS, PROF_LABEL } from '../sim/constants';
 import { migrateWorld } from '../sim/extras';
 import { playerSaid } from '../sim/chat';
-import { questReward } from '../sim/life';
+import { questReward, markQuest } from '../sim/life';
 import type { NpcMsg } from '../sim/types';
 import { realtime, judgeRule, judgeAnswer, dmPrompt, talksPrompt, judgePrompt } from '../sim/v16';
 import { findPerson } from '../sim/world';
@@ -39,6 +39,7 @@ export function act(w: World, playerId: string, a: Action, now: number, deferJud
   migrateWorld(w); advanceWorld(w, now); realtime(w, now);
   const r = applyAction(w, playerId, a, now);
   if (a.t === 'defense' && r.ok && !deferJudge) { const c = w.cases.find((x) => x.id === a.caseId); const last = c?.trial?.msgs.at(-1); if (c && last) { const j = judgeRule(w, c, last.text); judgeAnswer(w, c, j.reply, j.score, now + 800); } }
+  if (r.ok) markQuest(w, playerId, a.t, a.t === 'useItem' ? (a.good === 'su' || a.good === 'sut' ? 'drink' : 'eat') : undefined);
   const q = questReward(w, playerId); if (q) r.msg = `${r.msg}\n🎯 ${q}`;
   return r;
 }
@@ -61,6 +62,7 @@ export function makeChat(w: World, playerId: string, text: string, toPersonId: s
   if (!clean) return 'Boş mesaj.';
   if (!rateOk(times, now)) return 'Çok hızlı yazıyorsunuz; biraz bekleyin.';
   if (toPersonId && !w.people.some((p) => p.id === toPersonId)) return 'Alıcı yok.';
+  if (toPersonId) markQuest(w, playerId, 'chat', 'chat');
   const replies = playerSaid(w, me, clean, toPersonId, now, defer); // NPCs answer (into w.chatOut unless deferred)
   const msg: ChatMsg = { id: `${now}-${Math.round(Math.random() * 1e6)}`, fromPersonId: me.id, fromName: me.name, toPersonId, text: clean, at: now };
   if (defer) msg.replies = replies.map((r) => ({ npcId: r.npc.id, npcName: r.npc.name, to: toPersonId ? me.id : null, fallback: r.fallback, prompt: dmPrompt(w, r.npc, me, clean, toPersonId ? history ?? [] : [], toPersonId ? r.outcome : 'Meydanda konuşuyorsun'), order: !!r.outcome }));

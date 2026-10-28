@@ -93,7 +93,7 @@ function shock(w: World, s: LawSpec, sign: 1 | -1): void {
     p.loyalty = clamp(p.loyalty + d * sign); if (d < -5) p.republic = clamp(p.republic + 1);
   }
 }
-const PRODUCER: Record<string, Good> = { ciftci: 'bugday', firinci: 'ekmek', sucu: 'su', kasap: 'et', balikci: 'balik', dokumaci: 'kumas', terzi: 'elbise', marangoz: 'odun', mobilyaci: 'mobilya', demirci: 'alet', barci: 'icki' };
+const PRODUCER: Record<string, Good> = { ciftci: 'bugday', degirmenci: 'un', firinci: 'ekmek', sucu: 'su', kasap: 'et', balikci: 'balik', dokumaci: 'kumas', terzi: 'elbise', marangoz: 'odun', mobilyaci: 'mobilya', demirci: 'alet', barci: 'icki' };
 
 function apply(w: World, l: LawSpec, on: boolean): void {
   switch (l.kind) {

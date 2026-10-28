@@ -11,7 +11,7 @@ import { openCase } from '../src/sim/ai';
 import { electionDates, electionPhase } from '../src/sim/tick';
 
 const T0 = 1_700_000_000_000;
-function setup(): World { const w = createWorld(3, T0); joinWorld(w, 'f', 'Enes', 'kayzer', true, T0); joinWorld(w, 'u2', 'Ali', 'hamal', false, T0); touchPlayer(w, 'u2', T0); return w; }
+function setup(): World { const w = createWorld(3, T0); joinWorld(w, 'f', 'Enes', 'kayzer', true, T0); joinWorld(w, 'u2', 'Alparslan', 'hamal', false, T0); touchPlayer(w, 'u2', T0); return w; }
 beforeEach(() => { rules.reach = true; });
 
 describe('movement', () => {
@@ -22,7 +22,7 @@ describe('movement', () => {
     for (let i = 1; i < path.length; i++) { const a = path[i - 1]!, b = path[i]!; const n = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) * 4); for (let k = 0; k <= n; k++) { const x = a.x + (b.x - a.x) * k / n, y = a.y + (b.y - a.y) * k / n; expect(g[Math.floor(y) * MAP_W + Math.floor(x)]).toBe(1); } }
   });
   it('interactions need the character at the building: walk there, then it works', () => {
-    const w = setup(); const me = findPerson(w, w.players.u2!.personId)!;
+    const w = setup(); const me = findPerson(w, w.players.u2!.personId)!; me.inv.su = 0; me.thirst = 60; me.onboardUntil = 0;
     const kuyu = w.buildings.find((b) => b.id === 'kuyu')!;
     applyAction(w, 'u2', { t: 'move', x: 90, y: 14 }, T0); let now = walkEnd(me.walk!) + 10; touchPlayer(w, 'u2', now);
     const far = applyAction(w, 'u2', { t: 'drinkWater' }, now); expect(far.ok).toBe(false); expect(far.msg).toMatch(/yürümelisiniz/);

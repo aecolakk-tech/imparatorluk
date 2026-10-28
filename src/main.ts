@@ -1,4 +1,9 @@
-import { ek, numA } from './sim/tr';
+import { oldWalk, ageText } from './sim/age';
+import { ek } from './sim/tr';
+import { buildControls, type SlotItem } from './ui/controls';
+import { foePos, liveFoes } from './sim/combatpos';
+import { weaponInHand, bestWeapon } from './sim/arms';
+import { hourMs } from './sim/tick';
 import './ui/style.css';
 import type { Action, Person, Profession, World } from './sim/types';
 import { GOODS } from './sim/types';
@@ -29,7 +34,9 @@ import { CRIME_LABEL } from './sim/ai';
 import type { Corpse, CourtCase } from './sim/types';
 import { avatar as av2 } from './ui/panels';
 import { witnessCandidates, hLabel } from './sim/alibi';
-import { inventoryBody, armsShop, personExtras, eventOptions, eventTitle, whatsNewModal, empireNameModal, VERSION } from './ui/v2';
+import { inventoryBody, armsShop, personExtras, eventOptions, eventTitle, whatsNewModal, empireNameModal, VERSION, controlsModal } from './ui/v2';
+import { AGE, ORIGIN, TEMPER, ageGroupOf, MIN_START_AGE, MAX_START_AGE, type Origin, type Temper } from './sim/profile';
+import { DAYS_PER_YEAR, DEATH_START_AGE, DEATH_CERTAIN_AGE } from './sim/constants';
 
 const app = document.getElementById('app')!;
 const be: Backend = makeBackend();
@@ -74,7 +81,7 @@ function loginScreen(): void {
       h('div', { class: 'row', style: 'margin-top:10px' }, h('button', { class: mode === 'giris' ? 'primary' : '', onclick: () => { mode = 'giris'; render(); } }, 'Giriş'), h('button', { class: mode === 'kayit' ? 'primary' : '', onclick: () => { mode = 'kayit'; render(); } }, 'Davetle kayıt')),
       ...(mode === 'kayit' ? [h('label', {}, 'Davet şifresi (kurucudan alın)'), access,
         h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { class: start_ === 'yeni' ? 'primary' : '', onclick: () => { start_ = 'yeni'; render(); } }, '🏠 Yeni vatandaş'), h('button', { class: start_ === 'devral' ? 'primary' : '', onclick: () => { start_ = 'devral'; render(); } }, '🧑 Var olan birini devral')),
-        ...(start_ === 'yeni' ? [h('label', {}, 'Oyundaki adınız'), name, h('label', {}, 'Mesleğiniz'), prof, h('div', { class: 'muted' }, 'Boş bir evde, 40 Dinar ile başlarsınız; ilk 5 gün dokunulmazsınız. Sarraftan borç alabilirsiniz.')] : devralUi()),
+        ...(start_ === 'yeni' ? [h('label', {}, 'Oyundaki adınız (benzersiz olmalı)'), name, h('div', { class: 'muted' }, 'Hesabı açınca karakter ekranında cinsiyet, soyadı, yaş grubu, köken (başlangıç mesleği, maaşı ve parası) ve mizacınızı seçersiniz. Boş bir evde başlarsınız; ilk 5 gün dokunulmazsınız.')] : devralUi()),
       ] : []),
       h('label', {}, 'E-posta (kimseye gösterilmez)'), email, h('label', {}, 'Hesap şifresi (en az 6)'), pw,
       h('div', { style: 'margin-top:12px' }, h('button', { class: 'primary', onclick: () => void go() }, mode === 'giris' ? 'Giriş yap' : 'Hesap aç ve katıl')), err,
@@ -113,16 +120,16 @@ let pending: { a: Action; label: string; since: number; retarget: number } | nul
 let walkTarget: Pt | null = null;
 let lowGfx = localStorage.getItem('imp-lowgfx') === '1';
 let localWalk: { walk: NonNullable<Person['walk']>; id: string } | null = null; // client-side prediction wins over older server copies
-let followCam = true; let lastMoveSent = 0; let moveTimer: ReturnType<typeof setTimeout> | null = null; let moveTo: Pt | null = null; let pendingOpen: string | null = null; let openTries = 0;
+let followCam = true; let lastMoveSent = 0; let moveTimer: ReturnType<typeof setTimeout> | null = null; let moveTo: Pt | null = null;
 function atSaray(): boolean { const w = world; const m = me(); const b = w?.buildings.find((x) => x.id === 'saray'); return !!(w && m && b && w.kayzerId === m.id && distToBuilding(b, myPos(w, m, gameNow())) <= REACH + 0.6); }
 async function send(a: Action): Promise<void> {
-  const before = me()?.money ?? 0;
+  const before = me()?.money ?? 0; ownActAt = Date.now();
   if (moveTimer && a.t !== 'move' && moveTo) { clearTimeout(moveTimer); moveTimer = null; lastMoveSent = Date.now(); await be.act({ t: 'move', x: moveTo.x, y: moveTo.y }); } // v1.9.3: a throttled move must not land AFTER the action (it pulled you out of the house)
   const r = await be.act(a);
   if (r.msg) toast(r.msg);
   if (r.ok) { await tick(); const d = Math.round(((me()?.money ?? 0) - before) * 10) / 10; if (Math.abs(d) >= 0.5) floatText(`${d > 0 ? '+' : ''}${d} D`, `coin${d < 0 ? ' neg' : ''}`); else floatText('✓'); }
   if (!r.ok && r.msg) sfx('error'); else if (a.t === 'buy' || a.t === 'sell' || a.t === 'give' || a.t === 'borrow' || a.t === 'repay') sfx('coins'); else if (a.t === 'kill' && r.ok) sfx('death'); else if (a.t === 'report' && r.ok) sfx('bell');
-  if (!r.ok) await tick(); rerenderSheet();
+  if (!r.ok) await tick(); rerenderSheet(false, true);
 }
 /** Do an action; if it has to be done somewhere else, walk there first (no teleporting). */
 async function doAct(a: Action): Promise<void> {
@@ -132,14 +139,14 @@ async function doAct(a: Action): Promise<void> {
   walkTo(nt.to); pending = { a, label: nt.label ?? '', since: Date.now(), retarget: Date.now() };
   toast(`${nt.label === 'yanına' ? 'Yanına' : nt.label} yürüyorsunuz…`);
 }
-function walkTo(to: Pt): void {
+function walkTo(to: Pt, joy = false): void {
   const w = world; const m = me(); if (!w || !m) return;
   if (m.jailedDays > 0) { toast('Zindandasınız.'); return; }
   const now = gameNow(); const from = myPos(w, m, now);
-  m.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * (m.riding && (m.animals?.at ?? 0) > 0 ? 2 : 1) }; // local prediction; the server computes the same path
-  localWalk = { walk: m.walk, id: m.id }; followCam = true; if (!lowGfx) { tapFx.x = to.x; tapFx.y = to.y; tapFx.t = performance.now(); }
+  m.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * (m.riding && (m.animals?.at ?? 0) > 0 ? 2 : 1) * oldWalk(w, m) }; // local prediction; the server computes the same path
+  localWalk = { walk: m.walk, id: m.id }; followCam = true; if (!lowGfx && !joy) { tapFx.x = to.x; tapFx.y = to.y; tapFx.t = performance.now(); }
   const pl = Object.values(w.players).find((x) => x.personId === m.id); if (pl) pl.lastSeen = Date.now();
-  walkTarget = m.walk.path[m.walk.path.length - 1] ?? to;
+  walkTarget = joy ? null : m.walk.path[m.walk.path.length - 1] ?? to;
   // throttle server syncs: at most one move per 400 ms, the last target wins
   moveTo = to;
   const sendMove = (): void => { lastMoveSent = Date.now(); moveTimer = null; void be.act({ t: 'move', x: to.x, y: to.y }); };
@@ -157,15 +164,21 @@ function pendingStep(): void {
 function openSheet(render: () => HTMLElement): void {
   sheetRender = render; rerenderSheet(true);
 }
-function rerenderSheet(force = false): void {
+function rerenderSheet(force = false, afterAct = false): void {
   if (!sheetRender) return;
-  if (!force && sheet && (sheet.contains(document.activeElement) && document.activeElement !== document.body)) return; // don't clobber typing
+  if (afterAct) { sheetPointer = false; const fa = document.activeElement as HTMLElement | null; if (fa && sheet?.contains(fa)) fa.blur(); } // v2.0.1: an action just finished → always show its result (Elinizde, offers, kese)
+  const ae = document.activeElement as HTMLElement | null; // v2.0.1: only typing blocks a refresh (a tapped button kept focus and froze the panel)
+  if (!force && sheet && ae && sheet.contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+  if (!force && sheetPointer) return;
   const scroll = sheet?.scrollTop ?? 0;
   const s = h('div', { class: 'sheet' }, h('button', { class: 'close icon', title: 'Kapat', onclick: closeSheet }, ic('close')), sheetRender());
   if (sheet) sheet.replaceWith(s); else { s.classList.add('enter'); app.append(s); requestAnimationFrame(() => requestAnimationFrame(() => s.classList.remove('enter'))); }
-  sheet = s; if (!force) s.scrollTop = scroll;
+  sheet = s; if (!force) s.scrollTop = scroll; document.body.classList.add('has-sheet');
+  s.addEventListener('pointerdown', () => { sheetPointer = true; }); s.addEventListener('pointerup', () => { setTimeout(() => { sheetPointer = false; }, 250); }); s.addEventListener('pointercancel', () => { sheetPointer = false; });
+  s.addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest('button'); if (b) { b.classList.add('pressed'); setTimeout(() => b.classList.remove('pressed'), 180); } }, true);
 }
-function closeSheet(): void { const s = sheet; if (s) { s.classList.add('leave'); setTimeout(() => s.remove(), lowGfx ? 0 : 200); } sheet = null; sheetRender = null; selected = null; }
+let sheetPointer = false;
+function closeSheet(): void { document.body.classList.remove('has-sheet'); sheetPointer = false; if (heldNpc) { const id = heldNpc; heldNpc = null; const p = world ? findPerson(world, id) : null; if (p) p.hold = undefined; void be.act({ t: 'holdNpc', personId: id, on: false } as never); } const s = sheet; if (s) { s.classList.add('leave'); setTimeout(() => s.remove(), lowGfx ? 0 : 200); } sheet = null; sheetRender = null; selected = null; }
 function openPersonSheet(id: string): void {
   selected = id;
   openSheet(() => { const p = findPerson(world!, id); if (!p) return h('div', {}, 'Kişi yok.'); const card = personCard(ctx(), p); const x = personExtras(ctx(), p); if (x) card.prepend(x); return card; });
@@ -178,47 +191,122 @@ function modal(content: HTMLElement, onClose?: () => void): void {
 }
 function maecenas(text: string | HTMLElement): HTMLElement { return h('div', { class: 'maecenas' }, h('div', { class: 'who' }, '🏛'), h('div', {}, h('b', { style: 'color:#e8c14a' }, 'Maecenas'), typeof text === 'string' ? h('pre', { class: 'summary' }, text) : text)); }
 
-function guide(step = 0): void {
-  if (step >= GUIDE.length) { localStorage.setItem('imp-guide-done', '1'); return; }
-  modal(maecenas(`${GUIDE[step]!}\n\n(${step + 1}/${GUIDE.length})`), () => guide(step + 1));
+/** v2.0.1: the guide is ONE modal whose text changes in place; the footer (Geri / n of N / İleri) never moves. */
+function guide(step = 0, done?: () => void): void {
+  const body = h('div', { class: 'guide-body' }); const cnt = h('span', { class: 'muted' });
+  const back = h('button', {}, '‹ Geri') as HTMLButtonElement; const next = h('button', { class: 'primary' }, 'İleri ›') as HTMLButtonElement;
+  const el = h('div', { class: 'modal guide-modal' }, h('div', { class: 'box guide-box' }, body, h('div', { class: 'guide-foot' }, h('button', { onclick: () => finish() }, 'Geç'), cnt, back, next)));
+  const show = (): void => { body.replaceChildren(maecenas(GUIDE[step]!)); body.scrollTop = 0; cnt.textContent = `${step + 1}/${GUIDE.length}`; back.disabled = step === 0; next.textContent = step === GUIDE.length - 1 ? 'Tamam' : 'İleri ›'; };
+  const finish = (): void => { localStorage.setItem('imp-guide-done', '1'); el.remove(); done?.(); };
+  back.onclick = () => { if (step > 0) { step--; show(); } };
+  next.onclick = () => { if (step < GUIDE.length - 1) { step++; show(); } else finish(); };
+  show(); app.append(el);
+}
+// v2.0.1: first-login queue – character → Neler yeni → guide → (then) events and need alerts, ONE modal at a time
+let lookSaved = false; let onbOpen = false; let onbDoneSent = false;
+function onboarding(): boolean {
+  const w = world; const m = me(); const s = be.session();
+  if (w && s && !m && w.players[s.playerId]?.dead) { if (!document.querySelector('.funeral-modal')) app.append(funeralModal(w, s.playerId)); return true; }
+  if (!w || !m || !s) return false;
+  if (lookOpen || onbOpen) return true;
+  const next = (): void => { onbOpen = false; setTimeout(() => { onboarding(); }, 50); };
+  if ((!m.lookSet || !m.genderSet || (!m.profile?.set && m.prof !== 'kayzer' && m.id !== w.kayzerId)) && !m.npc && !lookSaved) { openLook('ilk'); return true; }
+  if (!localStorage.getItem('imp-controls-done')) { onbOpen = true; void be.act({ t: 'onboardPause' } as never); app.append(controlsModal(() => { localStorage.setItem('imp-controls-done', '1'); next(); })); return true; }
+  if (!newsShown && w.whatsNew?.[s.playerId] !== VERSION) { newsShown = true; onbOpen = true; app.append(whatsNewModal(() => { void be.act({ t: 'seenNews', v: VERSION } as never); next(); })); return true; }
+  if (!localStorage.getItem('imp-guide-done')) { onbOpen = true; guide(0, next); return true; }
+  if (!onbDoneSent && (m.onboardUntil ?? 0) > 0) { onbDoneSent = true; void be.act({ t: 'onboardDone' } as never); }
+  return false;
+}
+const anyModal = (): boolean => !!document.querySelector('.modal');
+/** v2.0.1 funeral / vasiyet screen: continue as an adult child (who inherits house, sandık, Çanta) or create a new character. */
+function funeralModal(w: World, pid: string): HTMLElement {
+  const d = w.players[pid]!.dead!; const kids = d.heirs.map((id) => findPerson(w, id)).filter((x): x is Person => !!x && (!x.playerId || x.npc));
+  const err = h('div', { style: 'color:#ff8a7a;min-height:18px' }); const name = h('input', { maxlength: '24', placeholder: 'Yeni karakterin adı' }) as HTMLInputElement;
+  const done = (r: { ok: boolean; msg: string }): void => { if (!r.ok) { err.textContent = r.msg; return; } el.remove(); lookSaved = false; toast(r.msg); void tick().then(() => onboarding()); };
+  const el = h('div', { class: 'modal funeral-modal' }, h('div', { class: 'box parchment' },
+    h('h2', {}, '🕯 Vasiyet'), h('div', { class: 'msg' }, `${d.name} ${d.years} yaşında hayatını kaybetti. ${d.text}`),
+    kids.length ? h('div', { class: 'stack' }, h('div', {}, 'Hangi çocuğunuzla devam edeceksiniz? Seçtiğiniz çocuk evi, sandığı ve çantayı alır; para yetişkin çocuklar arasında eşit bölündü.'),
+      ...kids.map((k) => h('button', { class: 'primary', onclick: () => { void be.act({ t: 'continueAs', childId: k.id } as never).then(done); } }, `${k.female ? '👩' : '👨'} ${k.name} – ${ageText(w, k)}, ${PROF_LABEL[k.prof]}, ${Math.round(k.money)} D`)))
+      : h('div', { class: 'stack' }, h('div', {}, '16 yaşını geçmiş çocuğunuz yok. Malınız eşinize (yoksa hazineye) kaldı. Aynı hesapla yeni bir karakter yaratın:'), name,
+        h('button', { class: 'primary', onclick: () => { void be.act({ t: 'newCharacter', name: name.value } as never).then(done); } }, 'Yeni karakter oluştur')),
+    err));
+  return el;
 }
 
 const SEASON_IC: Record<string, string> = { ilkbahar: 'spring', yaz: 'summer', sonbahar: 'autumn', kis: 'winter' };
 // ---------------- v1.9.7 character creator / Terzi / Berber ----------------
 let lookOpen = false;
 function openLook(mode: 'ilk' | 'terzi' | 'berber'): void {
-  const m0 = me(); if (!m0 || lookOpen) return; lookOpen = true;
+  const m0 = me(); const w0 = world; if (!m0 || !w0 || lookOpen) return; lookOpen = true;
   let L: Look = { ...(m0.look ?? lookFromSeeds(m0)) };
-  const female = m0.female;
+  // v2.0.1 creation screen = identity sections (each one a self-contained block, so new fields slot in) + appearance
+  const ruler = m0.prof === 'kayzer' || m0.id === w0.kayzerId;
+  const needGender = mode === 'ilk' && !m0.genderSet; const needProfile = mode === 'ilk' && !m0.profile?.set && !ruler;
+  const fresh = !!m0.profile?.fresh;
+  let female: boolean | null = needGender ? (m0.spouse ? m0.female : null) : m0.female;
+  const pr: { surname: string; age: number; origin: Origin | null; temper: Temper | null } = { surname: '', age: 20, origin: null, temper: null };
   type Row = [keyof Look, string, string[]];
-  const all: Row[] = [['skin', 'Ten rengi', SKIN_NAMES], ['hair', 'Saç modeli', female ? HAIR_STYLES_F : HAIR_STYLES_M], ['hairColor', 'Saç rengi', HAIR_COLOR_NAMES], ...(female ? [] : [['beard', 'Sakal / bıyık', BEARDS] as Row]), ['eye', 'Göz rengi', EYE_NAMES], ['build', 'Yapı', BUILDS], ['height', 'Boy', HEIGHTS], ['cloth', 'Kıyafet rengi', CLOTH_NAMES], ['outfit', 'Kıyafet', OUTFITS], ['head', 'Başlık', HEADS]];
-  const rows = all.filter(([k]) => mode === 'ilk' || (mode === 'terzi' ? ['cloth', 'outfit', 'head'].includes(k) : ['hair', 'hairColor', 'beard'].includes(k)));
+  const rowsFor = (fem: boolean): Row[] => { const all: Row[] = [['skin', 'Ten rengi', SKIN_NAMES], ['hair', 'Saç modeli', fem ? HAIR_STYLES_F : HAIR_STYLES_M], ['hairColor', 'Saç rengi', HAIR_COLOR_NAMES], ...(fem ? [] : [['beard', 'Sakal / bıyık', BEARDS] as Row]), ['eye', 'Göz rengi', EYE_NAMES], ['build', 'Yapı', BUILDS], ['height', 'Boy', HEIGHTS], ['cloth', 'Kıyafet rengi', CLOTH_NAMES], ['outfit', 'Kıyafet', OUTFITS], ['head', 'Başlık', HEADS]];
+    return all.filter(([k]) => mode === 'ilk' || (mode === 'terzi' ? ['cloth', 'outfit', 'head'].includes(k) : ['hair', 'hairColor', 'beard'].includes(k))); };
   const toggles: [keyof Look, string][] = mode === 'berber' ? [] : [['scarf', '🧣 Atkı'], ['belt', '🪢 Kuşak'], ['jewel', '💍 Takı']];
   const prev = h('canvas', { width: '16', height: '16', class: 'look-prev', style: 'width:112px;height:112px;image-rendering:pixelated;background:#3a5a2a;border-radius:10px' }) as HTMLCanvasElement;
-  let fr = 0; const draw = (): void => { const g = prev.getContext('2d')!; g.clearRect(0, 0, 16, 16); g.drawImage(makeSprite({ ...m0, id: m0.id + ':prev', look: L })[fr]!, 0, 0); };
+  const fem = (): boolean => female ?? m0.female;
+  let fr = 0; const draw = (): void => { const g = prev.getContext('2d')!; g.clearRect(0, 0, 16, 16); g.drawImage(makeSprite({ ...m0, female: fem(), id: m0.id + ':prev' + (fem() ? 'f' : 'm'), look: fem() ? { ...L, beard: 0 } : L })[fr]!, 0, 0); };
   const timer = setInterval(() => { if (!prev.isConnected) { clearInterval(timer); return; } fr = 1 - fr; draw(); }, 300);
-  const body = h('div', {});
+  const idBox = h('div', { class: 'stack create-id' }); const body = h('div', { class: 'grow' }); const err = h('div', { style: 'color:#ff8a7a;min-height:18px' });
+  const choice = <K extends string>(opts: [K, string][], cur: K | null, pick: (k: K) => void, dis?: (k: K) => boolean): HTMLElement => h('div', { class: 'row wrap choice' }, ...opts.map(([k, label]) => { const b = h('button', { class: `sm${cur === k ? ' primary' : ''}`, onclick: () => pick(k) }, label) as HTMLButtonElement; if (dis?.(k)) b.disabled = true; return b; }));
+  const wageOf = (prof: Profession): string => { const xs = w0.people.filter((p) => p.prof === prof && !p.playerId); const frac = Math.max(0.25, w0.hour / 24); const avg = xs.length ? xs.reduce((a, p) => a + (p.incomeToday ?? 0), 0) / xs.length / frac : 0;
+    return prof === 'tuccar' ? 'maaş yok, ticaretten kazanır (değişken)' : `günde yaklaşık ${Math.max(5, Math.round(avg || ({ ciftci: 12, marangoz: 18, hamal: 11 } as Record<string, number>)[prof] || 10))} D (şehirdeki ortalama ciro)`; };
+  const sections: (() => HTMLElement | '')[] = [
+    () => mode !== 'ilk' ? '' : h('div', {}, h('h3', {}, 'Cinsiyet *'), m0.spouse && needGender ? h('div', { class: 'muted' }, 'Evlisiniz: evlilik yalnız erkek ile kadın arasında olduğundan cinsiyetiniz eşinizinkinin karşıtıdır.') : '',
+      needGender ? choice<'e' | 'k'>([['e', '👨 Erkek'], ['k', '👩 Kadın']], female === null ? null : female ? 'k' : 'e', (k) => { female = k === 'k'; if (female) L = { ...L, beard: 0 }; L = { ...L, hair: 0 }; paint(); draw(); }, (k) => !!m0.spouse && (k === 'k') !== m0.female) : h('div', { class: 'muted' }, m0.female ? '👩 Kadın' : '👨 Erkek')),
+    () => !needProfile ? '' : h('div', {}, h('h3', {}, 'Soyadı / aile adı *'), (() => { const i = h('input', { maxlength: '16', value: pr.surname, placeholder: 'ör. Demirci, Karaca' }) as HTMLInputElement; i.addEventListener('input', () => { pr.surname = i.value; }); return i; })(), h('div', { class: 'muted' }, 'Adınızın sonuna eklenir; çocuklarınız, mirasınız ve Tarih Kitabı bu adı taşır.')),
+    () => !needProfile ? '' : h('div', {}, h('h3', {}, `Yaş * (${MIN_START_AGE}–${MAX_START_AGE})`), (() => { const r = h('input', { type: 'range', min: String(MIN_START_AGE), max: String(MAX_START_AGE), step: '1', value: String(pr.age), style: 'width:100%' }) as HTMLInputElement; const n = h('b', {}, `${pr.age} yaşında`); const t = h('div', { class: 'muted' }, AGE[ageGroupOf(pr.age)].text);
+      r.addEventListener('input', () => { pr.age = Number(r.value); n.textContent = `${pr.age} yaşında`; t.textContent = AGE[ageGroupOf(pr.age)].text; }); return h('div', {}, h('div', { class: 'row' }, h('button', { class: 'sm', onclick: () => { pr.age = Math.max(MIN_START_AGE, pr.age - 1); paint(); } }, '−'), r, h('button', { class: 'sm', onclick: () => { pr.age = Math.min(MAX_START_AGE, pr.age + 1); paint(); } }, '+')), n, t, h('div', { class: 'muted' }, `1 yaş = ${DAYS_PER_YEAR} oyun günü. 65’ten sonra yaşlılık başlar; ${DEATH_START_AGE} yaşından sonra her doğum gününde (yaş − ${DEATH_START_AGE})% ölüm şansı vardır, ${DEATH_CERTAIN_AGE}’de ömür biter.`)); })()),
+    () => !needProfile ? '' : h('div', {}, h('h3', {}, 'Köken *'), choice((Object.keys(ORIGIN) as Origin[]).map((k) => [k, ORIGIN[k].label]), pr.origin, (k) => { pr.origin = k; paint(); }),
+      pr.origin ? h('div', { class: 'muted' }, fresh ? `Başlangıç mesleği: ${PROF_LABEL[ORIGIN[pr.origin].prof]} – ${wageOf(ORIGIN[pr.origin].prof)}. Başlangıç parası: ${Math.max(5, ORIGIN[pr.origin].money + AGE[ageGroupOf(pr.age)].money)} D. Beceri: ${ORIGIN[pr.origin].skill}. ${ORIGIN[pr.origin].text}` : `Beceri: ${ORIGIN[pr.origin].skill}. (Var olan karakter: mesleğiniz ve paranız değişmez.)`) : ''),
+    () => !needProfile ? '' : h('div', {}, h('h3', {}, 'Mizaç *'), choice((Object.keys(TEMPER) as Temper[]).map((k) => [k, TEMPER[k].label]), pr.temper, (k) => { pr.temper = k; paint(); }), pr.temper ? h('div', { class: 'muted' }, TEMPER[pr.temper].text) : ''),
+    // (future identity fields slot in here as one more () => block)
+  ];
   const paint = (): void => {
-    body.replaceChildren(...rows.map(([k, label, names]) => { const v = L[k] as number; const set = (d: number): void => { L = { ...L, [k]: (v + d + names.length) % names.length }; paint(); draw(); };
+    const keep = idBox.querySelector('input') === document.activeElement;
+    idBox.replaceChildren(...sections.map((f) => f()).filter((x): x is HTMLElement => !!x));
+    if (keep) (idBox.querySelector('input') as HTMLInputElement | null)?.focus();
+    body.replaceChildren(...rowsFor(fem()).map(([k, label, names]) => { const v = Math.min(L[k] as number, names.length - 1); const set = (d: number): void => { L = { ...L, [k]: (v + d + names.length) % names.length }; paint(); draw(); };
       return h('div', { class: 'row look-row' }, h('span', { style: 'width:110px' }, label), h('button', { class: 'sm', onclick: () => set(-1) }, '‹'), h('b', { class: 'grow', style: 'text-align:center' }, `${names[v]} (${v + 1}/${names.length})`), h('button', { class: 'sm', onclick: () => set(1) }, '›')); }),
       toggles.length ? h('div', { class: 'row' }, ...toggles.map(([k, label]) => h('button', { class: `sm${L[k] ? ' primary' : ''}`, onclick: () => { L = { ...L, [k]: !L[k] }; paint(); draw(); } }, label))) : '');
   };
   paint(); draw();
   const price = mode === 'terzi' ? TERZI_PRICE : mode === 'berber' ? BERBER_PRICE : 0;
   const close = (): void => { lookOpen = false; el.remove(); };
+  const save = (e: Event): void => {
+    if (mode !== 'ilk') { close(); void doAct({ t: 'customize', look: L, where: mode }); return; }
+    if (needGender && female === null) { err.textContent = 'Lütfen cinsiyet seçin (Erkek / Kadın).'; return; }
+    if (needProfile && (!pr.surname.trim() || !pr.origin || !pr.temper)) { err.textContent = 'Lütfen soyadı, köken ve mizaç seçin.'; return; }
+    const act = { t: 'customize', look: fem() ? { ...L, beard: 0 } : L, where: 'ilk', ...(needGender ? { female: !!female } : {}), ...(needProfile ? { profile: { surname: pr.surname.trim(), age: pr.age!, origin: pr.origin!, temper: pr.temper! } } : {}) } as Action;
+    const bt = e.currentTarget as HTMLButtonElement; bt.disabled = true; bt.textContent = 'Kaydediliyor…'; err.textContent = '';
+    void be.act(act).then((r) => {
+      if (!r.ok) { bt.disabled = false; bt.textContent = 'Kaydet'; err.textContent = r.msg || 'Kaydedilemedi.'; return; }
+      lookSaved = true; const mm = me(); if (mm) { mm.lookSet = true; mm.genderSet = true; mm.female = fem(); mm.look = act.t === 'customize' ? act.look : L; }
+      close(); toast(r.msg || 'Karakteriniz kaydedildi.'); void tick().then(() => onboarding());
+    });
+  };
   const el = h('div', { class: 'modal look-modal' }, h('div', { class: 'box', style: 'max-height:92vh;overflow:auto' },
-    h('h2', {}, mode === 'ilk' ? '🎨 Karakterinizi oluşturun' : mode === 'terzi' ? `🧵 Terzi – yeni kıyafet (${price} D)` : `✂ Berber – saç ve sakal (${price} D)`),
+    h('h2', {}, mode === 'ilk' ? (m0.lookSet ? '🪪 Karakterinizi tamamlayın' : '🎨 Karakterinizi oluşturun') : mode === 'terzi' ? `🧵 Terzi – yeni kıyafet (${price} D)` : `✂ Berber – saç ve sakal (${price} D)`),
+    mode === 'ilk' && m0.lookSet ? h('div', { class: 'muted' }, 'v2.0.1: Her karakter bir kez cinsiyet' + (needProfile ? ', soyadı, yaş, köken ve mizaç' : '') + ' seçer. Paranız ve mesleğiniz değişmez.') : '',
+    idBox,
+    mode === 'ilk' ? h('h3', {}, 'Görünüm') : '',
     h('div', { class: 'row', style: 'align-items:flex-start;gap:12px' }, h('div', {}, prev, h('div', { class: 'muted', style: 'text-align:center' }, 'canlı önizleme')), body),
-    h('div', { class: 'row' }, mode === 'ilk' ? h('button', { onclick: () => { L = randomLook(Math.random, female); paint(); draw(); } }, '🎲 Rastgele') : '',
-      h('button', { class: 'primary', onclick: () => { const act: Action = { t: 'customize', look: L, where: mode }; if (mode === 'ilk') void send(act).then(close); else { close(); void doAct(act); } } }, mode === 'ilk' ? 'Kaydet' : `Öde ve değiştir (${price} D)`),
+    err,
+    h('div', { class: 'row' }, mode === 'ilk' ? h('button', { onclick: () => { L = randomLook(Math.random, fem()); paint(); draw(); } }, '🎲 Rastgele görünüm') : '',
+      h('button', { class: 'primary', onclick: save }, mode === 'ilk' ? 'Kaydet' : `Öde ve değiştir (${price} D)`),
       mode === 'ilk' ? '' : h('button', { onclick: close }, 'Vazgeç')),
-    mode === 'ilk' ? h('div', { class: 'muted' }, 'Bu seçim ücretsiz ve bir kez yapılır. Sonra kıyafeti Terzi’de (Dokuma Tezgâhı), saç/sakalı Berber’de (Zanaat Atölyesi) para ile değiştirebilirsiniz.') : ''));
+    mode === 'ilk' ? h('div', { class: 'muted' }, '* zorunlu. Bu seçimler ücretsiz ve bir kez yapılır. Sonra kıyafeti Terzi’de (Dokuma Tezgâhı), saç/sakalı Berber’de (Zanaat Atölyesi) para ile değiştirebilirsiniz.') : ''));
   app.append(el);
 }
 (window as unknown as { __openLook: typeof openLook }).__openLook = openLook;
 function renderHud(): void {
   const w = world; if (!w) return; const m = me(); setRuler(w.kayzerId);
-  if (m && !m.lookSet && !m.npc && !document.querySelector('.modal:not(.look-modal)')) openLook('ilk');
   const k = findPerson(w, w.kayzerId); const ruler = !!m && w.kayzerId === m.id;
   const chips = hudChips(ctx()); // [clock, meals, water, health, mood, din, ...events]
   const events = chips.slice(m ? 6 : 1);
@@ -226,14 +314,14 @@ function renderHud(): void {
   const chip = (icon: string, text: string, tip: string, cls = ''): HTMLElement => h('span', { class: `stat${cls ? ' ' + cls : ''}`, title: tip, onclick: () => toast(tip) }, ic(icon), h('span', {}, text));
   hudEl.replaceChildren(
     h('div', { class: 'hud-l' },
-      chip(night ? 'moon' : 'sun', `Gün ${w.day} · ${String(w.hour).padStart(2, '0')}:00`, '1 oyun günü = 6 gerçek dakika (1x)'),
+      chip(night ? 'moon' : 'sun', `Gün ${w.day} · ${String((w.hour + Math.max(0, Math.min(23, Math.floor((gameNow() - w.lastTickAt) / hourMs(w))))) % 24).padStart(2, '0')}:00${w.speed !== 1 ? ` · ${w.combat ? '🐢 ' : ''}${w.speed}x` : ''}`, `1 oyun günü = 5 gerçek dakika (1x)${w.speed !== 1 ? ` · şu an ${w.speed}x${w.combat ? ' (saldırı sırasında otomatik yavaş)' : ''}` : ''}`, w.combat ? 'warn' : ''),
       chip(SEASON_IC[season(w)]!, SEASON_LABEL[season(w)].replace(/^\S+\s/, ''), 'Mevsim'),
       ...(m ? [
         meterI('heart', m.health, 'var(--red)', `❤️ Sağlık${m.wounded ? ' – yaralısınız, hekime gidin' : ' – hastalık/yara düşürür, hekim ve dinlenme iyileştirir'}`, m.health < 40 || m.wounded, 'hp'),
-        meterI('bread', 100 - m.hunger, 'var(--gold)', `🍞 Tokluk – açlık ${Math.round(m.hunger)}/100. Pazarda ya da evde yemek yiyin`, m.hunger >= 85, 'hunger'),
-        meterI('water', 100 - m.thirst, 'var(--blue)', `💧 Su – susuzluk ${Math.round(m.thirst)}/100. Kuyuda, evde ya da pazarda için`, m.thirst >= 85, 'thirst'),
+        meterI('bread', 100 - m.hunger, 'var(--gold)', `🍞 Tokluk ${Math.round(100 - m.hunger)}/100 (100 = tok, 0 = çok aç). Saatte ~4 azalır. Çanta’dan ya da Fırın/Pazar’da yiyin`, m.hunger >= 85, 'hunger'),
+        meterI('water', 100 - m.thirst, 'var(--blue)', `💧 Su ${Math.round(100 - m.thirst)}/100 (100 = susuz değilsiniz, 0 = çok susuz). Saatte ~3,5 azalır. Çanta’dan ya da Kuyu/Pazar’da için`, m.thirst >= 85, 'thirst'),
         meterI('moon', m.energy ?? 80, '#b59cf0', `🌙 Enerji (uyku) ${Math.round(m.energy ?? 80)}/100 – dışarıda saatte 4 düşer; evinizde dinlenince/uyuyunca dolar. 15’in altında mutluluğunuz düşer.`, (m.energy ?? 80) < 15, 'energy'),
-        chip('coin', fmt(m.money), 'Keseniz'),
+        h('span', { class: 'stat', title: 'Keseniz – dokunun: kese geçmişi', onclick: () => openPurse() }, ic('coin'), h('span', {}, `${m.money.toFixed(2)} D`)),
       ] : []),
       ruler ? chip('castle', fmt(w.treasury), 'Hazine') : '',
       ruler && w.regime === 'imparatorluk' ? chip('banner', String(Math.round(w.cumhuriyet)), 'Cumhuriyet isteği', w.cumhuriyet > 50 ? 'warn' : '') : '',
@@ -248,7 +336,7 @@ function renderHud(): void {
       h('button', { class: 'mini icon', title: isMuted() ? 'Sesi aç' : 'Sesi kapat', onclick: () => { setMuted(!isMuted()); renderHud(); } }, ic(isMuted() ? 'mute' : 'sound'))),
   );
   const ib = isyanBar(ctx()); if (ib) hudEl.append(ib);
-  iconify(hudEl); needAlerts(m);
+  iconify(hudEl); if (!anyModal() && !lookOpen && !onbOpen) needAlerts(m);
 }
 function meterI(icon: string, v: number, color: string, tip: string, warn: boolean, key: string): HTMLElement {
   return h('span', { class: `stat meter${warn ? ' warn' : ''}${flashKey === key && performance.now() < flashUntil ? ' flash' : ''}`, title: tip, 'data-k': key, onclick: () => toast(tip) }, ic(icon), bar(v, color));
@@ -262,7 +350,7 @@ function needAlerts(m: ReturnType<typeof me>): void {
     if (left > 25) alarmArmed[key] = true; // re-arm once the bar is refilled
     if (left <= 15 && alarmArmed[key] && performance.now() - alarmAt[key]! > 90_000) {
       alarmArmed[key] = false; alarmAt[key] = performance.now(); flashKey = key; flashUntil = performance.now() + 4000;
-      const msg = key === 'hunger' ? `Açlığınız kritik! Tokluk ${numA(left)} düştü – bir şeyler yiyin.` : `Susuzluğunuz kritik! Su ${numA(left)} düştü – su için.`;
+      const msg = key === 'hunger' ? `Tokluk ${Math.round(left)}/100 – çok açsınız, bir şeyler yiyin.` : `Su ${Math.round(left)}/100 – çok susadınız, su için.`;
       alertPop(key === 'hunger' ? 'bread' : 'water', msg, key);
       try { navigator.vibrate?.([180, 90, 180]); } catch { /* not supported */ }
       sfx('error'); setTimeout(renderHud, 4100);
@@ -271,7 +359,7 @@ function needAlerts(m: ReturnType<typeof me>): void {
 }
 function alertPop(icon: string, text: string, key: string): void {
   document.querySelector('.alert-pop')?.remove();
-  const el = h('div', { class: `alert-pop ${key}`, role: 'alert' }, h('span', { class: 'big' }, ic(icon)), h('div', { class: 'grow' }, h('b', {}, key === 'hunger' ? 'Açlık' : 'Susuzluk'), h('div', {}, text)),
+  const el = h('div', { class: `alert-pop ${key}`, role: 'alert' }, h('span', { class: 'big' }, ic(icon)), h('div', { class: 'grow' }, h('b', {}, key === 'hunger' ? 'Tokluk düşük' : 'Su düşük'), h('div', {}, text)),
     h('button', { class: 'primary sm', onclick: () => { el.remove(); void send({ t: key === 'hunger' ? 'eat' : 'drinkWater' } as never); } }, key === 'hunger' ? 'Ye' : 'Su iç'), h('button', { class: 'sm', onclick: () => el.remove() }, ic('close')));
   document.body.append(el); setTimeout(() => el.classList.add('out'), 7000); setTimeout(() => el.remove(), 7600);
 }
@@ -287,7 +375,7 @@ function badges(): Partial<Record<Section, number>> {
 }
 function renderDock(): void {
   const b = badges(); const total = Object.values(b).reduce((x, y) => x + (y ?? 0), 0);
-  dockEl.replaceChildren(h('button', { class: 'primary menu-btn', onclick: () => openMenu(section) }, ic('menu'), h('span', {}, 'Menü'), total ? h('span', { class: 'badge' }, String(total)) : ''));
+  dockEl.replaceChildren(h('button', { class: 'menu-btn', title: 'Yer bul', onclick: () => openPlaces() }, '📍', h('span', {}, 'Yer bul')), h('button', { class: 'primary menu-btn', onclick: () => openMenu(section) }, ic('menu'), h('span', {}, 'Menü'), total ? h('span', { class: 'badge' }, String(total)) : ''));
 }
 function openMenu(sec: Section): void {
   section = sec; localStorage.setItem('imp-sec', sec); if (sec === 'mesaj') seenMsgs = msgs.length;
@@ -537,13 +625,18 @@ function setupInput(): void {
       if (!dragStart.moved && world) {
         const r = canvas.getBoundingClientRect(); const hit = hitTest(world, placed, cam, (e.clientX - r.left) * dpr(), (e.clientY - r.top) * dpr(), me()?.id ?? null);
         const tx = (e.clientX - r.left) * dpr() / (cam.z * T) + cam.x, ty = (e.clientY - r.top) * dpr() / (cam.z * T) + cam.y;
-        if (hit.animal) tapAnimal(hit.animal);
+        // v2.0.1: a tap never opens a random panel. Foe → attack/approach; person → name + health label; building → walk, open on arrival
+        const foe = nearestFoeAt(tx, ty);
+        const bAt = world.buildings.find((b) => tx >= b.x && tx <= b.x + b.w && ty >= b.y - (b.kind === 'pazar' ? 1.4 : 0.6) && ty <= b.y + b.h);
+        if (foe) tapFoe(foe);
+        else if (hit.animal) tapAnimal(hit.animal);
         else if (hit.corpse) openCorpse(hit.corpse.id);
-        else if (hit.sign) openElectionSign();
-        else if (hit.person && hit.person.id !== me()?.id) { const mq = placed.find((q) => q.p.id === me()?.id); const tq = placed.find((q) => q.p.id === hit.person!.id); if (!mq || !tq || Math.hypot(tq.x - mq.x, tq.y - mq.y) <= PERSON_REACH + 0.4) openPersonSheet(hit.person.id); else { closeSheet(); pending = null; openTries = 0; pendingOpen = hit.person.id; walkTo({ x: tq.x + 0.7, y: tq.y }); toast(`🚶 ${hit.person.name} yanına yürüyorsunuz…`); } }
-        else if (hit.person) { const mm = me(); if (mm?.riding && (mm.animals?.at ?? 0) > 0) { sfx('step'); void send({ t: 'ride', on: false }); } else openMenu('ben'); }
-        else if (hit.building) { const b = hit.building; selected = null; pending = null; walkTo(doorSpot(b)); sfx('door'); openSheet(() => bPanel(b)); }
-        else { pending = null; pendingOpen = null; closeSheet(); walkTo({ x: tx, y: ty }); sfx('step'); }
+        else if (hit.sign && !bAt) openElectionSign();
+        else if (bAt && bAt.kind === 'pazar' && ty >= bAt.y - 0.6) { selB = bAt.id; selPerson = null; sfx('tap'); const q = myPlaced(); toast(q && distToBuilding(bAt, q) <= REACH + 1 ? `🏠 ${bAt.name} seçildi – açmak için “Etkileşim” (E).` : `🏠 ${bAt.name} seçildi – joystick ile yanına gidin, sonra “Etkileşim” (E).`); ctl?.refresh(); } // a tap on a market stall/roof selects the market, not the seller standing in it
+        else if (hit.person && hit.person.id !== me()?.id) { selPerson = hit.person.id; selUntil = performance.now() + 4000; sfx('tap'); }
+        else if (hit.person) { const mm = me(); if (mm?.riding && (mm.animals?.at ?? 0) > 0) { sfx('step'); void send({ t: 'ride', on: false }); } }
+        else if (hit.building || bAt) { const b = (hit.building ?? bAt)!; selB = b.id; sfx('tap'); const q = myPlaced(); toast(q && distToBuilding(b, q) <= REACH ? `🏠 ${b.name} seçildi – girmek için “Etkileşim” (E).` : `🏠 ${b.name} seçildi – joystick ile kapısına gidin, sonra “Etkileşim” (E).`); ctl?.refresh(); }
+        else { selB = null; selPerson = null; ctl?.refresh(); } // v2.0.1: tapping the map never walks – movement is joystick / WASD only
       }
       dragStart = null;
     }
@@ -598,6 +691,120 @@ function smoothPeople(list: Placed[], mine: string | null): Placed[] {
   }
   return list;
 }
+
+// ---------------- v2.0.1: combat taps, labels, controls, notices ----------------
+let selB: string | null = null; let selPerson: string | null = null; let selUntil = 0; let heldNpc: string | null = null; let pendingB: string | null = null; let labelEl: HTMLElement | null = null;
+let ctl: ReturnType<typeof buildControls> | null = null; let joyVec = { x: 0, y: 0 }; let joyTimer: ReturnType<typeof setInterval> | null = null;
+function nearestFoeAt(tx: number, ty: number): string | null {
+  const w = world; if (!w?.combat) return null; let best: string | null = null; let bd = 1.3;
+  for (const f of liveFoes(w)) { const p = foePos(f, gameNow()); const d = Math.hypot(p.x - tx, p.y - (ty + 0.4)); if (d < bd) { bd = d; best = f.id; } }
+  return best;
+}
+function myPlaced(): Placed | undefined { const m = me(); return m ? placed.find((q) => q.p.id === m.id) : undefined; }
+function foeRange(): number { const m = me(); return m && weaponInHand(m) === 'yay' ? 7 : 1.6; }
+function tapFoe(id: string): void {
+  const w = world; const m = me(); const f = w?.combat?.foes.find((x) => x.id === id); if (!w || !m || !f) return;
+  if (!weaponInHand(m)) { toast(bestWeapon(m) ? '⚔ Önce alttaki hızlı çubuktan silahınızı seçin (kınından çekin).' : '⚔ Silahınız yok – Demirci’den (Zanaat Atölyesi) alın ya da evinize kaçın.'); return; }
+  const q = myPlaced(); const fp = foePos(f, gameNow());
+  if (q && Math.hypot(q.x - fp.x, q.y - fp.y) > foeRange() + 0.2) { toast(`🎯 Düşman menzil dışında (${Math.round(Math.hypot(q.x - fp.x, q.y - fp.y))} kare) – joystick ile yaklaşın, sonra Saldır.`); return; }
+  void send({ t: 'attack', foeId: id } as never);
+}
+function ctlAttack(): void {
+  const w = world; const m = me(); if (!w || !m) return;
+  const live = w.combat ? liveFoes(w) : []; if (!live.length) { toast('Saldırılacak düşman yok. (Eşkıya baskını ya da savaş sırasında kullanılır.)'); return; }
+  const q = myPlaced(); if (!q) return; const now = gameNow();
+  const f = [...live].sort((a, b) => Math.hypot(foePos(a, now).x - q.x, foePos(a, now).y - q.y) - Math.hypot(foePos(b, now).x - q.x, foePos(b, now).y - q.y))[0]!;
+  tapFoe(f.id);
+}
+function nearPeople(): Placed[] { const q = myPlaced(); const m = me(); if (!q || !m) return []; return placed.filter((x) => x.visible && x.p.id !== m.id && Math.hypot(x.x - q.x, x.y - q.y) <= PERSON_REACH); }
+function interactTarget(): { kind: 'person'; id: string; label: string } | { kind: 'building'; id: string; label: string } | { kind: 'none'; label: string } {
+  const w0 = world; const q0 = myPlaced(); const sb = selB && w0 ? w0.buildings.find((x) => x.id === selB) : undefined;
+  if (sb && q0 && distToBuilding(sb, q0) <= REACH + 1) return { kind: 'building', id: sb.id, label: sb.name }; // a tapped (selected) building wins when in reach
+  const near = nearPeople();
+  if (near.length === 1) return { kind: 'person', id: near[0]!.p.id, label: near[0]!.p.name.split(' ')[0]! };
+  if (near.length > 1) { const s = near.find((x) => x.p.id === selPerson); return s ? { kind: 'person', id: s.p.id, label: s.p.name.split(' ')[0]! } : { kind: 'none', label: 'Kişiye dokunun' }; }
+  const w = world; const q = myPlaced(); if (w && q) { const b = w.buildings.filter((x) => distToBuilding(x, q) <= 1.2).sort((a, c) => distToBuilding(a, q) - distToBuilding(c, q))[0]; if (b) return { kind: 'building', id: b.id, label: b.name }; }
+  return { kind: 'none', label: 'Yakında kimse yok' };
+}
+function ctlInteract(): void {
+  const t = interactTarget(); const w = world; if (!w) return;
+  if (t.kind === 'none') { toast(t.label === 'Kişiye dokunun' ? 'Yakında birden fazla kişi var: önce konuşmak istediğinize dokunun.' : 'Etkileşim için birinin hemen yanında (1 kare) ya da bir binanın kapısında olun.'); return; }
+  if (t.kind === 'building') { const b = w.buildings.find((x) => x.id === t.id); if (b) openSheet(() => bPanel(b)); return; }
+  openInteraction(t.id);
+}
+function openInteraction(id: string): void {
+  const w = world; const p = w ? findPerson(w, id) : null; if (!w || !p) return;
+  const q = placed.find((x) => x.p.id === id); if (q && (!p.playerId || p.npc)) { p.hold = { by: me()?.id ?? '', x: q.x, y: q.y, until: gameNow() + 90_000 }; heldNpc = id; void be.act({ t: 'holdNpc', personId: id, on: true } as never); }
+  openPersonSheet(id); if (heldNpc) heldNpc = id;
+}
+function useSlot(k: SlotItem): void {
+  const m = me(); if (!m) return; const n = (m.arms as Record<string, number> | undefined)?.[k] ?? (m.inv as Record<string, number>)[k] ?? 0;
+  if (['kilic', 'hancer', 'yay'].includes(k)) { if (!n) { toast('Bu silah üzerinizde değil (sandıkta olabilir).'); return; } void send({ t: 'drawWeapon', kind: m.drawn === k ? null : k } as never); return; }
+  if (k === 'kalkan') { toast(n ? '🛡 Kalkan taşıdığınız sürece her darbe daha az acıtır (seçmeye gerek yok).' : 'Kalkanınız yok.'); return; }
+  if (k === 'ok') { toast(`➶ ${n} ok – yay seçiliyken her atış 1 ok harcar.`); return; }
+  if (!n) { toast(`Çantada ${GOOD_LABEL[k as never] ?? k} yok – Fırın/Kuyu/Pazar’dan “Çantaya al”.`); return; }
+  void send({ t: 'useItem', good: k } as never);
+}
+function ctlMove(dx: number, dy: number): void {
+  joyVec = { x: dx, y: dy };
+  const stepMove = (): void => { const w = world; const m = me(); if (!w || !m) return; if (!joyVec.x && !joyVec.y) return; const p = myPos(w, m, gameNow()); walkTo({ x: Math.max(0.5, Math.min(MAP_W - 0.5, p.x + joyVec.x * 2.4)), y: Math.max(0.5, Math.min(MAP_H - 0.5, p.y + joyVec.y * 2.4)) }, true); pendingB = null; };
+  if (dx || dy) { if (!joyTimer) { stepMove(); joyTimer = setInterval(stepMove, 220); } }
+  else if (joyTimer) { clearInterval(joyTimer); joyTimer = null; const w = world; const m = me(); if (w && m) { const p = myPos(w, m, gameNow()); walkTo(p, true); } }
+}
+function goBuilding(id: string): void {
+  const w = world; const b = w?.buildings.find((x) => x.id === id); const m = me(); if (!w || !b || !m) return;
+  if (distToBuilding(b, myPos(w, m, gameNow())) <= REACH) { openSheet(() => bPanel(b)); return; }
+  pendingB = id; walkTo(doorSpot(b)); toast(`🚶 ${b.name} yoluna çıktınız – varınca açılacak.`);
+}
+function frameExtras(): void {
+  const w = world; const m = me(); if (!w || !m) return;
+  if (pendingB) { const b = w.buildings.find((x) => x.id === pendingB); const q = myPlaced(); if (!b) pendingB = null; else if (q && distToBuilding(b, q) <= REACH) { pendingB = null; openSheet(() => bPanel(b)); } }
+  // name + health label above a tapped person
+  if (selPerson && performance.now() < selUntil) {
+    const q = placed.find((x) => x.p.id === selPerson); const r = canvas.getBoundingClientRect(); const k = cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1));
+    if (q) { if (!labelEl) { labelEl = h('div', { class: 'person-label' }); app.append(labelEl); } labelEl.replaceChildren(h('b', {}, q.p.name), h('div', { class: 'hp' }, h('i', { style: `width:${Math.max(0, Math.min(100, q.p.health))}%` }))); labelEl.style.left = `${r.left + (q.x - cam.x) * k}px`; labelEl.style.top = `${r.top + (q.y - cam.y) * k - 34}px`; }
+  } else if (labelEl) { labelEl.remove(); labelEl = null; }
+  if (heldNpc && sheet && performance.now() % 30000 < 40) void be.act({ t: 'holdNpc', personId: heldNpc, on: true } as never);
+  ctl?.refresh();
+}
+function setupControls(): void {
+  ctl = buildControls(app, { me: () => me(), useSlot, move: ctlMove, attack: ctlAttack, interact: ctlInteract,
+    canAttack: () => { const w = world; const m = me(); const on = !!w?.combat && liveFoes(w).length > 0 && !!m && !!weaponInHand(m); return { on, label: on ? 'En yakın düşmana saldır' : 'Saldırı yalnız baskın/savaşta, silah seçiliyken' }; },
+    canInteract: () => { const t = interactTarget(); return { on: t.kind !== 'none', label: t.label }; } });
+}
+// combat feedback + money / weapon notices (every state update)
+let hitSeen = 0; let ledgerSig = new Set<string>(); let ledgerInit = false; let lastDrawn: string | null | undefined; let ownActAt = 0;
+function stateNotices(): void {
+  const w = world; const m = me(); if (!w || !m) return; const now = gameNow();
+  const hits = w.combat?.hits ?? []; const logEl = document.querySelector('.combat-log') ?? (() => { const e = h('div', { class: 'combat-log' }); app.append(e); return e; })();
+  for (const hi of hits) { if (hi.at <= hitSeen) continue; if (now - hi.at > 15_000) continue;
+    if (hi.to === m.id) { const t = hi.k === 'rob' ? `💰 ${hi.by} kesenizden ${hi.dmg} D aldı!` : hi.k === 'block' ? `🛡 ${hi.by} size ${hi.w} ile vurdu – kalkan kısmen tuttu (−${hi.dmg})` : `🩸 ${hi.by} size ${hi.w} ile vurdu (−${hi.dmg})`; logEl.append(h('div', {}, t)); setTimeout(() => logEl.firstChild?.remove(), 3600); app.append(h('div', { class: 'hurt-flash' })); setTimeout(() => document.querySelector('.hurt-flash')?.remove(), 600); canvas.classList.remove('shake'); void canvas.offsetWidth; canvas.classList.add('shake'); sfx('error'); try { navigator.vibrate?.(120); } catch { /* */ } }
+    else if (hi.by === m.name && (hi.k === 'kill')) { logEl.append(h('div', {}, `⚔ ${hi.toName} yere serildi!`)); setTimeout(() => logEl.firstChild?.remove(), 3600); sfx('death'); }
+  }
+  hitSeen = Math.max(hitSeen, ...hits.map((x) => x.at), 0);
+  // every money loss gets a visible reason (unless it was the action you just did)
+  const mine = w.ledger.filter((l) => l.from === m.id || l.to === m.id); const sigOf = (l: typeof mine[number], i: number): string => `${l.day}|${l.from}|${l.to}|${l.amount}|${l.reason}|${i}`;
+  const counts = new Map<string, number>(); const cur = new Set<string>(); const fresh: typeof mine = [];
+  for (const l of mine) { const base = `${l.day}|${l.from}|${l.to}|${l.amount}|${l.reason}`; const n = (counts.get(base) ?? 0) + 1; counts.set(base, n); const sg = sigOf(l, n); cur.add(sg); if (ledgerInit && !ledgerSig.has(sg)) fresh.push(l); }
+  ledgerSig = cur; if (!ledgerInit) ledgerInit = true;
+  else if (Date.now() - ownActAt > 2500) for (const l of fresh.slice(-3)) toast(l.from === m.id ? `💸 −${l.amount.toFixed(2)} D: ${l.reason}` : `💰 +${l.amount.toFixed(2)} D: ${l.reason}`);
+  if (lastDrawn !== undefined && lastDrawn && !m.drawn && Date.now() - ownActAt > 2500) toast(`⚔ ${({ hancer: 'Hançeriniz', kilic: 'Kılıcınız', yay: 'Yayınız' } as Record<string, string>)[lastDrawn] ?? 'Silahınız'} artık elinizde değil – ${((m.arms as Record<string, number> | undefined)?.[lastDrawn] ?? 0) > 0 ? 'kınına girdi (ok bitti ya da sandığa kondu)' : 'elinizden alındı (bekçi araması ya da soygun – bildirimlere bakın)'}.`);
+  lastDrawn = m.drawn ?? null;
+}
+function openPurse(): void {
+  openSheet(() => { const w = world!; const m = me(); if (!m) return h('div', {}, '—');
+    const rows = w.ledger.filter((l) => l.from === m.id || l.to === m.id).slice(-40).reverse();
+    return h('div', { class: 'stack' }, h('h2', {}, `💰 Kese: ${m.money.toFixed(2)} D`), h('div', { class: 'muted' }, 'Son para hareketleriniz (en yeni üstte). Her gelir ve giderin sebebi burada.'),
+      ...rows.map((l) => h('div', { class: 'card row' }, h('b', { style: `color:${l.to === m.id ? '#7c7' : '#e77'};min-width:80px` }, `${l.to === m.id ? '+' : '−'}${l.amount.toFixed(2)} D`), h('span', { class: 'grow' }, l.reason), h('span', { class: 'muted' }, `Gün ${l.day}`))),
+      rows.length ? '' : h('div', { class: 'muted' }, 'Henüz hareket yok.')); });
+}
+function openPlaces(): void {
+  const groups: [string, string[]][] = [['Yiyecek ve su', ['firin', 'kuyu', 'gida', 'pazar', 'kasaphane', 'liman']], ['Alışveriş ve zanaat', ['zanaat', 'yeni', 'atolye', 'dokuma', 'mobilyahane', 'hayvan']], ['Devlet', ['saray', 'meclis', 'mahkeme', 'zindan', 'kisla']], ['Diğer', ['cami', 'okul', 'hekimhane', 'kahve', 'bar', 'festival', 'ambar', 'santiye', 'ciftlik']]];
+  const extra: Record<string, string> = { atolye: ' (Demirci, Terzi)', firin: ' (ekmek)', kuyu: ' (su)', hekimhane: ' (tedavi)' };
+  openSheet(() => { const w = world!; const m = me(); return h('div', { class: 'stack place-list' }, h('h2', {}, '📍 Yer bul'), h('div', { class: 'muted' }, 'Bir yere basın: karakteriniz oraya yürür (yürüme gerçek zamanlı, saat yakmaz), varınca paneli açılır. Haritada da her dükkânın adı yazar.'),
+    ...groups.map(([g, ids]) => h('div', {}, h('h3', {}, g), ...ids.map((id) => w.buildings.find((b) => b.id === id)).filter((b): b is NonNullable<typeof b> => !!b).map((b) => h('button', { onclick: () => { closeSheet(); goBuilding(b.id); } }, `${b.name}${extra[b.id] ?? ''}`)))),
+    m?.home ? h('div', {}, h('h3', {}, 'Ev'), h('button', { onclick: () => { closeSheet(); goBuilding(m.home); } }, `🏠 Evim (${w.buildings.find((b) => b.id === m.home)?.name ?? m.home})`)) : ''); });
+}
 function frame(): void {
   // v1.9.3: no 30 fps cap in low-graphics mode (it halved smoothness); low mode = 1× pixels
   const prof0 = performance.now();
@@ -607,11 +814,11 @@ function frame(): void {
     const meP = meP0; const mq = meP ? placed.find((q) => q.p.id === meP.id) : undefined;
     const dt = Math.min(0.1, (performance.now() - lastFrame) / 1000); lastFrame = performance.now();
     if (mq && followCam && !dragStart) { const vw = canvas.width / (cam.z * T), vh = canvas.height / (cam.z * T); const tx = mq.x - vw / 2, ty = mq.y - vh / 2 - 0.5; const k = Math.min(1, dt * 6); cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; clampCam(); }
-    if (pendingOpen && mq) { const tq = placed.find((q) => q.p.id === pendingOpen); if (!tq) pendingOpen = null; else if (Math.hypot(tq.x - mq.x, tq.y - mq.y) <= PERSON_REACH + 0.4 || (openTries >= 2 && meP?.walk && now > walkEnd(meP.walk) && Math.hypot(tq.x - mq.x, tq.y - mq.y) <= PERSON_REACH + 0.85)) { const id = pendingOpen; pendingOpen = null; walkTarget = null; openPersonSheet(id); } else if (meP?.walk && now > walkEnd(meP.walk) - 200) { openTries += 1; walkTo({ x: tq.x + (openTries % 2 ? 0.7 : -0.7), y: tq.y + (openTries > 2 ? 0.6 : 0) }); if (openTries > 8) pendingOpen = null; } }
     drawFrame(ctx2d, stat, world, cam, placed, now, selected, me()?.id ?? null, lowGfx ? 0 : darkness(world), walkTarget);
     pendingStep();
     if (walkTarget) { const m = me(); if (m?.walk && now > walkEnd(m.walk) + 300 && !pending) walkTarget = null; }
     if (now - lastHud > 1000) { lastHud = now; renderHud(); soundscape(); insideBanner(); }
+    frameExtras();
   }
   const pc = performance.now() - prof0; profAcc.n += 1; profAcc.sum += pc; if (pc > profAcc.max) profAcc.max = pc;
   requestAnimationFrame(frame);
@@ -627,15 +834,14 @@ async function tick(): Promise<void> {
     const mm = me(); if (localWalk && mm && mm.id === localWalk.id && gameNow() < walkEnd(localWalk.walk) + 15_000) mm.walk = localWalk.walk;
     if (first) { stat = buildStatic(world); const m = me(); const b = m ? world.buildings.find((x) => x.id === m.home) : undefined; if (b) { cam.x = b.x - canvas.width / (cam.z * T) / 2; cam.y = b.y - canvas.height / (cam.z * T) / 2; clampCam(); } }
     if (r.summary) modal(maecenas(r.summary));
-    renderDock(); events(first); trialPopup(); disasterPopup(); v2Popups();
+    renderDock(); stateNotices(); if (sheet && !sheetPointer) rerenderSheet(); const onb = onboarding(); events(first, onb); trialPopup(); if (!onb) { disasterPopup(); v2Popups(); }
   } catch (e) { console.warn('heartbeat', e); } finally { ticking = false; }
 }
 
 async function start(): Promise<void> {
   app.replaceChildren(canvas); hudEl = h('div', { class: 'hud' }); dockEl = h('div', { class: 'dock' }); app.append(hudEl, dockEl); installClickSounds(app);
-  setupInput();
+  setupInput(); setupControls(); addEventListener('imp-refresh', () => { rerenderSheet(true); ctl?.refresh(); });
   await tick();
-  if (!localStorage.getItem('imp-guide-done')) guide(0);
   setInterval(() => void tick(), be.mode === 'mock' && !location.search.includes('poll6') ? 2500 : 6000);
   setInterval(() => { void be.messages().then((m) => { msgs = m; renderDock(); }); }, 5000);
   setInterval(() => rerenderSheet(), 4000);
@@ -686,15 +892,15 @@ function electionInfo(w: World): HTMLElement {
 }
 function openElectionSign(): void { openSheet(() => h('div', { class: 'stack' }, electionInfo(world!), electionCard(ctx()))); }
 let lastCorpses = new Set<string>(); let lastJail = 0; let lastIsyan = false;
-function events(first: boolean): void {
+function events(first: boolean, onb = false): void {
   const w = world; const m = me(); if (!w) return;
   // election phase notifications (once per phase)
   const ph = electionPhase(w).phase; const key = `${w.election.nextDay}:${ph}`;
-  if (!first && localStorage.getItem('imp-phase') !== key && ph !== 'bekleme') {
+  if (onb) { /* shown after onboarding */ } else if (!first && localStorage.getItem('imp-phase') !== key && ph !== 'bekleme') {
     const msg = ph === 'aday' ? 'Meclis seçimi için ADAYLIK açıldı! Aday olmak isteyen Meclis’e gitsin.' : ph === 'propaganda' ? 'PROPAGANDA dönemi başladı: adaylar afiş asıyor, meydanda konuşuyor.' : 'BUGÜN SEÇİM GÜNÜ! Sandık Meclis’te ve Meydan’da.';
     modal(h('div', {}, h('h2', {}, '🔔 Meclis'), h('p', {}, msg), electionInfo(w))); sfx('bell');
   }
-  localStorage.setItem('imp-phase', key);
+  if (!onb) localStorage.setItem('imp-phase', key);
   const cs = new Set((w.corpses ?? []).map((c) => c.id));
   if (!first) for (const id of cs) if (!lastCorpses.has(id)) { sfx('death'); const co = w.corpses!.find((c) => c.id === id)!; toast(`💀 ${co.name} öldürüldü!`); }
   lastCorpses = cs;
@@ -754,8 +960,7 @@ let newsShown = false; let namePrompted = false;
 /** v2.0: “Neler yeni?” once per player (server-tracked), and the Kayzer names the empire. */
 function v2Popups(): void {
   const w = world; const m = me(); const s = be.session(); if (!w || !m || !s) return;
-  if (document.querySelector('.look-modal')) return;
-  if (!newsShown && w.whatsNew?.[s.playerId] !== VERSION) { newsShown = true; app.append(whatsNewModal(() => void be.act({ t: 'seenNews', v: VERSION } as never))); return; }
+  if (anyModal()) return;
   if (!namePrompted && !w.empireName && w.kayzerId === m.id && !document.querySelector('.whatsnew')) { namePrompted = true; app.append(empireNameModal(nameSend)); }
 }
 async function nameSend(name: string): Promise<string | null> { const r = await be.act({ t: 'nameEmpire', name } as never); if (!r.ok) return r.msg; await tick(); return null; }
@@ -788,7 +993,7 @@ void ({} as Corpse);
 installIconify();
 void be.restore().then((s) => (s ? start() : loginScreen()));
 // expose for headless smoke tests
-(window as unknown as { __imp: () => unknown }).__imp = () => ({ profile: () => ({ frameCpuAvgMs: +(profAcc.sum / Math.max(1, profAcc.n)).toFixed(2), frameCpuMaxMs: +profAcc.max.toFixed(1) }), mood: musicMood, mute: setMuted, look: (x: number, y: number) => { followCam = false; cam.x = x - canvas.width / (cam.z * T) / 2; cam.y = y - canvas.height / (cam.z * T) / 2; }, act: doAct, openB: (id: string) => { const b = world!.buildings.find((x) => x.id === id); if (b) openSheet(() => bPanel(b)); }, menu: openMenu, admin: openAdmin, world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1)), r.top + (y - cam.y) * cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1))]; } });
+(window as unknown as { __imp: () => unknown }).__imp = () => ({ profile: () => ({ frameCpuAvgMs: +(profAcc.sum / Math.max(1, profAcc.n)).toFixed(2), frameCpuMaxMs: +profAcc.max.toFixed(1) }), mood: musicMood, mute: setMuted, sel: () => ({ b: selB, p: selPerson }), look: (x: number, y: number) => { followCam = false; cam.x = x - canvas.width / (cam.z * T) / 2; cam.y = y - canvas.height / (cam.z * T) / 2; }, act: doAct, openB: (id: string) => { const b = world!.buildings.find((x) => x.id === id); if (b) openSheet(() => bPanel(b)); }, menu: openMenu, admin: openAdmin, world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1)), r.top + (y - cam.y) * cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1))]; } });
 
 // ---- v1.9 landscape: rotate overlay (phones in portrait) + low-graphics class ----
 document.body.classList.toggle('low', lowGfx);

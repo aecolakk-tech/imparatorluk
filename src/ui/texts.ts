@@ -33,9 +33,9 @@ export const RULES: [string, string[]][] = [
     'Lider rol dağıtır (yardımcı, propagandacı, gözcü) ve eylem seçer: propaganda, soygun (lonca), sabotaj, gece toplantısı ve en az 8 üyeyle ayaklanma. Her eylem şüpheyi artırır; muhbir, casus, baskın ve sorgu sizi ele verebilir.',
   ]],
   ['Dünya', [
-    'Tek bir ortak dünya var, hiç sıfırlanmaz. 1 oyun günü = 6 gerçek dakika (1x). Hızı sadece Kayzer 0,5x / 1x / 2x yapabilir (üst çubuktan, her yerden).',
+    'Tek bir ortak dünya var, hiç sıfırlanmaz. 1 oyun günü = 20 gerçek dakika (1x): gündüz (06:00–22:00) her oyun saati 1 dakika, gece (22:00–06:00) 30 saniye sürer; kısa bir yürüyüş birkaç saniye sürer (yürümek saat atlatmaz, sadece iş ve namaz gibi uzun işler zaman alır). Kimse çevrimiçi değilken saat durur. Hızı sadece Kayzer 0,5x / 1x / 2x yapabilir (üst çubuktan, her yerden). Eşkıya baskını ve savaş sırasında oyun otomatik 0,25x yavaşlar, bitince eski hıza döner.',
     'Kimse çevrimiçi değilken dünya donar; biri girince kaldığı yerden devam eder.',
-    'Siz yokken karakterinizi oyunun yapay zekâsı SADECE hayatta tutar: 3 öğün yer, 5 kez su içer, gerekirse hekime gider. Çalışmaz, satmaz, para biriktirmez, suç işlemez. Girdiğiniz an kontrol size geçer.',
+    'Siz yokken karakterinizi oyunun yapay zekâsı SADECE hayatta tutar: 3 öğün yer, 3 kez su içer, gerekirse hekime gider. Çalışmaz, satmaz, para biriktirmez, suç işlemez. Girdiğiniz an kontrol size geçer.',
     'Üç hafta hiç girmeyen oyuncunun karakteri tamamen bağımsız bir vatandaşa döner (geri gelince yine sizin olur).',
   ]],
   ['Kayzer ve Naip', [
@@ -43,7 +43,7 @@ export const RULES: [string, string[]][] = [
     'Kayzer çevrimdışıyken Maecenas naiplik yapar: maaşı öder, devlet ekmeğini dağıtır, küçük yardım ve iş dilekçelerini cevaplar. Yeni kanun çıkaramaz, vergi değiştiremez, büyük harcama yapamaz.',
     'Oyunun kurucusu her zaman Hanedan’dır; hanedan hakkı çocuklarına ve torunlarına da geçer. Tahtı kaybeden hanedan üyesi en az 3 sadık asker varsa ya da cumhuriyet isteği 60’ın altındaysa “Tahtı geri al” diyebilir (sürgündeyken bile).',
     'Kayzer çevrimdışıyken ya da pasifken eşi devleti yönetir: eş oyuncuysa fermanları kendisi verir, değilse Maecenas’ın yardımıyla oyunun yapay zekâsı yönetir.',
-    'Feragat: Kayzer tahttan çekilirse taht veliahda (Kayzer seçebilir), yoksa en büyük yetişkin çocuğa geçer. Varis reşit değilse eş naip olarak tahta oturur, varis 60. gününde tahta çıkar. Çocuk yoksa taht eşe geçer.',
+    'Feragat: Kayzer tahttan çekilirse taht veliahda (Kayzer seçebilir), yoksa en büyük yetişkin çocuğa geçer. Varis reşit değilse eş naip olarak tahta oturur, varis 16 yaşında tahta çıkar. Çocuk yoksa taht eşe geçer.',
   ]],
   ['Darbe (Kışla)', [
     'Darbe için üçü birden gerekir: en az 6 asker sizin tarafınızda (Saray Koruması kanunu varsa 8), komplo fonunda 1500 Dinar, halk desteği (ortalama memnuniyet 40’ın altında ya da cumhuriyet isteği 50 ve üstü).',
@@ -64,9 +64,10 @@ export const RULES: [string, string[]][] = [
   ['Evlilik ve Aile', [
     'Her yetişkin vatandaş (oyuncu ya da yapay) evlenme teklif edebilir; oyuncu teklifleri kabul/ret ile cevaplar. Düğün yapılır, eşler aynı evde yaşar. Kayzer’in eşi otomatik soylu olur ve Saray’a taşınır.',
     'Çocuk sadece bolluk varsa olur: hanede en az 300 Dinar birikim (her çocuk için +100), tok bir hane ve şehirde ekmek bolluğu. Bebek 5 gün sonra doğar; her çocuk günde 3 Dinar bakım ister.',
-    'Çocuklar bebek → çocuk → genç → yetişkin (60. gün) olarak büyür, anne-babasının huyunu (dürüstlük, hırs, görünüş) alır. Okula giden çocuk (günde +1 Dinar) büyüyünce memur, hoca, hekim, kalemşör ya da tüccar olabilir.',
+    'YAŞ: 1 yaş = 5 oyun günü. 0–6 Bebek/Çocuk (çalışmaz, savaşmaz, salgına karşı çok zayıf), 7–15 Genç (okula gider ya da yarım ücretle çıraklık yapar; evlenemez, askere giremez), 16–64 Yetişkin, 65+ Yaşlı (%20 yavaş yürür, savaşta zayıf, daha sık hastalanır ve geç iyileşir; ama tecrübeli ve saygın). Evlilik 16 yaşından itibaren; kadınlar 16–45 yaş arası çocuk sahibi olabilir, erkeklerde 60’tan sonra azalır. Çocuklar babanın soyadını alır; evlenen kadın kocasının soyadını alır. Çocuklar anne-babasının huyunu (dürüstlük, hırs, görünüş) alır.',
+    'ÖLÜM: 68 yaşına kadar kimse yaşlılıktan ölmez; sonra her doğum gününde (yaş − 68)% ölüm şansı vardır (69’da %1, 78’de %10, 87’de %19), 88’de ömür biter. Oyuncu karakteri de ölür (yaşlılık, cinayet…): hesabınız silinmez; cenaze ekranında 16 yaşını geçmiş bir çocuğunuzla devam edersiniz, çocuğunuz yoksa yeni bir karakter yaratırsınız.',
     'Çocuklar hastalanabilir: Hekime götürün (8 Dinar), yoksa 6 günde ölebilir. Anne-babası ölen çocuklara devlet (hazine) bakar.',
-    'Yetişkin olan çocuk yeni bir vatandaştır; yeni oyuncular onu devralıp oynayabilir. Ölen kişinin malı eşine ve yetişkin çocuklarına kalır; mirasçısı yoksa hazineye geçer.',
+    'Yetişkin olan çocuk yeni bir vatandaştır; yeni oyuncular onu devralıp oynayabilir. MİRAS: para yetişkin çocuklar arasında eşit bölünür; ev, sandık ve çanta varise (oyuncunun seçtiği, yoksa en büyük çocuğa) kalır. Çocuk yoksa her şey eşe, eş de yoksa hazineye geçer (%10 miras vergisi). Kayzer ölürse taht varise, varis yoksa Maecenas’a geçer; kurucu paneli hesabınızda kalır.',
     'Boşanmada birikim ve eşyalar ikiye bölünür; evden ayrılan taraf boş bir eve taşınır. Kayzer’den boşanan eş soyluluğunu kaybeder.',
     'Soy ağacı “Aile” panelindedir. Kayzer’in çocukları varistir; Kayzer veliaht atayabilir.',
   ]],
@@ -101,7 +102,7 @@ export const RULES: [string, string[]][] = [
     'Şehre yeni gelen oyuncu ilk 5 gün dokunulmazdır (soyulamaz, saldırıya uğramaz).',
   ]],
   ['İhtiyaçlar ve sağlık', [
-    'Herkes günde 3 öğün yemek ve 5 kez su ister. Eksik kalan her gün −10 sağlık. Tam beslenen her gün biraz iyileşir.',
+    'Herkes günde 3 öğün yemek ve 3 kez su ister. Eksik kalan her gün −10 sağlık. Tam beslenen her gün biraz iyileşir.',
     'Sağlık 30’un altına düştüyse ya da yaralandıysanız kendiliğinden iyileşmezsiniz: Hekimhane’de ücretli hekime gidin (ücret hekimin rütbesine göre). Parası olmayana darülaceze bakar.',
     'Mutluluk (kişisel hayat) ile Memnuniyet (devlete bakış) ayrıdır. Et ve balık ekmekten fazla mutlu eder; meyhanede içki namazdan fazla mutlu eder ama dindarlığı düşürür.',
     'Elbise (≈30 günde eskir) sağlık ve itibar, mobilya dinlenme ve mutluluk, alet üretim hızı verir.',
@@ -137,11 +138,11 @@ export const RULES: [string, string[]][] = [
 export const GUIDE: string[] = [
   'Hoş geldiniz! Ben Maecenas, sarayın danışmanıyım (cumhuriyet olsa da hâlâ buradayım). Size şehri kısaca göstereyim.',
   'Harita oyunun kendisi. Parmağınızla kaydırın, iki parmakla ya da tekerlekle yakınlaştırın.',
-  'BİNALARA DOKUNARAK etkileşirsiniz: Pazar’da alışveriş, Kuyu’da su, Camide namaz, Meyhanede içki, Hekimhane’de tedavi, Saray’da dilekçe, Mahkeme’de davalar, Meclis’te seçim.',
-  'Üstteki çubukta saat, ihtiyaçlarınız (🍞 öğün x/3, 💧 su x/5), sağlık, aktif olaylar ve seçim takvimi var. ⚡ “Ne yapabilirim?” düğmesi her an yapabileceklerinizi listeler.',
-  'Her gün 3 öğün ve 5 su gerekir, yoksa sağlığınız düşer. Görevler (🎯) size adım adım şehri öğretir ve ödül verir.',
+  'YÜRÜMEK: sol alttaki joystick (bilgisayarda WASD/oklar). Haritaya dokunmak yürütmez. Bir binaya dokununca seçilir; kapısına gidip “Etkileşim”e (E) basınca açılır. Nereye gideceğinizi bilmiyorsanız sağ üstteki 📍 Yer bul. Binalarda: Pazar’da alışveriş, Kuyu’da su, Camide namaz, Meyhanede içki, Hekimhane’de tedavi, Saray’da dilekçe, Mahkeme’de davalar, Meclis’te seçim.',
+  'Üstteki çubukta saat, ihtiyaçlarınız (🍞 Tokluk ve 💧 Su çubukları: 100 = iyi, 0 = çok aç/susuz), sağlık, aktif olaylar ve seçim takvimi var. Menü → ⚡ Yap sekmesi her an yapabileceklerinizi listeler. Altta: sol joystick ile yürüyün, 8 yuvalı hızlı çubuktan eşya/silah seçin, sağda “Etkileşim” ve “Saldır”.',
+  'Her gün 3 öğün ve 3 kez su gerekir, yoksa sağlığınız düşer. Görevler (🎯) size adım adım şehri öğretir ve ödül verir.',
   'HAYVANLAR: Buğday Tarlaları’nın hemen batısında, yol kenarındaki çitli ağıl HAYVAN PAZARI’dır. Kendi hayvanlarınızın üstünde mavi işaret olur: ata dokununca binersiniz, inek/koyun/tavuğa dokununca “Kes” ile et alırsınız. Satılık inek, koyun, tavuk ve atlar içinde dolaşır; tarlalarda çiftçilerin sürüleri otlar. Hayvancıdan arsa ve hayvan alın, ahır/kümes kurun, besleyin; süt, yumurta, yün toplayın. Ata binince iki kat hızlı yürürsünüz.',
-  'Yürüyen herhangi birine dokunun: kartında parasını, ihtiyaçlarını, ne düşündüğünü görürsünüz; para verebilir, mesaj atabilirsiniz.',
-  'Karakteriniz her gün kendi mesleğinde otomatik çalışır ve kazandığıyla ekmek, su alır. Siz daha fazlasını yapabilirsiniz: ticaret, dilekçe, seçim… ya da darbe.',
+  'Birine dokununca adı ve canı görünür. Yanına gidip “Etkileşim”e basınca kartı açılır (o kişi siz konuşurken bekler): parasını, ihtiyaçlarını, ne düşündüğünü görürsünüz; para verebilir, mesaj atabilirsiniz.',
+  'Karakteriniz her gün kendi mesleğinde otomatik çalışır. Siz çevrimiçiyken yemeyi/su içmeyi siz yaparsınız (Ye / Su iç); siz yokken yapay zekâ yiyip içer ve bunu size bildirir. Siz daha fazlasını yapabilirsiniz: ticaret, dilekçe, seçim… ya da darbe.',
   '📜 Gazete her günün özetini verir, 💬 Meydan’da herkesle konuşursunuz. Kurallar 📖 sayfasında. Hayırlı olsun!',
 ];

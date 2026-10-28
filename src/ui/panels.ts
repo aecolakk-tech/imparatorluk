@@ -10,12 +10,14 @@ import { findPerson } from '../sim/world';
 import { bar, fmt, h, select } from './dom';
 import { spriteFor } from './sprites';
 import { ONLINE_WINDOW_MS } from '../sim/constants';
-import { age, ancestorsOf, canHaveChild, canRule, childrenOf, findChild, heirOf, isHanedan, nameOf, stage, STAGE_LABEL, ADULT_AGE, CHILD_UPKEEP, CURE_FEE, PROSPERITY_MONEY } from '../sim/family';
+import { ageText } from '../sim/age';
+import { ancestorsOf, canHaveChild, canRule, childrenOf, findChild, heirOf, isHanedan, nameOf, stage, CHILD_UPKEEP, CURE_FEE, PROSPERITY_MONEY } from '../sim/family';
 import { FATE_LABEL, strength, TARGETS } from '../sim/isyan';
 import type { Child, Fate } from '../sim/types';
 import { lawBuilder } from './ruler';
 import { myPos } from '../sim/v16';
 import { distToBuilding, REACH } from '../sim/move';
+import { eatLabel, drinkLabel } from './life';
 import { buildingExtras, caseRoles, electionBlock, personActions, personExtras, sarayExtras } from './life';
 
 export interface Ctx {
@@ -50,11 +52,11 @@ export function personCard(c: Ctx, p: Person): HTMLElement {
       h('tr', {}, h('td', {}, 'Kese'), h('td', {}, `${fmt(p.money)} Dinar`)),
       h('tr', { title: 'Kişisel hayat: yemek, aile, eğlence, din' }, h('td', {}, 'Mutluluk'), h('td', {}, bar(p.mood, '#5fae5a'), ` ${Math.round(p.mood)}`)),
       h('tr', { title: 'Devlete ve tahta bakış (eski memnuniyet + sadakat)' }, h('td', {}, 'Memnuniyet'), h('td', {}, bar(p.loyalty, '#e8c14a'), ` ${Math.round(p.loyalty)}`)),
-      h('tr', {}, h('td', {}, 'Açlık / Susuzluk'), h('td', {}, `${Math.round(p.hunger)} / ${Math.round(p.thirst)}`)),
+      h('tr', {}, h('td', {}, 'Tokluk / Su (100 = iyi)'), h('td', {}, `${Math.round(100 - p.hunger)} / ${Math.round(100 - p.thirst)}`)),
       h('tr', {}, h('td', {}, 'Sağlık'), h('td', {}, bar(p.health, '#c8483a'), ` ${Math.round(p.health)}`)),
       h('tr', {}, h('td', {}, 'Cumhuriyetçilik'), h('td', {}, bar(p.republic, '#5a8ad0'), ` ${Math.round(p.republic)}`)),
       h('tr', {}, h('td', {}, 'Eşyalar'), h('td', {}, inv)),
-      h('tr', {}, h('td', {}, 'Yaş'), h('td', {}, `${age(w, p)} gün · ${STAGE_LABEL[stage(w, p)]}${p.soylu ? ' · soylu' : ''}${p.school ? ` · ${p.school} gün okul` : ''}`)),
+      h('tr', {}, h('td', {}, 'Yaş'), h('td', {}, `${ageText(w, p)}${p.soylu ? ' · soylu' : ''}${p.school ? ` · ${p.school} gün okul` : ''}`)),
       ...(p.rank ? [h('tr', {}, h('td', {}, '⚜ Unvan'), h('td', {}, `${p.rank}${p.fief ? ` · tımar: ${w.buildings.find((b) => b.id === p.fief)?.name ?? ''}` : ''}`))] : []),
       h('tr', {}, h('td', {}, 'Eşi'), h('td', {}, findPerson(w, p.spouse)?.name ?? '—')),
       h('tr', {}, h('td', {}, 'Ebeveyn'), h('td', {}, p.parents.map((id) => nameOf(w, id)).join(', ') || '—')),
@@ -66,7 +68,7 @@ export function personCard(c: Ctx, p: Person): HTMLElement {
   );
   void friends; void foes;
   if (!c.me || mine) {
-    if (mine) box.append(h('div', { class: 'row' }, h('button', { onclick: () => c.act({ t: 'eat' }) }, `🍞 Ye (${p.meals}/3)`), h('button', { onclick: () => c.act({ t: 'drinkWater' }) }, `💧 Su iç (${p.drinks}/5)`), h('button', { onclick: () => c.act({ t: 'doctor' }) }, '🩺 Hekim')));
+    if (mine) box.append(h('div', { class: 'row' }, h('button', { onclick: () => c.act({ t: 'eat' }) }, eatLabel(c.w, p)), h('button', { onclick: () => c.act({ t: 'drinkWater' }) }, drinkLabel(c.w, p)), h('button', { onclick: () => c.act({ t: 'doctor' }) }, '🩺 Hekim')));
     return box;
   }
   const amt = numIn(10, 1);
@@ -364,9 +366,9 @@ export function buildingPanel(c: Ctx, b: Building): HTMLElement {
 function childCard(c: Ctx, k: Child): HTMLElement {
   const w = c.w; const st = stage(w, k); const mine = !!c.me && k.parents.includes(c.me.id);
   const row = h('div', { class: 'row' });
-  if (mine && (st === 'cocuk' || st === 'genc')) row.append(h('button', { onclick: () => c.act({ t: 'school', childId: k.id, on: !k.inSchool }) }, k.inSchool ? '🏫 Okuldan al' : '🏫 Okula yaz (1 D/gün)'));
+  if (mine && st === 'genc') row.append(h('button', { onclick: () => c.act({ t: 'school', childId: k.id, on: !k.inSchool }) }, k.inSchool ? '🏫 Okuldan al' : '🏫 Okula yaz (1 D/gün)'));
   if (mine && k.sick > 0) row.append(h('button', { class: 'primary', onclick: () => c.act({ t: 'cure', childId: k.id }) }, `🩺 Hekime götür (${CURE_FEE} D)`));
-  return h('div', { class: 'card' }, h('b', {}, `${k.female ? '👧' : '👦'} ${k.name}`), h('span', { class: 'muted' }, ` · ${STAGE_LABEL[st]} · ${age(w, k)} gün (yetişkinlik ${ADULT_AGE})`),
+  return h('div', { class: 'card' }, h('b', {}, `${k.female ? '👧' : '👦'} ${k.name}`), h('span', { class: 'muted' }, ` · ${ageText(w, k)} (16’sında yetişkin olur)${k.apprentice ? ` · çırak ${k.apprentice} gün` : ''}`),
     h('div', { class: 'muted' }, `${k.inSchool ? '🏫 okulda' : 'okula gitmiyor'} · okul ${k.school} gün · ${k.sick > 0 ? `🤒 hasta (${k.sick}. gün)` : 'sağlıklı'}${k.hunger > 0 ? ' · aç' : ''}${k.orphan ? ' · yetim (devlet bakıyor)' : ''}${k.soylu ? ' · soylu' : ''}${c.w.veliaht === k.id ? ' · 👑 veliaht' : ''}`), row);
 }
 

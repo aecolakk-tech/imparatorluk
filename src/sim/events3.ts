@@ -2,6 +2,7 @@
  * v1.9.9: salgın with individual infections, yangın that destroys buildings (warning first, ruins, rebuild),
  * and the empire's name chosen by the Kayzer.
  */
+import { oldSick } from './age';
 import type { Building, Person, World } from './types';
 import { findPerson } from './world';
 import { transfer } from './economy';
@@ -27,10 +28,10 @@ export function plagueHour(w: World, now: number): void {
   const sick = w.people.filter((p) => p.infected); if (!sick.length) return;
   if (w.nature?.kind === 'salgin') {
     const placed = placePeople(w, now); const pos = new Map(placed.map((q) => [q.p.id, q]));
-    for (const s of sick) { const a = pos.get(s.id); if (!a) continue; for (const q of placed) if (!q.p.infected && q.p.id !== s.id && Math.hypot(q.x - a.x, q.y - a.y) <= SPREAD_R && rand(w) < SPREAD_P) infect(w, q.p, now); }
+    for (const s of sick) { const a = pos.get(s.id); if (!a) continue; for (const q of placed) if (!q.p.infected && q.p.id !== s.id && Math.hypot(q.x - a.x, q.y - a.y) <= SPREAD_R && rand(w) < SPREAD_P * oldSick(w, q.p)) infect(w, q.p, now); }
   }
   for (const p of sick) {
-    p.health = clamp(p.health - SICK_DMG);
+    p.health = clamp(p.health - SICK_DMG * (oldSick(w, p) > 1 ? 1.3 : 1));
     if (p.health <= 0) { if (p.playerId && !p.npc) { p.health = 3; p.wounded = true; } else { die(w, p, `${p.name} salgından öldü.`); continue; } }
     if ((!p.playerId || p.npc) && p.jailedDays === 0 && chance(w, 0.35)) { const r = seeDoctor(w, p, true); if (!/hekim yok|yetmiyor/i.test(r)) cure(p); }
   }

@@ -68,9 +68,11 @@ export function addListing(w: World, seller: Person, good: Good, qty: number, pr
 }
 
 /** Buy up to qty of good, cheapest first. Seller pays sales tax. Returns qty bought. */
-export function buy(w: World, buyerAcc: string, good: Good, qty: number, maxPrice = Infinity): number {
+export function buy(w: World, buyerAcc: string, good: Good, qty: number, maxPrice = Infinity, opt: { group?: string; wholesale?: boolean } = {}): number {
   let got = 0;
-  const offers = w.listings.filter((l) => l.good === good && l.qty > 0 && l.sellerId !== buyerAcc && !(w.bans.includes(good) && l.sellerId !== 'dis')).sort((a, b) => a.price - b.price);
+  // v2.0.1: Liman toptancısı (wholesale) only sells to traders, producers and players at the Liman; a group limits the buy to one market
+  const offers = w.listings.filter((l) => l.good === good && l.qty > 0 && l.sellerId !== buyerAcc && !(w.bans.includes(good) && l.sellerId !== 'dis')
+    && (!l.wholesale || opt.wholesale) && (!opt.group || groupOf(l.market) === opt.group)).sort((a, b) => a.price - b.price);
   const fixedWater = good === 'su' && lawOn(w, 'devletsuyu');
   for (const l of offers) {
     while (got < qty && l.qty > 0) {
@@ -90,7 +92,7 @@ export function buy(w: World, buyerAcc: string, good: Good, qty: number, maxPric
   }
   return finish();
   // could not afford: poverty, not a shortage – do not push the price up
-  function finishPoor(): number { const b = findPerson(w, buyerAcc); if (b) b.inv[good] += got; return got; }
+  function finishPoor(): number { const b = findPerson(w, buyerAcc); if (b) { b.inv[good] += got; if (got < qty && ESSENTIAL.includes(good)) b.cantAfford = w.day; } return got; }
   function finish(): number {
     if (got < qty) w.market.unmet[good] += qty - got;
     const b = findPerson(w, buyerAcc); if (b) b.inv[good] += got;
@@ -98,8 +100,24 @@ export function buy(w: World, buyerAcc: string, good: Good, qty: number, maxPric
   }
 }
 
+/** v2.0.1 market groups: the Çarşı (Pazar + Gıda/Zanaat/Yeni pazar + Ambar), the Liman, the Meyhane. */
+export const MARKET_GROUP: Record<string, string> = { pazar: 'carsi', gida: 'carsi', zanaat: 'carsi', yeni: 'carsi', ambar: 'carsi', liman: 'liman', bar: 'bar' };
+export const groupOf = (m: string): string => MARKET_GROUP[m] ?? 'carsi';
+export const ESSENTIAL: Good[] = ['ekmek', 'su', 'odun'];
+
 export function resetMarketDay(w: World): void { for (const g of GOODS) { w.market.sold[g] = 0; w.market.unmet[g] = 0; } }
 
+/** v2.0.1: production multiplier from nature (drought/flood/bereket) and the season (harvest in autumn, little wheat in winter). */
+export function supplyMult(w: World, g: Good): number {
+  const s = (['ilkbahar', 'yaz', 'sonbahar', 'kis'] as const)[Math.floor(Math.max(0, w.day - 1) / 30) % 4];
+  const sea = g === 'bugday' ? ({ ilkbahar: 0.9, yaz: 1.1, sonbahar: 1.25, kis: 0.5 } as const)[s!] : g === 'balik' && s === 'kis' ? 0.8 : g === 'odun' && s === 'kis' ? 0.85 : 1;
+  return natureMult(w, g) * sea;
+}
+/** v2.0.1: winter makes staples dearer (stored grain, firewood); the autumn harvest makes them cheaper. */
+export function seasonPremium(w: World, g: Good): number {
+  if (!['ekmek', 'un', 'bugday', 'odun'].includes(g)) return 1;
+  const s = Math.floor(Math.max(0, w.day - 1) / 30) % 4; return s === 3 ? (g === 'odun' ? 1.4 : 1.3) : s === 2 ? 0.95 : 1;
+}
 export function natureMult(w: World, g: Good): number {
   const n = w.nature; if (!n || w.day < n.start || w.day > n.until) return 1;
   if (n.kind === 'kuraklik' && g === 'bugday') return 0.35;
@@ -118,16 +136,18 @@ export function produce(w: World, p: Person): void {
   // don't flood the market: with more than a day's output still unsold, work at reduced pace
   const unsold = w.listings.filter((l) => l.sellerId === p.id && l.good === spec.good).reduce((s, l) => s + l.qty, 0) + p.inv[spec.good];
   let frac = unsold >= spec.qty * 1.5 ? 0 : unsold >= spec.qty * 0.7 ? 0.5 : 1;
+  // v2.0.1 narh: a ceiling far below the market price makes production a loss → less output (shortage)
+  const cap = w.priceCaps[spec.good]; if (cap && cap < w.prices[spec.good] * 0.9) frac *= Math.max(0.3, (cap / w.prices[spec.good]) ** 2);
   if (frac === 0) { p.lastAction = 'tezgâh dolu, satış bekliyor'; return; }
   for (const [g, need] of Object.entries(spec.inputs ?? {}) as [Good, number][]) {
-    if (p.inv[g] < need * frac) buy(w, p.id, g, Math.ceil(need * frac - p.inv[g]), Math.max(0.1, Math.min(p.money * 0.7, (spec.qty * w.prices[spec.good] * 0.8) / need / Object.keys(spec.inputs ?? {}).length)));
+    if (p.inv[g] < need * frac) buy(w, p.id, g, Math.ceil(need * frac - p.inv[g]), Math.max(0.1, Math.min(p.money * 0.7, (spec.qty * w.prices[spec.good] * 0.8) / need / Object.keys(spec.inputs ?? {}).length)), { wholesale: true });
     frac = Math.min(frac, p.inv[g] / need);
   }
   if (frac <= 0) { p.lastAction = 'ham madde bulamadı'; return; }
   for (const [g, need] of Object.entries(spec.inputs ?? {}) as [Good, number][]) p.inv[g] = Math.max(0, p.inv[g] - Math.ceil(need * frac));
   const tools = p.inv.alet > 0 ? 1.15 : 1; // alet boosts output, wears out
   const r = rankOf(p);
-  const qty = Math.max(1, Math.round(spec.qty * frac * tools * r.mult * natureMult(w, spec.good) * Math.max(0.75, 0.5 + p.health / 200)));
+  const qty = Math.max(1, Math.round(spec.qty * frac * tools * r.mult * supplyMult(w, spec.good) * (p.infected ? 0.5 : 1) * Math.max(0.75, 0.5 + p.health / 200)));
   p.xp += 1;
   const price = sellerPrice(w, p, spec.good, spec.inputs, spec.qty);
   addListing(w, p, spec.good, qty, price, spec.market);
@@ -160,9 +180,14 @@ export function settleMarket(w: World): void {
     else if (miss > 0) p *= 1 + Math.min(0.08, 0.01 + miss / Math.max(20, sold + miss) * 0.15);
     else if (left < sold * 0.25) p *= 1.02; // thin shelves
     else if (left > sold * 1.2 + 5) p *= 1 - Math.min(0.06, 0.01 + left / Math.max(20, sold + left) * 0.06);
-    else p += (BASE_PRICE[g] - p) * 0.03; // balanced market drifts to the normal price
+    else p += (BASE_PRICE[g] * seasonPremium(w, g) - p) * 0.03; // balanced market drifts to the normal (seasonal) price
     // v1.6: bread follows wheat (bakers pass on flour cost), crafts don't collapse below cost
     if (g === 'ekmek' && natureMult(w, 'bugday') < 1) { const wr = w.prices.bugday / BASE_PRICE.bugday; p *= 1.03; if (wr > 1.1) p *= 1 + Math.min(0.1, (wr - 1) * 0.08); p = Math.max(p, w.prices.bugday * 0.55); }
+    // v2.0.1 production chain: a good never stays below what its inputs cost (dear flour → dear bread)
+    const rec = Object.values(PRODUCES).find((r) => r?.good === g && r.inputs); if (rec) { const c = Object.entries(rec.inputs!).reduce((s2, [ig, n]) => s2 + w.prices[ig as Good] * (n as number), 0) / rec.qty; p = Math.max(p, Math.min(c * 1.05, p * 1.08)); }
+    // war and raids: people hoard staples
+    if ((w.raid?.phase === 'gece' || w.foreign?.phase === 'savas' || w.combat) && ['ekmek', 'su', 'un', 'bugday', 'odun'].includes(g)) p *= 1.04;
+    if (seasonPremium(w, g) > 1 && p < BASE_PRICE[g] * seasonPremium(w, g)) p *= 1.02; // winter: stores shrink
     const floor = ['kumas', 'alet', 'elbise', 'mobilya', 'yun', 'odun', 'icki'].includes(g) ? 0.75 : 0.6;
     w.prices[g] = Math.round(Math.max(BASE_PRICE[g] * floor, Math.min(BASE_PRICE[g] * 5, p)) * 100) / 100;
   }

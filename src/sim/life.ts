@@ -19,14 +19,14 @@ import { BASE_PRICE, GOOD_LABEL, PRODUCES, PROF_LABEL, STOCK_LIMIT } from './con
 import { addListing, buy, lawOn, marketPrice, rankOf, transfer } from './economy';
 import { chance, clamp, nextId, pick, rand } from './rng';
 import { findPerson, WORKPLACE } from './world';
-import { log, personal } from './log';
+import { log, personal, isOnline } from './log';
 import { fullAI, openCase } from './ai';
 import { die } from './family';
 import { crimeFactor, curfewAt, customLawsDay, wealthThreshold } from './laws';
 import { hoarderAI, patrolDay } from './hoard';
 
 export const DOCTOR_FEE = 10;
-export const MEALS = 3; export const WATERS = 5;
+export const MEALS = 3; export const WATERS = 3; // v2.0.1: ~3 meals and 3 drinks a day are enough with the per-hour drain
 /** The ruler and nobles living in the Saray eat from the palace kitchen (paid by the treasury). */
 const palace = (w: World, p: Person): boolean => p.id === w.kayzerId || (p.soylu && p.home === 'saray');
 const active = (p: Person): boolean => p.prof !== 'naip' && p.jailedDays === 0 && p.exiledDays === 0;
@@ -52,6 +52,17 @@ export function eatMeal(w: World, p: Person): boolean {
   // askıda ekmek / state bread fallback handled elsewhere
   return false;
 }
+/** Automatic eat/drink (NPCs, offline players, critical need): a player's character always gets a notice saying what was used and paid. */
+export function autoNeed(w: World, p: Person, kind: 'yemek' | 'su'): boolean {
+  const inv0 = { ...p.inv }; const m0 = p.money; const ok = kind === 'su' ? drinkWater(w, p) : eatMeal(w, p);
+  if (ok && p.playerId && !p.npc) {
+    const used = (Object.keys(inv0) as Good[]).filter((g) => (inv0[g] ?? 0) > (p.inv[g] ?? 0)).map((g) => `${inv0[g]! - p.inv[g]} ${GOOD_LABEL[g]}`);
+    const got = (Object.keys(p.inv) as Good[]).filter((g) => (p.inv[g] ?? 0) > (inv0[g] ?? 0)).map((g) => `${p.inv[g] - (inv0[g] ?? 0)} ${GOOD_LABEL[g]}`);
+    const paid = Math.round((m0 - p.money) * 100) / 100;
+    personal(w, p.playerId, `${kind === 'su' ? '💧 Karakteriniz kendiliğinden su içti' : '🍞 Karakteriniz kendiliğinden yemek yedi'}${used.length ? ` (çantadan: ${used.join(', ')})` : ''}${paid > 0 ? ` – ödenen: ${paid} D${got.length ? `, çantaya kalan: ${got.join(', ')}` : ''}` : ''}.`);
+  }
+  return ok;
+}
 export function drinkWater(w: World, p: Person): boolean {
   if (p.prof === 'naip' || p.jailedDays > 0) { p.drinks += 1; p.thirst = clamp(p.thirst - 35); return true; }
   if (palace(w, p) && transfer(w, 'saray', 'dis', 0.3, 'saray mutfağı')) { p.drinks += 1; p.thirst = clamp(p.thirst - 35); return true; }
@@ -62,7 +73,7 @@ export function drinkWater(w: World, p: Person): boolean {
 /** End of day: anyone who missed 3 meals or 5 waters loses 10 health. Below 30 (or wounded) only a doctor helps. */
 export function needsEndOfDay(w: World, p: Person): void {
   if (p.prof === 'naip') { p.meals = 0; p.drinks = 0; return; }
-  const fresh = w.day <= 1 || (p.protectedUntil ?? 0) > w.day + 4; // the first (partial) day never counts
+  const fresh = w.day <= 1 || (p.protectedUntil ?? 0) > w.day + 4 || (p.onboardUntil ?? 0) > (w.serverNow ?? w.lastTickAt); // the first (partial) day never counts
   const ok = fresh || (p.hunger < 85 && p.thirst < 85); // v1.8: continuous bars (damage while empty is hourly)
   if (!ok) { p.health = clamp(p.health - 4); p.mood = clamp(p.mood - 3); }
   else if (p.health >= 30 && !p.wounded) p.health = clamp(p.health + 3);
@@ -131,9 +142,11 @@ export function needsHour(w: World): void {
   const h = w.hour;
   const meal = h === 7 || h === 13 || h === 19; const water = h === 7 || h === 10 || h === 13 || h === 16 || h === 19;
   if (!meal && !water) return;
-  for (const p of w.people) { if (water) drinkWater(w, p); if (meal) eatMeal(w, p); }
+  // v2.0.1: an online player's character never eats/drinks/buys behind his back – he uses Ye / Su iç (auto only when critical, with a notice)
+  const now = w.serverNow ?? w.lastTickAt; const auto = (p: Person): boolean => !(p.playerId && !p.npc && isOnline(w, p.playerId, now, 120_000));
+  for (const p of w.people) { if (!auto(p)) continue; if (water) autoNeed(w, p, 'su'); if (meal) autoNeed(w, p, 'yemek'); }
   if (h === 19) { // top-up: anyone still short tries again (players' offline AI included)
-    for (const p of w.people) { while (p.drinks < WATERS && drinkWater(w, p)) { /* */ } while (p.meals < MEALS && eatMeal(w, p)) { /* */ } }
+    for (const p of w.people) { if (!auto(p)) continue; let k = 0; while (p.drinks < WATERS && k++ < 6 && autoNeed(w, p, 'su')) { /* */ } k = 0; while (p.meals < MEALS && k++ < 4 && autoNeed(w, p, 'yemek')) { /* */ } }
   }
 }
 
@@ -222,7 +235,7 @@ function outsideWorld(w: World): void {
   if (w.caravan && (w.day > w.caravan.until || (w.day === w.caravan.until && w.hour >= (w.caravan.hour ?? 0)))) { caravanBuys(w, true); for (const l of w.listings.filter((x) => x.sellerId === 'dis')) l.qty = 0; w.listings = w.listings.filter((l) => l.qty > 0); w.caravan = null; }
   w.shortDays = short.length ? (w.shortDays ?? 0) + 1 : 0;
   if (w.caravan && w.day <= w.caravan.until) caravanBuys(w);
-  if (!w.caravan && ((short.length && (w.shortDays ?? 0) >= 3) || chance(w, 0.06))) {
+  if (!w.caravan && w.imports !== false && w.raid?.phase !== 'gece' && w.foreign?.phase !== 'savas' && ((short.length && (w.shortDays ?? 0) >= 3) || chance(w, 0.06))) {
     // v1.9.9: camels walk to the Pazar (the Venedik ship docks at the Liman) and stay one game day.
     // Mixed prices: goods the city lacks (price ≥ 1.5× base) are dear, everything else is cheaper than the market.
     const name = pick(w, ['Halep kervanı', 'Venedik gemisi', 'Bağdat kervanı', 'Ceneviz tüccarları']); const ship = name === 'Venedik gemisi';
@@ -315,7 +328,7 @@ function wealthTax(w: World): void {
 }
 
 // ---------------- jobs ----------------
-const STAPLE_PROFS = ['ciftci', 'firinci', 'sucu', 'kasap', 'balikci'];
+const STAPLE_PROFS = ['ciftci', 'degirmenci', 'firinci', 'sucu', 'kasap', 'balikci'];
 function switchJobs(w: World): void {
   const count = (prof: string): number => w.people.filter((x) => x.prof === prof).length;
   for (const p of [...w.people].sort(() => rand(w) - 0.5)) {
@@ -456,7 +469,7 @@ export function murder(w: World, a: Person, v: Person): string {
     crimeSeen(w, a, v, 'saldiri', 0);
     return `${ek(v.name, 'ı')} yaraladınız (can ${Math.round(v.health)}). Öldürmek için bir darbe daha gerekir.`;
   }
-  if (v.playerId || v.prof === 'asker' && chance(w, 0.5)) { v.health = 5; v.wounded = true; log(w, `${a.name}, ${ek(v.name, 'ı')} öldürmeye kalktı; ağır yaralı kurtuldu!`, v.id); crimeSeen(w, a, v, 'cinayet', 0); return `${v.name} ağır yaralı kurtuldu.`; }
+  if (v.prof === 'asker' && chance(w, 0.5)) { /* v2.0.1: players can die too (death → funeral/heir flow) */ v.health = 5; v.wounded = true; log(w, `${a.name}, ${ek(v.name, 'ı')} öldürmeye kalktı; ağır yaralı kurtuldu!`, v.id); crimeSeen(w, a, v, 'cinayet', 0); return `${v.name} ağır yaralı kurtuldu.`; }
   const co = makeCorpse(w, v, a, w.serverNow ?? w.lastTickAt);
   for (const x of w.people) if ((x.relations[v.id] ?? 0) > 20 && co.witnesses.includes(x.id)) rel(x, a, -70, `${ek(v.name, 'ı')} öldürdü`);
   die(w, v, `CİNAYET! ${v.name} öldürüldü. Cesedi yerde yatıyor…`);
@@ -499,19 +512,25 @@ function achievements(w: World): void {
     for (const [t, f] of TITLES) if (!p.titles.includes(t) && f(w, p)) { p.titles.push(t); log(w, `🏅 ${p.name} “${t}” unvanını kazandı!`, p.id); }
   }
 }
-export const QUESTS: { text: string; done: (w: World, p: Person) => boolean }[] = [
-  { text: 'Karnınızı doyurun (⚡ Yap → Ye)', done: (_w, p) => p.meals >= 1 },
-  { text: 'Su için (susuzluk çubuğu boşalmasın)', done: (_w, p) => p.drinks >= 1 },
-  { text: 'Pazardan bir şey alın (Pazar binasına dokunun)', done: (w, p) => w.ledger.some((l) => l.from === p.id && l.reason.endsWith('alımı')) },
-  { text: 'Camide namaz kılın ya da meyhanede bir kadeh için', done: (_w, p) => p.lastAction.includes('namaz') || p.lastAction.includes('içti') },
-  { text: 'Bir vatandaşla sohbet edin (birine dokunun → Sohbet)', done: (_w, p) => Object.values(p.relNote).some((x) => x.includes('sohbet')) },
-  { text: 'Saraya bir dilekçe yazın (Saray binası)', done: (w, p) => w.petitions.some((x) => x.fromId === p.id) },
-  { text: 'Meclis seçiminde aday olun ya da oy verin (Meclis binası)', done: (w, p) => w.election.candidates.includes(p.id) || !!w.election.votes[p.id] || p.meclis },
-  { text: 'Hayvan Pazarı’na gidin (Buğday Tarlaları’nın batısındaki çitli ağıl) ve bir tavuk ya da arsa alın', done: (_w, p) => !!p.farm || ['inek', 'koyun', 'tavuk', 'at'].some((a) => ((p.animals as Record<string, number> | undefined)?.[a] ?? 0) > 0) },
+/** v2.0.1: quests count what the player really did after joining (flags), not stats the character already had. */
+export const QUESTS: { text: string; done: (w: World, p: Person, f: Record<string, boolean>) => boolean }[] = [
+  { text: 'Karnınızı doyurun (Menü → Çanta → Ye, ya da Pazar’da yemek)', done: (_w, _p, f) => !!f.eat },
+  { text: 'Su için (Çanta → İç, ya da Kuyu)', done: (_w, _p, f) => !!f.drink },
+  { text: 'Pazardan bir şey alın (Pazar binasına dokunun)', done: (_w, _p, f) => !!f.buy },
+  { text: 'Camide namaz kılın ya da meyhanede bir kadeh için', done: (_w, _p, f) => !!f.pray },
+  { text: 'Bir vatandaşla sohbet edin (birine dokunun → Sohbet)', done: (_w, _p, f) => !!f.chat },
+  { text: 'Saraya bir dilekçe yazın (Saray binası)', done: (_w, _p, f) => !!f.petition },
+  { text: 'Meclis seçiminde aday olun ya da oy verin (Meclis binası)', done: (_w, _p, f) => !!f.vote },
+  { text: 'Hayvan Pazarı’na gidin (Buğday Tarlaları’nın batısındaki çitli ağıl) ve bir tavuk ya da arsa alın', done: (_w, _p, f) => !!f.animal },
 ];
+const QFLAG: Record<string, string> = { eat: 'eat', drinkWater: 'drink', buy: 'buy', caravanBuy: 'buy', askida: 'buy', pray: 'pray', drink: 'pray', petition: 'petition', runForMeclis: 'vote', castVote: 'vote', vote: 'vote', voteBaskan: 'vote', runForBaskan: 'vote', buyAnimal: 'animal', buyFarm: 'animal' };
+export function markQuest(w: World, playerId: string, t: string, extra?: string): void {
+  const pl = w.players[playerId]; if (!pl) return; const f = (pl.qf ??= {});
+  const k = extra ?? QFLAG[t]; if (k) f[k] = true;
+}
 export function questReward(w: World, playerId: string): string | null {
   const pl = w.players[playerId]; const p = findPerson(w, pl?.personId); if (!pl || !p) return null;
-  const i = pl.quest ?? 0; const q = QUESTS[i]; if (!q || !q.done(w, p)) return null;
+  const i = pl.quest ?? 0; const q = QUESTS[i]; if (!q || !q.done(w, p, pl.qf ?? {})) return null;
   pl.quest = i + 1; p.xp += 2; transfer(w, 'saray', p.id, 3, 'rehber ödülü');
   return `Görev tamam: ${q.text}. Ödül: 3 Dinar.${QUESTS[i + 1] ? ` Sıradaki: ${QUESTS[i + 1]!.text}` : ' Rehber bitti — artık şehir sizin!'}`;
 }

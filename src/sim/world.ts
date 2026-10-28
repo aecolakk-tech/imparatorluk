@@ -1,7 +1,7 @@
 import { migrate10 } from './realm';
 import type { Building, BuildingKind, Good, Law, Person, Profession, World } from './types';
 import { GOODS } from './types';
-import { BASE_PRICE, DEFAULT_SALARY, MAP_H, MAP_W } from './constants';
+import { BASE_PRICE, DAYS_PER_YEAR, DEFAULT_SALARY, MAP_H, MAP_W } from './constants';
 import { pick, rand, randInt } from './rng';
 import { DEFAULT_BUDGET, initMeclis } from './meclis';
 import { log } from './log';
@@ -97,7 +97,7 @@ const NAMED: Seed[] = [
 ];
 
 const COUNTS: [Profession, number][] = [
-  ['ciftci', 5], ['firinci', 5], ['sucu', 8], ['kasap', 4], ['balikci', 6], ['dokumaci', 3], ['terzi', 3], ['demirci', 3], ['marangoz', 4], ['mobilyaci', 2], ['barci', 2],
+  ['ciftci', 5], ['degirmenci', 3], ['firinci', 5], ['sucu', 8], ['kasap', 4], ['balikci', 6], ['dokumaci', 3], ['terzi', 3], ['demirci', 3], ['marangoz', 4], ['mobilyaci', 2], ['barci', 2],
   ['tuccar', 3], ['hekim', 3], ['hoca', 3], ['imam', 1], ['hamal', 9], ['insaatci', 8], ['kalemsor', 2],
   ['memur', 6], ['tahsildar', 3], ['bekci', 6], ['savci', 2], ['hakim', 2], ['asker', 10],
 ];
@@ -105,10 +105,10 @@ const COUNTS: [Profession, number][] = [
 export const WORKPLACE: Record<Profession, string> = {
   firinci: 'firin', sucu: 'kuyu', kasap: 'kasaphane', balikci: 'liman', terzi: 'atolye', demirci: 'atolye', marangoz: 'atolye',
   tuccar: 'pazar', hekim: 'hekimhane', hoca: 'okul', hamal: 'pazar', insaatci: 'santiye', kalemsor: 'kahve', imam: 'cami',
-  ciftci: 'ciftlik', hayvanci: 'hayvan', dokumaci: 'dokuma', mobilyaci: 'mobilyahane', barci: 'bar',
+  ciftci: 'ciftlik', hayvanci: 'hayvan', degirmenci: 'degirmen', dokumaci: 'dokuma', mobilyaci: 'mobilyahane', barci: 'bar',
   memur: 'saray', tahsildar: 'kahve', bekci: 'zindan', savci: 'mahkeme', hakim: 'mahkeme', asker: 'kisla', kayzer: 'saray', naip: 'saray',
 };
-const TITLE: Partial<Record<Profession, string>> = { ciftci: 'Çiftçi', barci: 'Barcı', asker: 'Asker', bekci: 'Bekçi', hoca: 'Öğretmen', hekim: 'Hekim', savci: 'Savcı', hakim: 'Kadı', tuccar: 'Tüccar', hamal: 'Hamal', firinci: 'Fırıncı', kalemsor: 'Kalemşör' };
+const TITLE: Partial<Record<Profession, string>> = { ciftci: 'Çiftçi', degirmenci: 'Değirmenci', barci: 'Barcı', asker: 'Asker', bekci: 'Bekçi', hoca: 'Öğretmen', hekim: 'Hekim', savci: 'Savcı', hakim: 'Kadı', tuccar: 'Tüccar', hamal: 'Hamal', firinci: 'Fırıncı', kalemsor: 'Kalemşör' };
 
 export function emptyInv(): Record<Good, number> {
   const r = {} as Record<Good, number>; for (const g of GOODS) r[g] = 0; return r;
@@ -129,10 +129,20 @@ export function makePerson(w: World, s: Seed, home: string): Person {
     ambition: s.ambition ?? randInt(w, 10, 70), honesty: s.honesty ?? randInt(w, 30, 95), republic: randInt(w, 0, 15), health: 100,
     spouse: null, jailedDays: 0, incomeToday: 0, unemployedDays: 0, thought: '', lastAction: 'evde', relations: {},
     hairColor: randInt(w, 0, 7), skin: randInt(w, 0, 3), shirt: randInt(w, 0, 7), female, plotting: 'none', sidedWith: null, faction: null, immune: false,
-    born: (w.day ?? 1) - randInt(w, 70, 300), parents: [], soylu: false, school: 0, exiledDays: 0,
+    born: (w.day ?? 1) - randInt(w, 18 * DAYS_PER_YEAR, 50 * DAYS_PER_YEAR), parents: [], soylu: false, school: 0, exiledDays: 0,
     din: s.prof === 'imam' || s.prof === 'hoca' ? randInt(w, 70, 95) : randInt(w, 15, 85), meals: 0, drinks: 0, wounded: false, protectedUntil: 0,
     xp: randInt(w, 0, 80), rep: 0, relNote: {}, titles: [], taxDue: 0, smuggle: false, nightOut: false,
   };
+}
+
+/** v2.0.1 göçmen: an adult newcomer (no money of his own) for the profession the city lacks most. */
+export function makeNewcomer(w: World, years: number, home: string): Person {
+  const need = COUNTS.filter(([pr]) => pr !== 'asker').map(([pr, c]) => [pr, c - w.people.filter((p) => p.prof === pr).length] as const).filter((x) => x[1] > 0).sort((a, b) => b[1] - a[1]);
+  const prof: Profession = need.length ? need[Math.floor(rand(w) * Math.min(3, need.length))]![0] : 'hamal';
+  const female = rand(w) < 0.5; const used = new Set(w.people.map((p) => p.name));
+  let name = ''; for (let k = 0; k < 30; k += 1) { const first = pick(w, female ? KADIN : ERKEK); name = TITLE[prof] ? `${TITLE[prof]} ${first}` : `${first} ${pick(w, female ? ['Hanım', 'Kalfa'] : ['Efendi', 'Ağa', 'Kalfa'])}`; if (!used.has(name)) break; name = `${name} ${String.fromCharCode(65 + randInt(w, 0, 25))}.`; }
+  const p = makePerson(w, { name, prof, female, money: 0 }, home); p.born = (w.day ?? 1) - Math.round(years * DAYS_PER_YEAR); p.inv.ekmek = 1; p.inv.su = 1;
+  return p;
 }
 
 export function defaultLaws(): Law[] {
@@ -152,7 +162,7 @@ export function defaultLaws(): Law[] {
 
 export function createWorld(seed = 42, now = Date.now()): World {
   const w: World = {
-    version: 1, seed, rng: seed, day: 1, hour: 6, lastTickAt: now, frozen: true,
+    version: 1, ageV: 2, seed, rng: seed, day: 1, hour: 6, lastTickAt: now, frozen: true,
     treasury: 10000, taxRate: 10, headTax: 1.75, salaries: { ...DEFAULT_SALARY }, laws: defaultLaws(),
     people: [], buildings: makeBuildings(), listings: [], prices: { ...BASE_PRICE }, market: { sold: emptyInv(), unmet: emptyInv() }, ledger: [], petitions: [], cases: [],
     projects: [{ id: 'saray-insa', name: 'Saray Kanadı İnşaatı (Usta Bekir)', site: 'santiye', cost: 1200, paid: 200, progress: 0, needed: 120, done: false }],

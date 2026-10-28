@@ -1,3 +1,5 @@
+import { migrateEcon } from './market2';
+import { migrateAge } from './age';
 import { ek } from './tr';
 import { migrateArms } from './arms';
 import { migrate4 } from './v16';
@@ -72,7 +74,7 @@ export function lawPreview(w: World, kind: string, value?: number): string {
 
 /** Bring an older saved world up to the current schema without losing people, money or history. */
 export function migrateWorld(w: World): World {
-  migrateArms(w);
+  migrateArms(w); migrateAge(w); migrateEcon(w);
   const any = w as unknown as Record<string, unknown>;
   if ((w.schema ?? 1) >= 2) return migrate3(w);
   const def: Record<string, unknown> = { speed: 1, nature: null, nextDrought: w.day + 60, festivalUntil: 0, granary: 400, priceCaps: {}, arrests: [], chatOut: [], talks: [], offers: [], rumors: [], caravan: null, threat: null, bans: [], loans: [] };

@@ -114,7 +114,7 @@ export function searchPerson(w: World, bekci: Person, t: Person, now?: number): 
   for (const k of WEAPONS) {
     const n = a[k] ?? 0; if (!n) continue;
     const reg = registered(w, t, k); const illegal = Math.max(0, n - reg); const drawn = t.drawn === k;
-    const take = drawn ? n : illegal; if (!take) continue;
+    const take = drawn && !w.combat ? n : illegal; if (!take) continue; // v2.0.1: a drawn blade is legal while the town is under attack
     a[k] = n - take; unregister(w, t, k, Math.min(take, reg)); out.push(`${take} ${ARM_LABEL[k]}${drawn ? ' (çekili)' : ' (kayıtsız)'}`);
   }
   if (!out.length) return `${t.name} arandı: ${WEAPONS.some((k) => a[k]) ? 'kayıtlı ve kınında silahları var, yasal.' : 'silah yok.'}`;
@@ -123,6 +123,7 @@ export function searchPerson(w: World, bekci: Person, t: Person, now?: number): 
   const fine = Math.min(ARM_FINE, Math.max(0, t.money)); if (fine > 0) transfer(w, t.id, 'saray', fine, 'silah cezası');
   t.armsFines = (t.armsFines ?? 0) + 1; t.rep = clamp(t.rep - 5, -100, 100);
   log(w, `🛡 Bekçi ${bekci.name}, ${t.name} üzerinde ${out.join(', ')} buldu; el koydu, ${fine} D ceza kesti.`, t.id, now);
+  if (t.playerId && !t.npc) personal(w, t.playerId, `🛡 Bekçi ${bekci.name} sizi aradı: ${out.join(', ')} – el koydu${fine > 0 ? `, ${fine} D silah cezası kesti` : ''}. Sebep: ${out.some((x) => x.includes('çekili')) ? 'sokakta çekili silah taşımak yasak (kınına koyun)' : 'kayıtsız silah'}.`, now);
   if (t.playerId) personal(w, t.playerId, `🛡 Bekçi ${bekci.name} sizi aradı: ${out.join(', ')} el konuldu, ${fine} D ceza. Silahları evdeki sandıkta saklayın ya da kınında taşıyın.`, now);
   return `El konuldu: ${out.join(', ')}; ${fine} D ceza.`;
 }
@@ -146,6 +147,7 @@ export function npcArmsHour(w: World): void {
 }
 /** Hourly: bekçis on the street notice drawn weapons within 4 tiles. */
 export function bekciPatrol(w: World, placed: { p: Person; x: number; y: number; visible: boolean }[], now: number): void {
+  if (w.combat || w.raid?.phase === 'gece' || w.foreign?.landed) return; // v2.0.1: self-defence – no confiscation during a raid or war
   const bekcis = placed.filter((q) => q.visible && q.p.prof === 'bekci' && q.p.jailedDays === 0 && (!q.p.playerId || q.p.npc));
   if (!bekcis.length) return;
   for (const q of placed) {

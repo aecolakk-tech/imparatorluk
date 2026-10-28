@@ -326,7 +326,7 @@ export function spend(w: World, amount: number): boolean { if (budgetLeft(w) < a
 /** NPC stance on a custom law: ideology, religion, own trade and wallet. */
 function lawStance(w: World, p: Person, f: string, l?: LawSpec): number {
   if (!l) return -1;
-  const PRODUCER: Record<string, string> = { ciftci: 'bugday', firinci: 'ekmek', sucu: 'su', kasap: 'et', balikci: 'balik', dokumaci: 'kumas', terzi: 'elbise', marangoz: 'odun', mobilyaci: 'mobilya', demirci: 'alet', barci: 'icki' };
+  const PRODUCER: Record<string, string> = { ciftci: 'bugday', degirmenci: 'un', firinci: 'ekmek', sucu: 'su', kasap: 'et', balikci: 'balik', dokumaci: 'kumas', terzi: 'elbise', marangoz: 'odun', mobilyaci: 'mobilya', demirci: 'alet', barci: 'icki' };
   const mine = l.good && PRODUCER[p.prof] === l.good;
   switch (l.kind) {
     case 'satisVergisi': return (w.taxRate - l.value) / 8 + (f === 'saltanatci' ? 0.2 : f === 'esnaf' ? -0.3 : 0);

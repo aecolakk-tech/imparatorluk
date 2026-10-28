@@ -7,9 +7,14 @@ import { findPerson } from '../sim/world';
 import { ARM_LABEL, ARM_PRICE, ARM_WEIGHT, CARRY_MAX, carryWeight, isUniformed, WEAPONS, type ArmItem } from '../sim/arms';
 import { RANSOM, RECRUIT_MAX, RECRUIT_PAY } from '../sim/events2';
 import { REBUILD_COST } from '../sim/events3';
+import { foeMoving, foePos, SAIL_MS } from '../sim/combatpos';
+import { myPos } from '../sim/v16';
+import { distToBuilding, REACH } from '../sim/move';
+import { assignSlot, hotbarSlots } from './controls';
+import { marketPrice } from '../sim/economy';
 
 export const APP_NAME = 'Medieval Empire';
-export const VERSION = 'v2.0';
+export const VERSION = 'v2.0.1';
 const EAT: Good[] = ['ekmek', 'et', 'balik', 'yumurta', 'sut', 'su'];
 
 /** 🎒 Çanta: carried weapons (draw / holster), food & water (use), and the house chest. */
@@ -17,32 +22,39 @@ export function inventoryBody(c: Ctx): HTMLElement {
   const w = c.w; const m = c.me; const box = h('div', { class: 'stack inv' }, h('h2', {}, '🎒 Çanta ve sandık')); if (!m) return box;
   const a = m.arms ?? {};
   box.append(h('div', { class: 'muted' }, `Taşınan silah yükü: ${carryWeight(a).toFixed(1)} / ${CARRY_MAX} kg. Çekili silah: ${m.drawn ? ARM_LABEL[m.drawn] : 'yok'}.${!isUniformed(m) ? ' Sivilken silah çekili gezmek suçtur: bekçi görürse el koyar ve 15 D ceza keser. Kınındaki kayıtlı silah yasaldır; evdeki sandıkta olan güvendedir.' : ' Görevlisiniz: silah taşımanız serbest.'}`));
+  const homeB = w.buildings.find((b) => b.id === m.home); const atHome = !!homeB && !homeB.burned && ((m.homeUntil ?? 0) > Date.now() || distToBuilding(homeB, myPos(w, m, Date.now())) <= REACH + 0.5);
+  const slots = hotbarSlots(m);
+  const slotSel = (k: string): HTMLElement => { const sel = h('select', { title: 'Hızlı çubuktaki yuvası', style: 'width:auto' }, h('option', { value: '' }, 'Çubuk —'), ...[1, 2, 3, 4, 5, 6, 7, 8].map((i) => h('option', { value: String(i - 1), ...(slots[i - 1] === k ? { selected: 'selected' } : {}) }, `Yuva ${i}`))) as HTMLSelectElement; sel.addEventListener('change', () => { if (sel.value !== '') { assignSlot(m, k, +sel.value); dispatchEvent(new Event('imp-refresh')); } }); return sel; };
+  const toChest = (k: string, n: number): HTMLElement => atHome ? h('button', { onclick: () => c.act({ t: 'stash', item: k, qty: n, toChest: true }) }, 'Sandığa') : h('button', { disabled: 'disabled', title: 'Sandık evinizde – önce eve gidin' }, 'Sandık: evde');
   const rows: HTMLElement[] = [];
   for (const k of [...WEAPONS, 'kalkan', 'ok'] as ArmItem[]) {
     const n = a[k] ?? 0; if (!n) continue;
     const btns: HTMLElement[] = [];
     if ((WEAPONS as string[]).includes(k)) btns.push(m.drawn === k ? h('button', { onclick: () => c.act({ t: 'drawWeapon', kind: null }) }, 'Kınına koy') : h('button', { class: 'primary', onclick: () => c.act({ t: 'drawWeapon', kind: k as never }) }, 'Çek'));
-    btns.push(h('button', { onclick: () => c.act({ t: 'stash', item: k, qty: k === 'ok' ? n : 1, toChest: true }) }, 'Sandığa'));
+    if (k !== 'ok') btns.push(slotSel(k)); btns.push(toChest(k, k === 'ok' ? n : 1));
     rows.push(h('div', { class: 'card row inv-row' }, h('b', { style: 'flex:1' }, `${ARM_LABEL[k]} × ${n}`), h('span', { class: 'muted' }, `${(ARM_WEIGHT[k] * n).toFixed(1)} kg`), ...btns));
   }
   box.append(h('h3', {}, '⚔ Silahlar'), ...(rows.length ? rows : [h('div', { class: 'muted' }, 'Silahınız yok. Demirci’den (Zanaat Atölyesi) alabilirsiniz; asker ve bekçiler Kışla’dan bedava alır.')]));
   const food = EAT.filter((g) => (m.inv[g] ?? 0) > 0);
-  box.append(h('h3', {}, '🍞 Yiyecek ve su'), ...(food.length ? food.map((g) => h('div', { class: 'card row inv-row' }, h('b', { style: 'flex:1' }, `${GOOD_LABEL[g]} × ${m.inv[g]}`), h('button', { class: 'primary', onclick: () => c.act({ t: 'useItem', good: g }) }, g === 'su' || g === 'sut' ? 'İç' : 'Ye'), h('button', { onclick: () => c.act({ t: 'stash', item: g, qty: 1, toChest: true }) }, 'Sandığa'))) : [h('div', { class: 'muted' }, 'Çantanızda yiyecek yok. Pazardan alın.')]));
+  box.append(h('h3', {}, '🍞 Yiyecek ve su'), ...(food.length ? food.map((g) => h('div', { class: 'card row inv-row' }, h('b', { style: 'flex:1' }, `${GOOD_LABEL[g]} × ${m.inv[g]}`), h('button', { class: 'primary', onclick: () => c.act({ t: 'useItem', good: g }) }, g === 'su' || g === 'sut' ? 'İç' : 'Ye'), slotSel(g), toChest(g, 1))) : [h('div', { class: 'muted' }, 'Çantanızda yiyecek yok. Fırın’dan ekmek, Kuyu’dan su “Çantaya al” ile alın.')]));
   const other = (Object.keys(m.inv) as Good[]).filter((g) => !EAT.includes(g) && (m.inv[g] ?? 0) > 0);
-  if (other.length) box.append(h('div', { class: 'muted' }, `Diğer: ${other.map((g) => `${GOOD_LABEL[g]} ${m.inv[g]}`).join(', ')}`));
+  if (other.length) box.append(h('h3', {}, '📦 Diğer eşyalar'), ...other.map((g) => h('div', { class: 'card row inv-row' }, h('b', { style: 'flex:1' }, `${GOOD_LABEL[g]} × ${m.inv[g]}`), toChest(g, 1), atHome && (m.inv[g] ?? 0) > 1 ? h('button', { onclick: () => c.act({ t: 'stash', item: g, qty: m.inv[g], toChest: true }) }, 'Hepsini sandığa') : '')));
   const ch = m.home ? w.chests?.[m.home] : undefined; const home = w.buildings.find((b) => b.id === m.home);
   box.append(h('h3', {}, '🧰 Evdeki sandık'));
   if (!home || home.burned) box.append(h('div', { class: 'muted' }, home?.burned ? 'Eviniz yandı; sandık da yandı.' : 'Sandık için bir eviniz (satın alınmış ya da kiralık) olmalı.'));
   else {
     const items: [string, number, boolean][] = [...(Object.entries(ch?.arms ?? {}) as [string, number][]).map(([k, n]) => [k, n, true] as [string, number, boolean]), ...(Object.entries(ch?.goods ?? {}) as [string, number][]).map(([k, n]) => [k, n, false] as [string, number, boolean])].filter(([, n]) => n > 0);
-    box.append(h('div', { class: 'muted' }, `${home.name}. Sandığı kullanmak için evinizde olmalısınız (otomatik yürürsünüz).`));
-    box.append(...(items.length ? items.map(([k, n, isArm]) => h('div', { class: 'card row inv-row' }, h('b', { style: 'flex:1' }, `${isArm ? ARM_LABEL[k as ArmItem] : GOOD_LABEL[k as Good]} × ${n}`), h('button', { onclick: () => c.act({ t: 'stash', item: k, qty: k === 'ok' ? n : 1, toChest: false }) }, 'Al'))) : [h('div', { class: 'muted' }, 'Sandık boş.')]));
+    box.append(h('div', { class: 'muted' }, atHome ? `${home.name} – sandığın başındasınız.` : `${home.name}. Sandığı yalnız evinizdeyken kullanabilirsiniz.`), atHome ? '' : h('button', { onclick: () => c.act({ t: 'goHome' } as never) }, '🏠 Eve git'));
+    box.append(...(items.length ? items.map(([k, n, isArm]) => h('div', { class: 'card row inv-row' }, h('b', { style: 'flex:1' }, `${isArm ? ARM_LABEL[k as ArmItem] : GOOD_LABEL[k as Good]} × ${n}`), atHome ? h('button', { onclick: () => c.act({ t: 'stash', item: k, qty: k === 'ok' ? n : 1, toChest: false }) }, 'Al') : '')) : [h('div', { class: 'muted' }, 'Sandık boş.')]));
   }
   return box;
 }
 /** Demirci shop (Zanaat Atölyesi) and Kışla kit. */
 export function armsShop(c: Ctx, b: Building): HTMLElement | null {
   const m = c.me; if (!m) return null;
+  const goods: Good[] = b.id === 'firin' ? ['ekmek'] : b.id === 'kuyu' ? ['su'] : b.kind === 'pazar' ? ['ekmek', 'su'] : [];
+  if (goods.length && !b.burned) return h('div', { class: 'stack' }, h('h3', {}, '🎒 Çantaya al (sonra Çanta’dan ya da hızlı çubuktan ücretsiz yer/içersiniz)'),
+    ...goods.map((g) => h('div', { class: 'row' }, h('b', { style: 'flex:1' }, `${GOOD_LABEL[g]} (~${marketPrice(c.w, g).toFixed(2)} D) · çantada ${m.inv[g] ?? 0}`), h('button', { class: 'primary', onclick: () => c.act({ t: 'buyBag', good: g, qty: 1 } as never) }, '1 al'), h('button', { onclick: () => c.act({ t: 'buyBag', good: g, qty: 5 } as never) }, '5 al'))));
   if (b.id === 'atolye') {
     const smith = c.w.people.find((p) => p.prof === 'demirci' && p.jailedDays === 0);
     return h('div', { class: 'stack' }, h('h3', {}, `⚒ Demirci${smith ? ` (${smith.name})` : ''}: silah satışı`), h('div', { class: 'muted' }, 'Sabit fiyat. Her silah adınıza kaydedilir. Fiyatın %30’u demir/kereste için şehir dışına gider.'),
@@ -82,17 +94,17 @@ export function eventOptions(kind: string, env: PopupEnv, close: () => void): HT
 export function eventTitle(kind: string): string { return `${ICON[kind] ?? '⚠'} ${TITLE[kind] ?? 'OLAY'}`; }
 
 export const WHATS_NEW: string[] = [
-  '👑 Oyunun yeni adı Medieval Empire; yeni simge.',
-  '🏷 Kayzer devletimize isim koyar; isim herkese duyurulur ve Tarih Kitabı’na yazılır.',
-  '⚔ Silahlar: kılıç, hançer, yay + ok, kalkan. Demirci satar, asker/bekçi Kışla’dan bedava alır. Silahsız yaralayamaz, öldüremezsiniz; öldürmek iki darbe ister.',
-  '🎒 Çanta ve ev sandığı: silahı çekip kınına koyun, ekmeği/suyu çantadan yiyip için, eşyayı evdeki sandıkta saklayın. Sivilken çekili silahla gezmek suç: bekçi el koyar.',
-  '🗡 Silahlı eşkıya baskını: gündüz uyarı gelir, gece 10 eşkıya dışarıdakileri soyar. Evde kalın; asker ve bekçiler savaşır.',
-  '⛵ Yabancı devlet: haraç, vergiye bağlanma ya da savaş. Savaşta düşman gemilerle nehirden çıkar; Kayzer ücretli asker toplayabilir, esirler fidyeyle geri alınır.',
-  '🐪 Develi kervanlar Pazar’a, Venedik gemisi Liman’a gelir: kıt mal pahalı, diğerleri ucuz.',
-  '🔥 Yangın binayı yıkar: içeridekiler kaçmazsa ölür ya da yaralanır; harabe yeniden yapılabilir.',
-  '🦠 Salgın kişiden kişiye bulaşır: hastaysanız üstte 🦠 görünür, hekime gidin.',
-  '📣 Her olay için açıklamalı, seçenekli ayrı açılır pencere.',
-  '🧑‍⚖ Mahkemede tanık çağırma, küçük ekranlarda kayıt düzeltmesi, hata ve takılma düzeltmeleri.',
+  '⚔ Gerçek zamanlı savaş: eşkıya ve düşman askerleri haritada dolaşan gerçek hedefler. Silahınızı seçip dokunun ya da “Saldır”a basın; kılıç/hançer yakından, yay uzaktan vurur (ok harcar), kalkan darbeyi azaltır.',
+  '⛵ Macar çıkarması artık görünür: gemiler nehirden yelken açıp Liman’a yanaşır, askerler karaya çıkıp şehre yürür; asker ve bekçilerimiz onlarla çarpışır. Hasar sayıları, can çubukları, kırmızı parlama.',
+  '🐢 Baskın ve savaş sırasında oyun otomatik 0,25x yavaşlar; bitince Kayzer’in hızına döner.',
+  '🎮 Yeni kontroller: yürümek için sol altta joystick (bilgisayarda WASD/oklar); sağ altta “Saldır” ve “Etkileşim”, altta 8 yuvalı hızlı çubuk (1–8 tuşları; Boşluk/F saldır, E etkileşim). Haritaya dokunmak artık yürütmez: kişiye dokununca adı ve canı, binaya dokununca bina seçilir; yanına gidip “Etkileşim” ile girersiniz.',
+  '🕰 Yeni saat: 1 oyun günü = 20 gerçek dakika. Gündüz (06–22) her oyun saati 1 dakika, gece (22–06) 30 saniye. Yürümek saat yakmaz; kısa bir yol birkaç saniye sürer. Günde 3 öğün ve 3 kez su yeter.',
+  '👤 Birine dokununca adı ve canı görünür; yanındayken “Etkileşim” ile konuşma penceresi açılır ve o kişi siz konuşurken bekler.',
+  '🎒 Fırın/Kuyu/Pazar’da “Çantaya al”; Ye/Su iç önce çantadan ücretsiz kullanır, yoksa fiyatı düğmede yazar. Sandık yalnız evde; her eşya sandığa konabilir.',
+  '💰 Kese geçmişi (keseye dokunun): her gelir/giderin sebebi; para kaybında bildirim. Kese kuruşuyla gösterilir.',
+  '📍 Yer bul: Fırın, Kuyu, Demirci… birine basınca karakteriniz oraya yürür, varınca açılır. Haritada dokunmak artık rastgele panel açmaz.',
+  '🆕 Yeni karakterler tok, susuz değil ve dinç başlar; çantada ekmek ve su var; tanıtım sırasında ihtiyaçlar durur. Pencereler sırayla açılır.',
+  '🔧 Su daha yavaş azalır; çubuklar “100 = iyi” gösterir; karakteriniz siz çevrimiçiyken arkanızdan yiyip içmez (yalnız çok acil durumda, bildirimle); menü donması, teklif kartı, sekme taşması, fare tekerleği ve diğer hatalar düzeltildi.',
 ];
 export function whatsNewModal(onClose: () => void): HTMLElement {
   const el = h('div', { class: 'modal whatsnew' }, h('div', { class: 'box' }, h('h2', {}, `✨ Neler yeni? (${VERSION})`), h('div', { class: 'stack' }, ...WHATS_NEW.map((t) => h('div', { class: 'msg' }, t))), h('button', { class: 'primary', onclick: () => { el.remove(); onClose(); } }, 'Harika!')));
@@ -127,7 +139,7 @@ function figure(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, 
   ctx.strokeStyle = bow ? '#7a5a2a' : '#cfd6dc'; ctx.lineWidth = Math.max(1, s * 0.05); ctx.beginPath(); if (bow) ctx.arc(x + s * 0.25, y - s * 0.55, s * 0.22, -1.2, 1.2); else { ctx.moveTo(x + s * 0.2, y - s * 0.4); ctx.lineTo(x + s * 0.45, y - s * 0.95); } ctx.stroke();
 }
 const hsh = (s: string): number => { let x = 0; for (const ch of s) x = (x * 31 + ch.charCodeAt(0)) | 0; return Math.abs(x); };
-export function drawV2(ctx: CanvasRenderingContext2D, w: World, cam: Cam, z: number, sz: number, now: number): void {
+export function drawV2(ctx: CanvasRenderingContext2D, w: World, cam: Cam, z: number, sz: number, now: number, placed?: { p: Person; x: number; y: number; visible: boolean }[]): void {
   const P = (x: number, y: number): [number, number] => [(x - cam.x) * z, (y - cam.y) * z];
   // burned buildings and the fire
   for (const b of w.buildings) {
@@ -142,18 +154,64 @@ export function drawV2(ctx: CanvasRenderingContext2D, w: World, cam: Cam, z: num
     if (cv.ship) { const [x, y] = P(100 - (100 - LIMAN.x) * t, LIMAN.y + 1.6); ship(ctx, x, y, sz * 1.1, '#c8102e'); }
     else for (let i = 0; i < 6; i++) { const sx = 101 - (101 - PAZAR.x - 1.2 * i) * t + i * 1.2 * (1 - t); const [x, y] = P(sx, PAZAR.y + (i % 2) * 0.6); camel(ctx, x, y, sz * 1.05, t < 1 ? Math.floor(now / 250 + i) % 2 : 0); }
   }
-  // raid robbers
-  if (w.raid?.phase === 'gece') for (const r of w.raid.robbers ?? []) {
-    if (r.hp <= 0) continue; const k = hsh(r.id); const x = 10 + (k % 70) + Math.sin(now / 4000 + k) * 6; const y = 20 + ((k >> 4) % 16) + Math.cos(now / 5300 + k) * 3;
-    const [px, py] = P(x, y); figure(ctx, px, py, sz, '#2b2b2b', Math.floor(now / 220 + k) % 2, k % 3 === 0);
-  }
-  // foreign ships + troops
-  const f = w.foreign;
+  drawCombat(ctx, w, P, z, sz, now, placed);
+}
+function hpBar(ctx: CanvasRenderingContext2D, x: number, y: number, wd: number, v: number, max: number, col: string): void {
+  const k = Math.max(0, Math.min(1, v / max)); ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(x - wd / 2 - 1, y - 1, wd + 2, 5);
+  ctx.fillStyle = k > 0.5 ? col : k > 0.25 ? '#e0a020' : '#d03020'; ctx.fillRect(x - wd / 2, y, wd * k, 3);
+}
+/** v2.0.1: real-time fight – foes with health bars, the enemy fleet sailing in and docking, floating damage numbers. */
+export function drawCombat(ctx: CanvasRenderingContext2D, w: World, P: (x: number, y: number) => [number, number], z: number, sz: number, now: number, placed?: { p: Person; x: number; y: number; visible: boolean }[]): void {
+  const f = w.foreign; const c = w.combat;
   if (f && f.phase === 'savas') {
-    const ships = Math.max(2, Math.ceil(f.troops / 8));
-    if (f.landed) for (let i = 0; i < ships; i++) { const [x, y] = P(46 + i * 6, 51.5); ship(ctx, x, y, sz * 1.2, '#2a4a9a'); }
-    else if (w.day >= (f.landDay ?? 0) - 1) for (let i = 0; i < ships; i++) { const [x, y] = P(95 - i * 5 - (now / 3000 % 10), 52); ship(ctx, x, y, sz * 1.0, '#2a4a9a'); }
-    if (f.landed) { const k = Math.min(1, (now - (f.landAt ?? now)) / 120_000); for (let i = 0; i < (f.alive ?? 0); i++) { const x = 44 + (i % 8) * 1.3 + Math.sin(now / 900 + i) * 0.3; const y = 48 - k * 16 - Math.floor(i / 8) * 1.2; const [px, py] = P(x, y); figure(ctx, px, py, sz, '#2a4a9a', Math.floor(now / 220 + i) % 2, i % 3 === 0); } }
+    const ships = Math.max(3, Math.ceil(f.troops / 6));
+    const dock = (i: number): [number, number] => [LIMAN.x - 7 + i * (14 / Math.max(1, ships - 1)), 49.6 + (i % 2) * 1.3];
+    const sail = c?.kind === 'war' ? Math.min(1, Math.max(0, (now - c.startAt) / SAIL_MS)) : f.landed ? 1 : -1;
+    for (let i = 0; i < ships; i++) {
+      const [dx, dy] = dock(i); const bob = Math.sin(now / 600 + i) * 0.12;
+      let x: number, y: number;
+      if (sail < 0) { if (w.day < (f.landDay ?? 0) - 1) continue; x = 93 + i * 1.6; y = 52 + (i % 3) * 1.4; } // waiting downstream
+      else { const e = 1 - Math.pow(1 - sail, 2); const sx = 93 + i * 1.6, sy = 52 + (i % 3) * 1.4; x = sx + (dx - sx) * e; y = sy + (dy - sy) * e; }
+      const [px, py] = P(x, y + bob); ship(ctx, px, py, sz * 1.25, '#2a4a9a');
+      if (sail >= 0 && sail < 1) { ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = Math.max(1, z * 0.08); ctx.beginPath(); ctx.moveTo(px + sz * 1.3, py); ctx.lineTo(px + sz * 2.6, py + sz * 0.15); ctx.stroke(); } // wake
+    }
+    if (c?.kind === 'war' && !c.spawned) { const [lx, ly] = P(LIMAN.x, 47.6); const left = Math.max(0, Math.ceil((c.spawnAt - now) / 1000)); ctx.font = `bold ${Math.max(11, z * 0.7)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = '#000a'; ctx.fillText(`⚓ Gemiler yanaşıyor… ${left} sn`, lx + 1, ly + 1); ctx.fillStyle = '#ffd36a'; ctx.fillText(`⚓ Gemiler yanaşıyor… ${left} sn`, lx, ly); }
+  }
+  if (!c) return;
+  for (const fo of c.foes) {
+    if (fo.hp <= 0) continue; const pt = foePos(fo, now); const [px, py] = P(pt.x, pt.y);
+    const mov = foeMoving(fo, now);
+    figure(ctx, px, py, sz, fo.kind === 'eskiya' ? '#2b2b2b' : '#2a4a9a', mov ? Math.floor(now / 220 + hsh(fo.id)) % 2 : 0, fo.bow);
+    if (fo.kind === 'eskiya') { ctx.fillStyle = '#7a1010'; ctx.fillRect(px - sz * 0.14, py - sz * 0.86, sz * 0.28, sz * 0.07); } else { ctx.fillStyle = '#c8102e'; ctx.fillRect(px - sz * 0.05, py - sz * 0.7, sz * 0.1, sz * 0.3); ctx.fillRect(px - sz * 0.15, py - sz * 0.6, sz * 0.3, sz * 0.08); }
+    hpBar(ctx, px, py - sz * 1.12, Math.max(18, sz * 0.8), fo.hp, fo.max, '#e04040');
+  }
+  if (placed) for (const q of placed) { if (!q.visible) continue; const fight = !!c.assign[q.p.id] || (!!q.p.playerId && !q.p.npc); if (!fight) continue; const [px, py] = P(q.x, q.y); hpBar(ctx, px, py - sz * 1.15, Math.max(18, sz * 0.8), q.p.health, 100, '#40c040'); }
+  // floating numbers
+  ctx.textAlign = 'center';
+  for (const hi of c.hits) {
+    const age = now - hi.at; if (age < 0 || age > 1400) continue; const k = age / 1400; const [px, py] = P(hi.x, hi.y);
+    const txt = hi.k === 'miss' ? 'ıska' : hi.k === 'rob' ? `−${hi.dmg} D` : hi.k === 'down' ? '✝' : `−${hi.dmg}`;
+    ctx.font = `bold ${Math.max(12, Math.round(z * (hi.k === 'kill' ? 0.95 : 0.75)))}px sans-serif`;
+    ctx.globalAlpha = 1 - k; ctx.fillStyle = '#000'; ctx.fillText(txt, px + 1, py - sz * (1.3 + k) + 1);
+    ctx.fillStyle = hi.k === 'miss' ? '#ddd' : hi.k === 'block' ? '#8fc8ff' : hi.k === 'rob' ? '#ffd36a' : hi.to.startsWith('E') || hi.to.startsWith('M') ? '#ffe070' : '#ff5050';
+    ctx.fillText(txt, px, py - sz * (1.3 + k)); ctx.globalAlpha = 1;
   }
 }
 export { findPerson };
+
+/** v2.0.1 one-page controls screen (after character creation). Needs stand still while it is open (onboardPause). */
+export function controlsModal(onClose: () => void): HTMLElement {
+  const slot = (n: number, t: string): HTMLElement => h('div', { class: 'cm-slot' }, h('small', {}, String(n)), t);
+  const el = h('div', { class: 'modal controls-modal' }, h('div', { class: 'box' },
+    h('h2', {}, '🎮 Kontroller'),
+    h('div', { class: 'cm-grid' },
+      h('div', { class: 'cm-item' }, h('div', { class: 'cm-joy' }, h('i', {})), h('b', {}, 'Joystick (sol alt)'), h('div', { class: 'muted' }, 'Basılı tutup kaydırın: karakteriniz o yöne yürür. Bilgisayarda WASD / ok tuşları. Haritaya dokunmak yürütmez.')),
+      h('div', { class: 'cm-item' }, h('div', { class: 'cm-btn atk' }, '⚔'), h('b', {}, 'Saldır (sağ alt)'), h('div', { class: 'muted' }, 'Seçili silahla en yakın düşmana vurur (kılıç/hançer yakından, yay uzaktan). Klavye: Boşluk / F.')),
+      h('div', { class: 'cm-item' }, h('div', { class: 'cm-btn itr' }, '✋'), h('b', {}, 'Etkileşim'), h('div', { class: 'muted' }, 'Yanınızdaki kişiyle konuşun ya da seçtiğiniz binaya girin. Bir kişiye/binaya dokununca seçilir. Klavye: E.')),
+    ),
+    h('div', { class: 'cm-item wide' }, h('div', { class: 'cm-bar' }, slot(1, '🗡'), slot(2, '🏹'), slot(3, '🛡'), slot(4, '🍞'), slot(5, '💧'), slot(6, ''), slot(7, ''), slot(8, '')), h('b', {}, '8 yuvalı hızlı çubuk (alt orta)'),
+      h('div', { class: 'muted' }, 'Bir yuvaya dokunun: silahı çeker/kınına koyar, ekmeği yer, suyu içer. Klavye: 1–8. Yuvaları Menü → Çanta’dan değiştirirsiniz.')),
+    h('div', { class: 'row', style: 'justify-content:flex-end' }, h('button', { onclick: () => { el.remove(); onClose(); } }, 'Atla'), h('button', { class: 'primary', onclick: () => { el.remove(); onClose(); } }, 'Anladım')),
+    h('div', { class: 'muted' }, 'Bu ekran açıkken açlık, susuzluk ve yorgunluğunuz ilerlemez.')));
+  return el;
+}

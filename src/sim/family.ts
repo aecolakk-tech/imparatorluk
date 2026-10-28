@@ -1,32 +1,34 @@
 import { ek } from './tr';
-import { dropArms } from './arms';
 import { freeSpots, houses } from './housing';
 /**
  * Marriage & family: proposals, weddings, shared household, children (only above a prosperity threshold),
  * ageing bebek → çocuk → genç → yetişkin, schooling, illness, orphans, inheritance and dynastic succession.
  */
 import type { Child, Person, Profession, World } from './types';
-import { PROF_LABEL } from './constants';
+import { BASE_PRICE, PROF_LABEL } from './constants';
 import { transfer } from './economy';
 import { chance, clamp, nextId, pick, rand, randInt } from './rng';
-import { findPerson, makePerson, WORKPLACE } from './world';
+import { findPerson, makePerson, makeNewcomer, WORKPLACE } from './world';
 import { log, isOnline, personal } from './log';
 import { chronicle } from './realm';
+import { ADULT_YEARS, yearsOf, fertility, deathChance, isBirthday } from './age';
+import { DAYS_PER_YEAR } from './constants';
 
-export const ADULT_AGE = 60; // game days
+export const ADULT_AGE = ADULT_YEARS * DAYS_PER_YEAR; // game days (16 years)
 export const CHILD_UPKEEP = 3; // Dinar per child per day
 export const SCHOOL_FEE = 1;
 export const CURE_FEE = 8;
-export const PREGNANCY_DAYS = 5;
+export const PREGNANCY_DAYS = Math.max(1, Math.round(DAYS_PER_YEAR * 0.75)); // ~9 months
 export const WEDDING_COST = 20;
 export const PROSPERITY_MONEY = 300; // household savings needed for a child
 const MAX_CHILDREN = 4;
 
 export type Stage = 'bebek' | 'cocuk' | 'genc' | 'yetiskin';
-export const STAGE_LABEL: Record<Stage, string> = { bebek: 'Bebek', cocuk: 'Çocuk', genc: 'Genç', yetiskin: 'Yetişkin' };
-export function age(w: World, x: { born: number }): number { return w.day - x.born; }
+export const STAGE_LABEL: Record<Stage, string> = { bebek: 'Bebek/Çocuk', cocuk: 'Çocuk', genc: 'Genç', yetiskin: 'Yetişkin' };
+/** Age in YEARS (v2.0.1). */
+export function age(w: World, x: { born: number }): number { return yearsOf(w, x); }
 export function stage(w: World, x: { born: number }): Stage {
-  const a = age(w, x); return a < 10 ? 'bebek' : a < 35 ? 'cocuk' : a < ADULT_AGE ? 'genc' : 'yetiskin';
+  const y = yearsOf(w, x); return y < 7 ? 'bebek' : y < ADULT_YEARS ? 'genc' : 'yetiskin';
 }
 export const findChild = (w: World, id: string | null | undefined): Child | undefined => (id ? w.children.find((c) => c.id === id) : undefined);
 export const nameOf = (w: World, id: string | null | undefined): string => findPerson(w, id)?.name ?? findChild(w, id)?.name ?? '?';
@@ -79,6 +81,7 @@ export function answerProposal(w: World, me: Person, id: string, accept: boolean
   if (pr.kind === 'evlilik') {
     if (!accept || !from) { if (from) log(w, `${me.name}, ${ek(from.name, 'ın')} evlenme teklifini reddetti.`, from.id); return 'Teklif reddedildi.'; }
     if (!adultFree(w, from) || !adultFree(w, me)) return 'Artık evlenemezsiniz.';
+    if (from.female === me.female) return 'Evlilik sadece bir erkek ile bir kadın arasında olur.';
     wed(w, from, me); return 'Evlendiniz! Mutluluklar.';
   }
   if (!accept || !from || from.spouse !== me.id) return 'Çocuk teklifi reddedildi.';
@@ -89,6 +92,7 @@ export function answerProposal(w: World, me: Person, id: string, accept: boolean
 export function wed(w: World, a: Person, b: Person): void {
   if (a.female === b.female) return;
   a.spouse = b.id; b.spouse = a.id;
+  { const hus = a.female ? b : a, wife = a.female ? a : b; const sn = hus.profile?.surname; if (sn) setSurname(w, wife, sn); }
   const imam = w.people.find((p) => p.prof === 'imam' && p.jailedDays === 0);
   for (const x of [a, b]) { const c = Math.min(WEDDING_COST / 2, x.money); if (c > 0) transfer(w, x.id, imam?.id ?? 'saray', c, 'düğün'); x.mood = clamp(x.mood + 15); }
   a.relations[b.id] = 80; b.relations[a.id] = 80;
@@ -120,10 +124,12 @@ export function emptiestHouse(w: World): string {
 }
 
 /** Prosperity threshold for a child: household savings + income, both fed, city food secure, not too crowded. */
-export function canHaveChild(w: World, a: Person, b: Person): string | null {
+export function canHaveChild(w: World, a: Person, b: Person, npc = false): string | null {
   const kids = childrenOf(w, a.id).filter((k) => !k.adult).length;
   if (kids >= MAX_CHILDREN) return 'Bu evde yeterince çocuk var.';
-  if (a.money + b.money < PROSPERITY_MONEY + kids * 100) return `Çocuk için hanede en az ${PROSPERITY_MONEY + kids * 100} Dinar birikim gerekir.`;
+  if (fertility(w, a, b) <= 0) return 'Bu yaşta çocuk olmaz (kadınlar 16–45 yaş arası; erkeklerde 60’tan sonra azalır).';
+  const need = npc ? 100 + kids * 40 : PROSPERITY_MONEY + kids * 100; /* NPC households have smaller savings; the city must renew itself */
+  if (a.money + b.money < need) return `Çocuk için hanede en az ${need} Dinar birikim gerekir.`;
   if (a.hunger > 45 || b.hunger > 45) return 'Hane tok değil; önce karnınızı doyurun.';
   if (a.jailedDays > 0 || b.jailedDays > 0) return 'Zindandayken olmaz.';
   if (!foodSecure(w)) return 'Şehirde ekmek kıtlığı var; şimdi çocuk zor beslenir.';
@@ -147,6 +153,7 @@ export function requestChild(w: World, me: Person, playerDecides: (p: Person) =>
 }
 function conceive(w: World, a: Person, b: Person): string {
   const err = canHaveChild(w, a, b); if (err) return err;
+  if (rand(w) > fertility(w, a, b)) return 'Bu sefer olmadı; bir süre sonra yeniden deneyin.';
   w.pregnancies.push({ parents: [a.id, b.id], due: w.day + PREGNANCY_DAYS });
   log(w, `${a.name} ile ${b.name} bir bebek bekliyor!`, a.id);
   return `Müjde! ${PREGNANCY_DAYS} gün sonra bebeğiniz doğacak.`;
@@ -158,9 +165,10 @@ function birth(w: World, parents: string[]): Child | null {
   const [a, b] = parents.map((id) => findPerson(w, id)); if (!a) return null;
   const female = rand(w) < 0.5; const mix = (x: number, y: number): number => Math.round(clamp((x + y) / 2 + (rand(w) - 0.5) * 30));
   const royal = parents.includes(w.kayzerId ?? '-') || !!a.soylu || !!b?.soylu || parents.some((x) => isHanedan(w, x));
-  const last = a.name.replace(/\(.*?\)/g, '').trim().split(' ').filter((x) => !['Kayzer', 'Usta', 'Efendi', 'Hanım', 'Ağa', 'Kalfa', 'Asker', 'Bekçi', 'Hekim', 'Tüccar', 'Hamal', 'Fırıncı', 'Kalemşör', 'Öğretmen', 'Savcı', 'Hâkim'].includes(x)).pop() ?? 'Ana';
+  const father = [a, b].find((x) => x && !x.female); const last = father?.profile?.surname ?? a.profile?.surname ?? a.name.replace(/\(.*?\)/g, '').trim().split(' ').filter((x) => !['Kayzer', 'Usta', 'Efendi', 'Hanım', 'Ağa', 'Kalfa', 'Asker', 'Bekçi', 'Hekim', 'Tüccar', 'Hamal', 'Fırıncı', 'Kalemşör', 'Öğretmen', 'Savcı', 'Hâkim'].includes(x)).pop() ?? 'Ana';
+  const sur = father?.profile?.surname; /* v2.0.1: children carry the father's soyadı */
   const c: Child = {
-    id: nextId(w, 'c'), name: `${pick(w, female ? KIZ : ERKEK)}${royal ? ' Şehzade'.replace('Şehzade', female ? 'Sultan' : 'Şehzade') : ''} ${royal ? '' : `(${last})`}`.replace(/\s+/g, ' ').trim(),
+    id: nextId(w, 'c'), name: `${pick(w, female ? KIZ : ERKEK)}${royal ? ' Şehzade'.replace('Şehzade', female ? 'Sultan' : 'Şehzade') : ''} ${royal ? '' : sur ? sur : `(${last})`}`.replace(/\s+/g, ' ').trim(), ...(sur ? { surname: sur } : {}),
     female, born: w.day, parents, honesty: mix(a.honesty, b?.honesty ?? a.honesty), ambition: mix(a.ambition, b?.ambition ?? a.ambition),
     hairColor: rand(w) < 0.5 ? a.hairColor : b?.hairColor ?? a.hairColor, skin: rand(w) < 0.5 ? a.skin : b?.skin ?? a.skin, shirt: randInt(w, 0, 7),
     school: 0, inSchool: false, sick: 0, hunger: 0, orphan: false, soylu: royal,
@@ -172,20 +180,25 @@ function birth(w: World, parents: string[]): Child | null {
 
 /** Daily family life (end of day). */
 export function familyDay(w: World, npcDecides: (p: Person) => boolean, now: number): void {
+  settleEstates(w);
   // births
   for (const pg of w.pregnancies.filter((x) => x.due <= w.day)) birth(w, pg.parents);
   w.pregnancies = w.pregnancies.filter((x) => x.due > w.day);
   w.proposals = w.proposals.filter((x) => w.day - x.day <= 3);
   // NPC romance & family planning
   const singles = w.people.filter((p) => npcDecides(p) && adultFree(w, p) && p.jailedDays === 0 && p.home !== 'kisla' && p.id !== w.kayzerId);
-  for (const p of singles) if (!p.spouse && chance(w, 0.012)) {
+  // v2.0.1 demography: generations turn over (1 year = 5 days), so newcomers arrive with the caravans when the city shrinks
+  w.popTarget ??= Math.max(100, w.people.length);
+  { const dear = w.prices.ekmek > BASE_PRICE.ekmek * 1.6; /* nobody moves to a city with dear bread */ const deficit = dear ? 0 : w.popTarget - w.people.length; const n = deficit > 0 ? Math.min(2, Math.ceil(deficit / 15)) : 0;
+    for (let i = 0; i < n; i++) if (chance(w, 0.6)) { const home = emptiestHouse(w); const p = makeNewcomer(w, 18 + rand(w) * 17, home); w.people.push(p); if (w.treasury > 500) transfer(w, 'saray', p.id, 10, 'göçmen yardımı'); log(w, `🧳 ${p.name} kervanla şehre göç etti (${PROF_LABEL[p.prof]}).`, p.id); } }
+  for (const p of singles) if (!p.spouse && chance(w, 0.03)) {
     const o = singles.find((x) => x !== p && !x.spouse && x.female !== p.female && (x.relations[p.id] ?? 0) > -10);
     if (o) wed(w, p, o);
   }
   for (const p of w.people) {
     const sp = findPerson(w, p.spouse);
     if (!sp || p.id > sp.id || !npcDecides(p) || !npcDecides(sp)) continue;
-    if (!canHaveChild(w, p, sp) && chance(w, 0.015)) conceive(w, p, sp);
+    if (!canHaveChild(w, p, sp, true) && chance(w, 0.04)) conceive(w, p, sp);
   }
   // children: upkeep, school, illness, growing up
   for (const c of [...w.children]) {
@@ -199,10 +212,12 @@ export function familyDay(w: World, npcDecides: (p: Person) => boolean, now: num
     c.hunger = fed ? 0 : clamp(c.hunger + 30);
     if (!fed && payer) payer.mood = clamp(payer.mood - 4);
     const st = stage(w, c);
-    if (c.inSchool && (st === 'cocuk' || st === 'genc') && fed) c.school += 1;
-    if (st !== 'cocuk' && st !== 'genc') c.inSchool = false;
+    if (c.inSchool && st === 'genc' && fed) c.school += 1;
+    if (st !== 'genc') c.inSchool = false;
     // NPC parents send kids to school if they can afford it
-    if (!c.inSchool && (st === 'cocuk' || st === 'genc') && (c.orphan || (payer && npcDecides(payer) && payer.money > 120))) c.inSchool = true;
+    if (!c.inSchool && st === 'genc' && (c.orphan || (payer && npcDecides(payer) && payer.money > 120))) c.inSchool = true;
+    // v2.0.1: a genç not at school works as an apprentice (çırak) for half a hamal's pay, paid by a master to the household
+    if (st === 'genc' && !c.inSchool && fed && payer) { const master = w.people.find((p) => ['demirci', 'marangoz', 'terzi', 'firinci'].includes(p.prof) && p.money > 30 && p.jailedDays === 0 && !p.parents.includes(c.id)); if (master && transfer(w, master.id, payer.id, 3, `çırak ücreti (${c.name})`)) c.apprentice = (c.apprentice ?? 0) + 1; }
     // illness
     if (c.sick > 0) {
       c.sick += 1;
@@ -210,11 +225,12 @@ export function familyDay(w: World, npcDecides: (p: Person) => boolean, now: num
       const auto = payer && npcDecides(payer) && payer.money > CURE_FEE + 10;
       if (healer && (auto || (c.orphan && w.treasury > CURE_FEE))) { cureChild(w, c, auto ? payer! : null); }
       else if (c.sick > 6) { removeChild(w, c, `${c.name} hastalıktan kurtulamadı. Şehir yasta.`); continue; }
-    } else if (chance(w, c.hunger > 40 ? 0.15 : 0.02)) { c.sick = 1; for (const p of parents) if (p.playerId) log(w, `${c.name} hastalandı! Hekime götürün.`, p.id); }
+    } else if (chance(w, (c.hunger > 40 ? 0.15 : 0.02) * (w.nature?.kind === 'salgin' ? (st === 'bebek' ? 6 : 3) : 1))) { c.sick = 1; for (const p of parents) if (p.playerId) log(w, `${c.name} hastalandı! Hekime götürün.`, p.id); }
     if (st === 'yetiskin') growUp(w, c);
   }
   // natural deaths of very old NPCs (players never die of age)
-  for (const p of [...w.people]) if (!p.playerId && p.prof !== 'naip' && p.id !== w.kayzerId && age(w, p) > 540 && chance(w, 0.01)) die(w, p, `${p.name} ihtiyarlıktan hayata gözlerini yumdu.`);
+  // v2.0.1 natural death: rolled once per year of age, at each birthday (NPCs and players alike; Maecenas excepted)
+  for (const p of [...w.people]) if (p.prof !== 'naip' && isBirthday(w, p) && rand(w) < deathChance(yearsOf(w, p))) die(w, p, `${p.name} ${yearsOf(w, p)} yaşında, ihtiyarlıktan hayata gözlerini yumdu.`);
   // a minor heir comes of age → the regency ends
   if (w.regentFor && !findChild(w, w.regentFor) && findPerson(w, w.regentFor)) {
     const heir = findPerson(w, w.regentFor)!; const reg = findPerson(w, w.regentId);
@@ -255,7 +271,7 @@ export function growUp(w: World, c: Child): Person {
   const home = c.soylu && c.parents.includes(w.kayzerId ?? '-') ? 'saray' : par[0]?.home && par[0].home !== 'saray' && par[0].home !== 'kisla' ? par[0].home : emptiestHouse(w);
   const p = makePerson(w, { name: c.name, prof, female: c.female, honesty: c.honesty, ambition: c.ambition, money: 0, loyalty: Math.round(par.reduce((s, x) => s + x.loyalty, 60) / (par.length + 1)) }, home);
   w.idSeq -= 1; p.id = c.id; p.born = c.born; p.parents = c.parents; p.school = c.school; p.soylu = c.soylu;
-  p.hairColor = c.hairColor; p.skin = c.skin; p.shirt = c.shirt; p.republic = Math.round(par.reduce((s, x) => s + x.republic, 0) / Math.max(1, par.length) * 0.7);
+  if (c.surname) p.profile = { surname: c.surname }; p.hairColor = c.hairColor; p.skin = c.skin; p.shirt = c.shirt; p.republic = Math.round(par.reduce((s, x) => s + x.republic, 0) / Math.max(1, par.length) * 0.7);
   p.work = WORKPLACE[prof];
   w.children = w.children.filter((x) => x !== c); w.people.push(p);
   for (const x of par) { const gift = Math.min(40, x.money * 0.1); if (gift > 1) transfer(w, x.id, p.id, gift, 'harçlık'); p.relations[x.id] = 60; x.relations[p.id] = 60; }
@@ -263,28 +279,84 @@ export function growUp(w: World, c: Child): Person {
   return p;
 }
 
-/** Death with inheritance: spouse gets half, children share the rest (minors' share kept by the surviving parent / the state). */
+/**
+ * v2.0.1 death with inheritance (NPCs and players, any cause):
+ * adult children (16+) split the money equally; the heir (a player's chosen child, else the eldest) gets the house,
+ * the house sandık, the Çanta and the weapons. No adult child → the spouse gets everything; nobody → the hazine.
+ * A Kayzer's throne passes to the heir (minor → regent), or to Maecenas. A player's account is never deleted:
+ * w.players[id].dead holds the funeral/vasiyet state until he continues as a child or creates a new character.
+ */
 export function die(w: World, p: Person, text: string): void {
-  dropArms(w, p);
-  const heirs = childrenOf(w, p.id); const sp = findPerson(w, p.spouse);
-  const adults = heirs.filter((h) => h.adult).map((h) => findPerson(w, h.id)!).filter(Boolean);
+  const sp = findPerson(w, p.spouse); const years = yearsOf(w, p);
+  const adults = w.people.filter((x) => x.parents.includes(p.id) && x !== p && yearsOf(w, x) >= ADULT_YEARS).sort((a, b) => a.born - b.born);
+  const heir = adults[0] ?? sp ?? null; // receives house, sandık, Çanta, weapons (a player may later pick another child)
   if (p.money > 20) transfer(w, p.id, 'saray', Math.round(p.money * 0.1 * 100) / 100, 'miras vergisi (%10)');
-  const money = Math.max(0, p.money);
-  if (money > 0) {
-    const toSp = sp ? (adults.length ? money / 2 : money) : 0;
-    if (sp && toSp > 0) transfer(w, p.id, sp.id, toSp, 'miras');
-    const rest = Math.max(0, p.money);
-    if (adults.length && rest > 0) for (const a of adults) transfer(w, p.id, a.id, rest / adults.length, 'miras');
-    else if (rest > 0) transfer(w, p.id, 'saray', rest, 'mirassız mal hazineye');
+  if (p.money > 0) {
+    if (adults.length) { const share = Math.floor((p.money / adults.length) * 100) / 100; for (const a of adults) transfer(w, p.id, a.id, share, 'miras'); }
+    else if (sp) transfer(w, p.id, sp.id, p.money, 'miras (eşe)');
   }
-  if (p.money > 0) transfer(w, p.id, 'saray', p.money, 'kalan mal hazineye');
-  const invHeir = sp ?? adults[0]; if (invHeir) for (const g of Object.keys(p.inv) as (keyof Person['inv'])[]) { invHeir.inv[g] += p.inv[g]; p.inv[g] = 0; }
-  for (const l of w.listings) if (l.sellerId === p.id) l.sellerId = invHeir?.id ?? 'saray';
+  if (p.money > 0) transfer(w, p.id, 'saray', p.money, adults.length || sp ? 'miras kırıntısı hazineye' : 'mirassız mal hazineye');
+  const houses = w.buildings.filter((b) => b.ownerId === p.id).map((b) => b.id);
+  const estate = { houses, inv: { ...p.inv }, arms: { ...(p.arms ?? {}) } };
+  for (const g of Object.keys(p.inv) as (keyof Person['inv'])[]) p.inv[g] = 0; p.arms = {}; p.drawn = null;
+  const pl = p.playerId && !p.npc ? w.players[p.playerId] : undefined;
+  const free = adults.filter((a) => !a.playerId || a.npc);
+  if (pl && free.length) { // the player chooses which child inherits house/sandık/Çanta → park the estate (goods only; money is already shared)
+    pl.dead = { day: w.day, name: p.name, years, text, heirs: free.map((a) => a.id), estate };
+    for (const b of w.buildings) if (b.ownerId === p.id) b.ownerId = undefined;
+  } else {
+    giveEstate(w, p.id, estate, heir);
+    if (pl) pl.dead = { day: w.day, name: p.name, years, text, heirs: [] };
+  }
+  w.armsReg = (w.armsReg ?? []).filter((r) => r.ownerId !== p.id);
+  for (const l of w.listings) if (l.sellerId === p.id) l.sellerId = heir?.id ?? 'saray';
   if (sp) { sp.spouse = null; sp.mood = clamp(sp.mood - 25); }
+  // throne
+  let throne = '';
+  if (w.kayzerId === p.id) throne = succeedOnDeath(w, p) ?? '';
   w.people = w.people.filter((x) => x !== p);
+  if (w.regentId === p.id) { w.regentId = null; }
   for (const s of w.meclis.seats) if (s.holder === p.id) s.holder = null;
   if (w.isyan) w.isyan.rebels = w.isyan.rebels.filter((id) => id !== p.id);
+  if (p.playerId) { p.playerId = null; }
   log(w, text, sp?.id ?? adults[0]?.id);
+  const funeral = `🕯 Cenaze: ${p.name} (${years} yaşında) toprağa verildi.${adults.length ? ` Mirasçıları: ${adults.map((a) => a.name).join(', ')}.` : sp ? ` Malları eşi ${sp.name}’e kaldı.` : ' Mirasçısı olmadığından malları hazineye kaldı.'}${throne ? ' ' + throne : ''}`;
+  log(w, funeral, sp?.id ?? adults[0]?.id);
+  for (const x of [sp, ...adults]) if (x?.playerId && !x.npc) personal(w, x.playerId, funeral);
+  if (pl || p.soylu || p.meclis || throne || p.prof === 'kayzer') chronicle(w, 'olum', `${p.name} ${years} yaşında öldü. ${text}${throne ? ' ' + throne : ''}`);
+}
+type Estate = { houses: string[]; inv: Person['inv']; arms: NonNullable<Person['arms']> };
+/** Hand a dead person's house(s), the house sandık, Çanta and weapons to an heir (or the state). */
+export function giveEstate(w: World, deadId: string, e: Estate, heir: Person | null): void {
+  for (const b of w.buildings) if (e.houses.includes(b.id) || b.ownerId === deadId) b.ownerId = heir?.id;
+  if (!heir) return; // goods of a man without heirs are lost to the state (house becomes city property)
+  for (const g of Object.keys(e.inv) as (keyof Person['inv'])[]) heir.inv[g] = (heir.inv[g] ?? 0) + (e.inv[g] ?? 0);
+  const ha = (heir.arms ??= {}); for (const [k, n] of Object.entries(e.arms) as [keyof typeof ha, number][]) if (n) { ha[k] = (ha[k] ?? 0) + n; if (k === 'kilic' || k === 'hancer' || k === 'yay') (w.armsReg ??= []).push({ ownerId: heir.id, kind: k, day: w.day, by: 'demirci' }); }
+  if (e.houses[0] && heir.home !== 'saray' && heir.home !== 'kisla' && freeSpots(w, e.houses[0]) > 0) heir.home = e.houses[0];
+}
+/** The Kayzer died: adult heir → Kayzer; minor heir → regent (spouse, else Maecenas); no heir → Maecenas. */
+export function succeedOnDeath(w: World, k: Person): string | null {
+  if (w.regime !== 'imparatorluk') { w.kayzerId = null; return 'Devlet başkanlığı boşaldı; seçim yapılacak.'; }
+  const heir = heirOf(w, k); const sp = findPerson(w, k.spouse); const mae = w.people.find((p) => p.prof === 'naip');
+  if (heir?.adult && findPerson(w, heir.id)) { const h = findPerson(w, heir.id)!; w.kayzerId = h.id; h.prof = 'kayzer'; h.work = 'saray'; h.home = 'saray'; h.soylu = true; w.veliaht = null; const t = `Tahta varisi ${h.name} çıktı.`; chronicle(w, 'taht', `${k.name} öldü. ${t}`); return t; }
+  if (heir && (sp ?? mae)) { const reg = (sp ?? mae)!; w.kayzerId = reg.id; if (reg.prof !== 'naip') { reg.prof = 'kayzer'; reg.work = 'saray'; } w.regentId = reg.id; w.regentFor = heir.id; const t = `Veliaht ${nameOf(w, heir.id)} reşit olana dek ${reg.name} naip.`; chronicle(w, 'taht', `${k.name} öldü. ${t}`); return t; }
+  if (mae) { w.kayzerId = mae.id; const t = `Varisi olmadığından tahta ${mae.name} çıktı.`; chronicle(w, 'taht', `${k.name} öldü. ${t}`); return t; }
+  return null;
+}
+/** A dead player continues as one of his adult children (who inherits house/sandık/Çanta). */
+export function continueAsChild(w: World, playerId: string, childId: string): string | null {
+  const pl = w.players[playerId]; const d = pl?.dead; if (!pl || !d) return 'Karakteriniz yaşıyor.';
+  if (!d.heirs.includes(childId)) return 'Bu çocuk seçilemez.';
+  const c = findPerson(w, childId); if (!c || (c.playerId && !c.npc) || yearsOf(w, c) < ADULT_YEARS) return 'Bu çocuk artık seçilemez.';
+  if (d.estate) giveEstate(w, '-', d.estate, c);
+  c.playerId = playerId; c.npc = false; c.genderSet = true; c.lookSet = true; (c.profile ??= {}).set = true;
+  pl.personId = c.id; pl.name = c.name; pl.dead = undefined; pl.lastSeenDay = w.day; pl.awayMoney = c.money;
+  log(w, `${c.name}, ${d.name} ailesinin yeni reisi oldu.`, c.id);
+  return null;
+}
+/** Estates nobody claimed within 3 game days go to the eldest child. */
+export function settleEstates(w: World): void {
+  for (const pl of Object.values(w.players)) { const d = pl.dead; if (!d?.estate || w.day - d.day < 3) continue; const c = d.heirs.map((id) => findPerson(w, id)).find(Boolean) ?? null; giveEstate(w, '-', d.estate, c ?? null); d.estate = undefined; }
 }
 
 /** Who inherits the throne: designated veliaht, else the eldest adult child, else the eldest minor (with a regent). */
@@ -344,4 +416,12 @@ export function actingHead(w: World, now: number, windowMs: number): Person | un
 export function canRule(w: World, p: Person, now: number, windowMs: number): boolean {
   if (p.id === w.kayzerId) return true;
   return w.regime === 'imparatorluk' && actingHead(w, now, windowMs)?.id === p.id;
+}
+
+/** v2.0.1: replace (or add) a person's soyadı – a wife takes her husband's at the wedding. */
+export function setSurname(w: World, p: Person, sn: string): void {
+  const old = p.profile?.surname; let base = p.name;
+  if (old && base.endsWith(` ${old}`)) base = base.slice(0, -old.length - 1);
+  (p.profile ??= {}).surname = sn; if (!base.endsWith(` ${sn}`)) p.name = `${base} ${sn}`.slice(0, 40);
+  const pl = p.playerId ? w.players[p.playerId] : undefined; if (pl) pl.name = p.name;
 }

@@ -151,7 +151,7 @@ let lastAnimals: PlacedAnimal[] = [];
 /** Tap marker: an expanding ring where the player tapped. */
 export const tapFx = { x: 0, y: 0, t: 0 };
 /** The Meydan election notice board (tile coords). */
-export const SIGN = { x: 28.6, y: 21.2 };
+export const SIGN = { x: 27.4, y: 21.2 }; // v2.0.1: in the gap between the Gıda Pazarı and the Pazar (no overlap with either's roof/label)
 
 export interface Camera { x: number; y: number; z: number }
 
@@ -168,7 +168,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
   drawSign(ctx, w, cam, z, now);
   // corpses: blood pool + body lying on the ground
   for (const co of w.corpses ?? []) drawCorpse(ctx, co, cam, z, sz, now);
-  drawV2(ctx, w, cam, z, sz, now); // v2.0: ruins/fire, caravan camels or ship, raiders, enemy fleet
+  drawV2(ctx, w, cam, z, sz, now, placed); // v2.0: ruins/fire, caravan camels or ship, raiders, enemy fleet
   if (tapFx.t && performance.now() - tapFx.t < 550) { const k = (performance.now() - tapFx.t) / 550; const tx = (tapFx.x - cam.x) * z, ty = (tapFx.y - cam.y) * z; ctx.strokeStyle = `rgba(255,240,160,${1 - k})`; ctx.lineWidth = 3 * (1 - k) + 1; ctx.beginPath(); ctx.ellipse(tx, ty, sz * (0.2 + k * 0.7), sz * (0.09 + k * 0.32), 0, 0, Math.PI * 2); ctx.stroke(); }
   if (target) { const tx = (target.x - cam.x) * z, ty = (target.y - cam.y) * z; ctx.strokeStyle = 'rgba(255,240,120,0.9)'; ctx.lineWidth = 2; const r0 = sz * (0.25 + 0.08 * Math.sin(now / 150)); ctx.beginPath(); ctx.ellipse(tx, ty, r0, r0 * 0.45, 0, 0, Math.PI * 2); ctx.stroke(); }
   // animals (visual only)

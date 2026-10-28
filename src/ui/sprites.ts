@@ -26,6 +26,7 @@ const UNIFORM: Partial<Record<Profession, { body: string; hat?: string; trim?: s
   dokumaci: { body: '#8a5a9a' },
   mobilyaci: { body: '#7a4a2a', trim: '#c9a227' },
   barci: { body: '#6a2a4a', trim: '#f0f0f0' },
+  degirmenci: { body: '#d8d0c0', hat: '#f4f0e8' },
   kasap: { body: '#f0e8e0', trim: '#b03030' },
 };
 

@@ -9,7 +9,7 @@ import { inCustody, placeOf } from '../src/sim/place';
 import { arrest } from '../src/sim/life';
 
 const T0 = 1_700_000_000_000;
-function setup(): World { const w = createWorld(5, T0); joinWorld(w, 'f', 'Enes', 'kayzer', true, T0); joinWorld(w, 'u2', 'Ali', 'hamal', false, T0); touchPlayer(w, 'f', T0); touchPlayer(w, 'u2', T0); w.serverNow = T0; for (const p of w.people) p.protectedUntil = 0; return w; }
+function setup(): World { const w = createWorld(5, T0); joinWorld(w, 'f', 'Enes', 'kayzer', true, T0); joinWorld(w, 'u2', 'Alparslan', 'hamal', false, T0); touchPlayer(w, 'f', T0); touchPlayer(w, 'u2', T0); w.serverNow = T0; for (const p of w.people) p.protectedUntil = 0; return w; }
 const K = (w: World): Person => findPerson(w, w.kayzerId)!;
 const U = (w: World): Person => findPerson(w, w.players.u2!.personId)!;
 const npc = (w: World, prof: string, not?: string): Person => w.people.find((p) => p.prof === prof && !p.playerId && p.id !== not)!;

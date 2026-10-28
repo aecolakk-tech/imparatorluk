@@ -16,6 +16,7 @@ import { chance, clamp, nextId, pick } from './rng';
 import { transfer, buy, addListing, sellerPrice } from './economy';
 import { arrest, rumor, relate } from './life';
 import { die } from './family';
+import { needsMul } from './profile';
 
 // ======================= seasons =======================
 export type Season = 'ilkbahar' | 'yaz' | 'sonbahar' | 'kis';
@@ -24,17 +25,18 @@ export const SEASON_LABEL: Record<Season, string> = { ilkbahar: '🌸 İlkbahar'
 export function season(w: World): Season { return (['ilkbahar', 'yaz', 'sonbahar', 'kis'] as const)[Math.floor(Math.max(0, w.day - 1) / SEASON_DAYS) % 4]!; }
 
 // ======================= continuous hunger / thirst =======================
-export const HUNGER_PER_H = 4; export const THIRST_PER_H = 4.5;
+export const HUNGER_PER_H = 4; export const THIRST_PER_H = 3.5; // v2.0.1: thirst was too fast (4.5/h)
 /** Hourly: bars drain; NPCs (and offline players' AI) eat/drink when low; empty bars hurt. */
 export function needsDrain(w: World, eat: (p: Person) => boolean, drink: (p: Person) => boolean): void {
   const s = season(w); const night = w.hour < 6 || w.hour >= 23;
   for (const p of w.people) {
     if (p.prof === 'naip') { p.hunger = 0; p.thirst = 0; continue; }
-    p.hunger = clamp(p.hunger + HUNGER_PER_H * (night ? 0.5 : 1));
-    p.thirst = clamp(p.thirst + THIRST_PER_H * (night ? 0.5 : 1) * (s === 'yaz' ? 1.25 : 1));
+    if ((p.onboardUntil ?? 0) > (w.serverNow ?? w.lastTickAt)) continue; // v2.0.1: newcomer still reading the intro
+    const nm = needsMul(p); p.hunger = clamp(p.hunger + HUNGER_PER_H * nm * (night ? 0.5 : 1));
+    p.thirst = clamp(p.thirst + THIRST_PER_H * nm * (night ? 0.5 : 1) * (s === 'yaz' ? 1.25 : 1));
     const autoT = p.playerId && !p.npc ? 80 : 50;
-    if (p.thirst >= autoT) { if (p.inv.sut > 0 && chance(w, 0.4)) { p.inv.sut -= 1; p.thirst = clamp(p.thirst - 30); p.hunger = clamp(p.hunger - 10); p.drinks += 1; } else drink(p); }
-    if (p.hunger >= autoT + 5) { if (p.inv.yumurta > 0 && chance(w, 0.4)) { p.inv.yumurta -= 1; p.hunger = clamp(p.hunger - 22); p.meals += 1; } else eat(p); }
+    if (p.thirst >= autoT) { if (p.inv.sut > 0 && chance(w, 0.4)) { p.inv.sut -= 1; p.thirst = clamp(p.thirst - 30); p.hunger = clamp(p.hunger - 10); p.drinks += 1; if (p.playerId && !p.npc) personal(w, p.playerId, '🥛 Karakteriniz çok susadı, çantadan 1 Süt içti.'); } else drink(p); }
+    if (p.hunger >= autoT + 5) { if (p.inv.yumurta > 0 && chance(w, 0.4)) { p.inv.yumurta -= 1; p.hunger = clamp(p.hunger - 22); p.meals += 1; if (p.playerId && !p.npc) personal(w, p.playerId, '🥚 Karakteriniz çok acıktı, çantadan 1 Yumurta yedi.'); } else eat(p); }
     if (p.hunger >= 100) { p.health = clamp(p.health - 2.5); p.mood = clamp(p.mood - 0.5); }
     if (p.thirst >= 100) { p.health = clamp(p.health - 3.5); p.mood = clamp(p.mood - 0.5); }
     if (p.health < 5) p.health = 5;

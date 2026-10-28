@@ -9,7 +9,7 @@ import { meclisElection } from '../src/sim/meclis';
 import { totalMoney } from '../src/sim/economy';
 
 const T0 = 1_700_000_000_000;
-function setup(): World { const w = createWorld(5, T0); joinWorld(w, 'f', 'Enes', 'kayzer', true, T0); joinWorld(w, 'u2', 'Ali', 'hamal', false, T0); touchPlayer(w, 'f', T0); touchPlayer(w, 'u2', T0); w.serverNow = T0; for (const p of w.people) p.protectedUntil = 0; return w; }
+function setup(): World { const w = createWorld(5, T0); joinWorld(w, 'f', 'Enes', 'kayzer', true, T0); joinWorld(w, 'u2', 'Alparslan', 'hamal', false, T0); touchPlayer(w, 'f', T0); touchPlayer(w, 'u2', T0); w.serverNow = T0; for (const p of w.people) p.protectedUntil = 0; return w; }
 const U = (w: World): Person => findPerson(w, w.players.u2!.personId)!;
 const ok = (w: World, uid: string, a: unknown): { ok: boolean; msg: string } => applyAction(w, uid, a as never, T0) as never;
 beforeEach(() => { rules.reach = false; });
@@ -48,7 +48,7 @@ describe('v1.8 realm', () => {
     const m = migrate5(w); expect(m.schema).toBe(5); expect(m.people.map((p) => p.id)).toEqual(ids); expect(Math.max(...m.people.map((p) => p.hunger))).toBeLessThanOrEqual(40); expect(m.people.some((p) => p.prof === 'hayvanci')).toBe(true);
   });
   it('hunger and thirst drain continuously', () => {
-    const w = setup(); const u = U(w); u.hunger = 0; u.thirst = 0; u.money = 0; let now = T0;
+    const w = setup(); const u = U(w); u.hunger = 0; u.thirst = 0; u.onboardUntil = 0; u.money = 0; let now = T0;
     for (let i = 0; i < 6; i++) { now += 5 * 60_000 / 24; touchPlayer(w, 'u2', now); touchPlayer(w, 'f', now); advanceWorld(w, now); }
     expect(u.hunger + u.thirst).toBeGreaterThan(5);
   });

@@ -18,9 +18,9 @@ function run(w: World, days: number, start = T0, online = true): number {
 const npc = (w: World, prof: string): Person => w.people.find((p) => p.prof === prof && !p.playerId)!;
 
 describe('clock & speed', () => {
-  it('one game day takes 6 real minutes at 1x; only the Kayzer changes speed', () => {
-    expect(DAY_MS).toBe(360_000);
-    const w = setup(); joinWorld(w, 'u2', 'Ali', 'hamal', false, T0);
+  it('one game day takes 20 real minutes at 1x (day hours 60 s, night hours 30 s); only the Kayzer changes speed', () => {
+    expect(DAY_MS).toBe(1_200_000);
+    const w = setup(); joinWorld(w, 'u2', 'Alparslan', 'hamal', false, T0);
     expect(applyAction(w, 'u2', { t: 'setSpeed', speed: 2 }, T0).ok).toBe(false);
     expect(applyAction(w, 'f', { t: 'setSpeed', speed: 2 }, T0).ok).toBe(true);
     expect(w.speed).toBe(2);
@@ -29,19 +29,21 @@ describe('clock & speed', () => {
 });
 
 describe('production chains', () => {
-  it('a baker turns 20 wheat into ~40 bread; a farmer makes ~30 wheat', () => {
+  it('v2.0.1 chain: a farmer makes ~30 wheat, the miller 50 wheat → 50 flour, the baker 20 flour → ~40 bread', () => {
     const w = setup();
     const f = npc(w, 'ciftci'); f.health = 100; f.xp = 200; f.inv.alet = 0; const b0 = f.inv.bugday; produce(w, f);
     const made = f.inv.bugday + w.listings.filter((l) => l.sellerId === f.id && l.good === 'bugday').reduce((s, l) => s + l.qty, 0) - b0;
     expect(made).toBeGreaterThanOrEqual(25);
-    const b = npc(w, 'firinci'); b.health = 100; b.xp = 200; b.inv.bugday = 20; b.inv.alet = 0;
+    const m = npc(w, 'degirmenci'); m.health = 100; m.xp = 200; m.inv.bugday = 50; m.inv.alet = 0; m.inv.un = 0; produce(w, m);
+    const flour = m.inv.un + w.listings.filter((l) => l.sellerId === m.id && l.good === 'un').reduce((s, l) => s + l.qty, 0); expect(flour).toBeGreaterThanOrEqual(45); expect(m.inv.bugday).toBe(0);
+    const b = npc(w, 'firinci'); b.health = 100; b.xp = 200; b.inv.un = 20; b.inv.alet = 0;
     produce(w, b);
     const bread = b.inv.ekmek + w.listings.filter((l) => l.sellerId === b.id && l.good === 'ekmek').reduce((s, l) => s + l.qty, 0);
-    expect(bread).toBeGreaterThanOrEqual(34); expect(b.inv.bugday).toBe(0);
+    expect(bread).toBeGreaterThanOrEqual(34); expect(b.inv.un).toBe(0);
   });
-  it('without wheat the baker makes no bread', () => {
-    const w = setup(); w.listings = w.listings.filter((l) => l.good !== 'bugday');
-    const b = npc(w, 'firinci'); b.inv.bugday = 0; b.inv.ekmek = 0; produce(w, b);
+  it('without flour the baker makes no bread', () => {
+    const w = setup(); w.listings = w.listings.filter((l) => l.good !== 'un');
+    const b = npc(w, 'firinci'); b.inv.un = 0; b.inv.ekmek = 0; produce(w, b);
     expect(w.listings.filter((l) => l.sellerId === b.id && l.good === 'ekmek').length).toBe(0);
   });
 });
@@ -119,7 +121,7 @@ describe('nature', () => {
 
 describe('economy safeguards', () => {
   it('buy-then-resell the same day is refused', () => {
-    const w = setup(); joinWorld(w, 'u2', 'Ali', 'hamal', false, T0); const me = findPerson(w, w.players.u2!.personId)!; me.money = 200; me.inv.ekmek = 0;
+    const w = setup(); joinWorld(w, 'u2', 'Alparslan', 'hamal', false, T0); const me = findPerson(w, w.players.u2!.personId)!; me.money = 200; me.inv.ekmek = 0;
     w.listings.push({ id: 'Lx', sellerId: npc(w, 'firinci').id, good: 'ekmek', qty: 10, price: 1, market: 'gida' });
     const r = applyAction(w, 'u2', { t: 'buy', good: 'ekmek', qty: 5 }, T0); expect(r.ok).toBe(true);
     expect(applyAction(w, 'u2', { t: 'sell', good: 'ekmek', qty: 5, price: 5 }, T0).ok).toBe(false);
@@ -129,7 +131,7 @@ describe('economy safeguards', () => {
     expect(Math.abs(totalMoney(w) - m0)).toBeLessThan(1);
     for (const g of GOODS) { expect(w.prices[g]).toBeLessThanOrEqual(BASE_PRICE[g] * 5 + 0.01); expect(w.prices[g]).toBeGreaterThan(0); }
     expect(w.treasury).toBeGreaterThan(2000);
-    expect(w.people.length).toBeGreaterThan(90);
+    expect(w.people.length).toBeGreaterThan(60); /* v2.0.1: 220 days = 44 years → old-age deaths are real now */
     expect(w.people.filter((p) => p.health >= 50).length / w.people.length).toBeGreaterThan(0.7);
   }, 60_000);
 });

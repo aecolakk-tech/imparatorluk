@@ -1,5 +1,5 @@
 /* Headless world simulation: node smoke test of ~200 game days with a "sensible Kayzer" policy. */
-import { createWorld, joinWorld, advanceWorld, touchPlayer, applyAction, totalMoney, DAY_MS, naipPetitions, sanction } from '../src/sim/index';
+import { createWorld, joinWorld, advanceWorld, touchPlayer, applyAction, totalMoney, hourMs, naipPetitions, sanction } from '../src/sim/index';
 import type { World } from '../src/sim/index';
 
 export function runSim(days = 200, seed = 7, policy: 'sensible' | 'naip' | 'tyrant' = 'sensible'): { w: World; report: string[]; moneyDrift: number } {
@@ -12,7 +12,7 @@ export function runSim(days = 200, seed = 7, policy: 'sensible' | 'naip' | 'tyra
   let lastT = w.treasury;
   for (let d = 0; d < days; d += 1) {
     for (let h = 0; h < 24; h += 1) {
-      now += DAY_MS / 24;
+      now += hourMs(w); // v2.0.1: hours differ in length (night runs faster)
       if (policy !== 'naip') touchPlayer(w, 'founder', now); // naip policy: the Kayzer never shows up
       if (policy === 'naip' || d % 3 === 0) touchPlayer(w, 'friend', now);
       advanceWorld(w, now);
