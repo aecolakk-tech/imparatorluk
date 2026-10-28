@@ -1,4 +1,7 @@
 import { cleanLook, lookFromSeeds, TERZI_PRICE, BERBER_PRICE } from './look';
+import { rebuild, nameEmpire } from './events3';
+import { buyArm, kislaKit, draw, stash, searchPerson, armsLine, ARM_LABEL } from './arms';
+import { answerForeign, recruit, ransom, RECRUIT_MAX } from './events2';
 import { callWitness } from './alibi';
 import { ek } from './tr';
 import { moveIn, goInside, leaveHome, atHomeSafe } from './housing';
@@ -101,7 +104,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
   const me = findPerson(w, pl.personId); if (!me) return no('Karakter bulunamadı.');
   const isKayzer = (ww: World, p: Person): boolean => canRule(ww, p, now, ONLINE_WINDOW_MS);
   if ((me.homeUntil ?? 0) > now && !['goHome', 'setSpeed', 'setGoal', 'petition', 'answerProposal', 'defense', 'callWitness', 'restCase'].includes(a.t)) leaveHome(me); // any other action = you step outside
-  const jailedOk: Action['t'][] = ['petition', 'eat', 'divorce', 'answerProposal', 'defense', 'callWitness', 'restCase', 'offerBribe', 'setSpeed', 'setGoal'];
+  const jailedOk: Action['t'][] = ['petition', 'eat', 'useItem', 'seenNews', 'nameEmpire', 'divorce', 'answerProposal', 'defense', 'callWitness', 'restCase', 'offerBribe', 'setSpeed', 'setGoal'];
   const cellRising = (a.t === 'orgAct' && a.deed === 'ayaklanma') || (a.t === 'customize' && a.where === 'ilk'); // v1.9.6: a jailed leader can still give the signal
   if (me.jailedDays > 0 && !jailedOk.includes(a.t) && !cellRising) return no('Zindandasınız; şimdilik sadece dilekçe yazabilirsiniz.');
   const exileOk: Action['t'][] = [...jailedOk, 'restore', 'buy', 'sell', 'marry', 'haveChild', 'school', 'cure'];
@@ -449,6 +452,23 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       if (!transfer(w, me.id, 'saray', BERBER_PRICE, 'berber')) return no(`Berber ${BERBER_PRICE} Dinar ister.`);
       me.look = nl; return ok(`Berber işini bitirdi (${BERBER_PRICE} D).`);
     }
+    case 'buyArm': { const e = buyArm(w, me, a.item, a.qty ?? 1); return e ? no(e) : ok(`${ARM_LABEL[a.item]} alındı ve kaydınıza işlendi (${armsLine(me)}).`); }
+    case 'kislaKit': { const e = kislaKit(w, me); return e ? no(e) : ok(`Kışla teçhizatı envanterinize kondu: ${armsLine(me)}.`); }
+    case 'drawWeapon': { const e = draw(me, a.kind); return e ? no(e) : ok(a.kind ? `${ARM_LABEL[a.kind]} çekildi. Dikkat: sivilseniz bekçi görürse el koyar ve ceza keser.` : 'Silah kınına kondu.'); }
+    case 'stash': { const e = stash(w, me, a.item as never, a.qty, a.toChest); return e ? no(e) : ok(a.toChest ? 'Sandığa kondu.' : 'Sandıktan alındı.'); }
+    case 'useItem': {
+      if (a.good === 'su') { if (me.inv.su <= 0) return no('Envanterde su yok.'); me.inv.su -= 1; me.drinks += 1; me.thirst = clamp(me.thirst - 35); return ok(`Su içtiniz (susuzluk ${Math.round(me.thirst)}).`); }
+      if (!['ekmek', 'et', 'balik', 'yumurta', 'sut'].includes(a.good)) return no('Bu yenmez.');
+      if ((me.inv[a.good] ?? 0) <= 0) return no('Envanterde yok.'); if (me.hunger < 10) return no('Karnınız tok.');
+      me.inv[a.good] -= 1; me.meals += 1; me.hunger = clamp(me.hunger - 35); me.mood = clamp(me.mood + 0.5); return ok(`${GOOD_LABEL[a.good]} yediniz (açlık ${Math.round(me.hunger)}).`);
+    }
+    case 'searchPerson': { if (me.prof !== 'bekci') return no('Sadece bekçi arama yapar.'); const t = findPerson(w, a.personId); if (!t || t.id === me.id) return no('Geçersiz.'); return ok(searchPerson(w, me, t, now)); }
+    case 'foreignAnswer': { if (!isKayzer(w, me)) return no('Kararı Kayzer verir.'); return ok(answerForeign(w, a.choice)); }
+    case 'recruit': { if (!isKayzer(w, me)) return no('Asker toplamayı Kayzer emreder.'); const n = num(Math.min(Number(a.n) || 0, RECRUIT_MAX), 1, RECRUIT_MAX); if (n === null) return no('Geçersiz.'); return ok(recruit(w, n)); }
+    case 'ransom': { if (!isKayzer(w, me)) return no('Fidyeyi Kayzer öder.'); return ok(ransom(w, a.personId)); }
+    case 'seenNews': { (w.whatsNew ??= {})[playerId] = String(a.v).slice(0, 10); return ok(''); }
+    case 'rebuild': return ((r) => /yeniden yapıldı/.test(r) ? ok(r) : no(r))(rebuild(w, me, a.buildingId));
+    case 'nameEmpire': { if (!isKayzer(w, me) && !pl.founder) return no('Devlete adı Kayzer koyar.'); const e = nameEmpire(w, me, String(a.name ?? '')); return e ? no(e) : ok(`Devletin adı: ${w.empireName}`); }
     case 'callWitness': { const c = w.cases.find((x) => x.id === a.caseId); if (!c) return no('Dava yok.'); const e = callWitness(w, c, me, String(a.personId), now); return e ? no(e) : ok('Tanık çağrıldı.'); }
     case 'witness': {
       const c = w.cases.find((x) => x.id === a.caseId && x.stage !== 'kapandi'); if (!c || c.accusedId === me.id) return no('Dava yok.');

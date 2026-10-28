@@ -1,4 +1,19 @@
 export const RULES: [string, string[]][] = [
+  ['⚔ Silahlar, çanta ve sandık (v2.0)', [
+    'Silahlar: Kılıç (60 D, güçlü yakın dövüş), Hançer (25 D, ucuz, hafif, zayıf), Yay (45 D, uzaktan; her atış 1 ok), Ok (1 D/adet, kılıçtan zayıf vurur), Kalkan (30 D, her darbeden 15 can keser). Sadece Demirci (Zanaat Atölyesi) sabit fiyatla satar; her silah adınıza kaydedilir.',
+    'Asker ve bekçiler Kışla’dan 2 günde bir bedava kılıç + kalkan + yay + 20 ok alır.',
+    'Silahsız yaralayamaz, öldüremezsiniz (sadece itip kakarsınız). Saldırmadan önce Menü → Çanta’dan silahı ÇEKİN. Öldürmek iki darbe ister: ilk darbe yaralar, yaralı (can ≤ 65) birine ikinci darbe öldürür.',
+    'Sivilken çekili silahla gezmek suçtur: yakındaki bekçi el koyar ve 15 D ceza keser. Kınındaki kayıtlı silah yasaldır; kayıtsız silaha el konur. Evdeki sandıktakiler güvendedir. Taşıma sınırı 10 kg.',
+    'Çanta: ekmek, et, balık, su gibi şeyleri çantadan yiyip içersiniz. Ev sandığına eşya koyup alabilirsiniz (evinizde olmalısınız). Ölünce silahlar ev sandığına düşer.',
+  ]],
+  ['🗡 Büyük olaylar (v2.0)', [
+    'Eşkıya baskını: sabah “Bu gece silahlı eşkıya bekleniyor” uyarısı gelir. 22:00–06:00 arası 10 kılıçlı/yaylı eşkıya dışarıdakileri soyar; NPC’ler evde kalır. Oyuncular soyulur ve çoğunlukla ağır yaralanır (canı çok düşükse ölebilir). Asker ve bekçiler savaşır; öldürülen eşkıyanın çaldığı para hazineye döner.',
+    'Yabancı devlet: elçi çok yüksek haraç ister ya da vergiye bağlanmayı (20 gün, her gün hazinenin %3’ü). Kayzer reddederse 3 gün sonra düşman gemilerle nehirden çıkar. Sayaç sadece biri çevrimiçiyken ilerler. Bu sürede Kayzer en fazla 15 ücretli asker toplar (günde 6 D, savaştan sonra terhis). Düşmanın hepsi ölürse zafer ve ganimet; askerlerimizin hepsi düşerse tazminat, ambardan buğday ve en fazla 5 esir. Esirler Saray’dan fidyeyle (40 D) geri alınır. Her savaş bir sonrakini zorlaştırır; iki savaş arası en az 30 gün.',
+    'Kervanlar: develer Pazar’a, Venedik gemisi Liman’a gelir ve bir gün kalır. Şehirde kıt olan mal pahalı, diğerleri piyasadan ucuz satılır; her satıştan hazineye gümrük girer.',
+    'Yangın: bina 2 saat yanar, sonra çöker. İçerideyseniz hemen dışarı çıkın. Çökünce sahibi mülkü kaybeder, sandık yanar; harabe 150 D ile yeniden yapılır (yapan sahibi olur).',
+    'Salgın: hastalık 2 adım yakındakilere bulaşır. Hastaysanız üstte 🦠 yanıp söner; her saat can kaybedersiniz. Hekimhane’de tedavi olun. NPC’ler kendileri hekime gider.',
+    'Her olay için açıklamalı ve seçenekli bir açılır pencere çıkar.',
+  ]],
   ['Yönetim ekranı ve özel kanunlar', [
     'Tahttaki Kayzer (cumhuriyette seçilmiş Başkan) alttaki 👑/🗽 düğmesiyle Divan ekranını açar: hazine dökümü, pazar ve ambar, ordu/isyan haritası, kanunlar, dilekçeler, görevliler, raporlar, aile ve varis.',
     'Kanun yazıcı: satış vergisi, baş vergisi, mala özel vergi, narh (tavan fiyat), yasak, sokağa çıkma yasağı, zorunlu hizmet, üretim desteği, servet vergisi eşiği ve sert ceza. Her kanun için “Etkiyi tahmin et” sonucu gösterir.',

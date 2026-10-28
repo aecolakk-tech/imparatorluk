@@ -1,4 +1,5 @@
 import { energyHour, housingDay } from './housing';
+import { bigEventsHour } from './bigevents';
 import { goalsDay } from './goals';
 import type { Person, World } from './types';
 import { startTrial } from './v16';
@@ -77,6 +78,7 @@ export function stepHour(w: World, now: number): void {
   }
   needsDrain(w, (p) => eatMeal(w, p), (p) => drinkWater(w, p)); lifeHour(w); energyHour(w, w.serverNow ?? w.lastTickAt);
   chatHour(w, now, (p) => isOnline(w, p.playerId, now, ONLINE_WINDOW_MS));
+  bigEventsHour(w, now);
   if (w.hour === 10) campaign(w, now);
   switch (w.hour) {
     case 2: for (const p of w.people) decide(w, p); break;
@@ -114,7 +116,7 @@ function sellGazette(w: World): void {
 function salaries(w: World): void {
   let unpaid = 0;
   for (const p of w.people) {
-    if (!isState(p) || p.jailedDays > 0) continue;
+    if (!isState(p) || p.jailedDays > 0 || p.recruit) continue; // v1.9.9: recruits get their own capped pay
     const s = (w.salaries[p.prof] ?? 0) * (p.prof === 'asker' ? saraykorBonus(w) : 1);
     if (s <= 0) continue;
     if (transfer(w, 'saray', p.id, s, 'maaş')) { p.incomeToday += s; p.loyalty = clamp(p.loyalty + 0.3); }

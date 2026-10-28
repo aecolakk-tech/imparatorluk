@@ -1,4 +1,5 @@
 import { ek } from './tr';
+import { dropArms } from './arms';
 import { freeSpots, houses } from './housing';
 /**
  * Marriage & family: proposals, weddings, shared household, children (only above a prosperity threshold),
@@ -264,6 +265,7 @@ export function growUp(w: World, c: Child): Person {
 
 /** Death with inheritance: spouse gets half, children share the rest (minors' share kept by the surviving parent / the state). */
 export function die(w: World, p: Person, text: string): void {
+  dropArms(w, p);
   const heirs = childrenOf(w, p.id); const sp = findPerson(w, p.spouse);
   const adults = heirs.filter((h) => h.adult).map((h) => findPerson(w, h.id)!).filter(Boolean);
   if (p.money > 20) transfer(w, p.id, 'saray', Math.round(p.money * 0.1 * 100) / 100, 'miras vergisi (%10)');

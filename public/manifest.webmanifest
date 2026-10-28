@@ -1,2 +1,2 @@
-{ "name": "İmparatorluk", "short_name": "İmparatorluk", "lang": "tr", "start_url": "./", "scope": "./", "display": "fullscreen", "orientation": "landscape", "background_color": "#1b1410", "theme_color": "#7a1c24",
+{ "name": "Medieval Empire", "short_name": "Medieval Empire", "lang": "tr", "start_url": "./", "scope": "./", "display": "fullscreen", "orientation": "landscape", "background_color": "#1b1410", "theme_color": "#7a1c24",
   "icons": [ { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }, { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" } ] }

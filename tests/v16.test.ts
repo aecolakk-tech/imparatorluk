@@ -43,6 +43,9 @@ describe('murder → corpse → report → bekçi → case → trial → verdict
     const w = setup(); const me = findPerson(w, w.players.u2!.personId)!; me.protectedUntil = 0;
     const v = w.people.find((p) => !p.playerId && p.prof === 'hamal' && p.id !== me.id)!; v.protectedUntil = 0;
     let now = T0 + 1000; w.serverNow = now;
+    expect(act(w, 'u2', { t: 'kill', personId: v.id }, now).msg).toMatch(/Silahsız/); // v2.0: no weapon, no kill
+    me.arms = { kilic: 1 }; me.drawn = 'kilic';
+    act(w, 'u2', { t: 'kill', personId: v.id }, now); expect(w.people.includes(v)).toBe(true); expect(v.wounded).toBe(true); // first blow wounds
     const r = act(w, 'u2', { t: 'kill', personId: v.id }, now); expect(r.ok).toBe(true);
     expect(w.people.includes(v)).toBe(false); const co = w.corpses![0]!; expect(co.stage).toBe('yerde'); expect(co.killerId).toBe(me.id);
     now += 60_000; touchPlayer(w, 'u2', now); touchPlayer(w, 'f', now); realtime(w, now); expect(co.stage).toBe('ihbar'); expect(co.bekciId).toBeTruthy();

@@ -191,3 +191,10 @@ body.inside-home canvas { filter: brightness(0.55) saturate(0.7); transition: fi
   .look-modal .look-prev { width:80px !important; height:80px !important; }
   .look-modal .look-row { margin:2px 0; } .look-modal h2 { font-size:16px; margin:0 0 4px; }
 }
+/* v2.0 */
+.stat.pulse { animation: pulseRed 1.2s ease-in-out infinite; }
+@keyframes pulseRed { 0%,100% { box-shadow: 0 0 0 0 rgba(220,60,60,.0); } 50% { box-shadow: 0 0 0 4px rgba(220,60,60,.55); } }
+.inv-row { align-items: center; gap: 8px; flex-wrap: wrap; }
+.inv-row button { min-height: 38px; }
+.whatsnew .box .msg { font-size: 14px; line-height: 1.35; }
+.chip.warn { background: #6a2a20; color: #ffd9cf; padding: 2px 8px; border-radius: 10px; }

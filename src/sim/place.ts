@@ -153,6 +153,7 @@ export function placePeople(w: World, now: number): Placed[] {
     else if (playerWalking(w, p, now)) { const r = walkPos(p.walk!, now); q = { p, x: r.pt.x, y: r.pt.y, moving: r.moving, visible: true, dir: r.dir }; }
     else q = scheduled(w, p, now, c);
     if (p.exiledDays > 0) q.visible = false;
+    if ((w.raid?.phase === 'gece' || w.foreign?.landed) && (!p.playerId || p.npc) && p.prof !== 'asker' && p.prof !== 'bekci' && p.jailedDays === 0) { const hb = c.B.get(p.home); if (hb) { q.x = hb.door.x + 0.5; q.y = hb.door.y + 0.4; } q.visible = false; q.moving = false; } // v1.9.9: NPCs hide at home
     if (w.isyan && !playerWalking(w, p, now)) {
       if (w.isyan.rebels.includes(p.id)) { const at = w.isyan.occupied[w.isyan.occupied.length - 1] ?? 'pazar'; const d = c.door(at, p, 3); q.x = d.x + Math.sin(now / 2300 + hash(p.id)) * 2; q.y = d.y; q.visible = true; q.moving = true; }
       else if (p.prof === 'asker') { const d = c.door('saray', p, 3); q.x = d.x; q.y = d.y + 1; q.visible = true; q.moving = false; }
@@ -162,6 +163,7 @@ export function placePeople(w: World, now: number): Placed[] {
   // map conversations: b walks up to a, both stand and talk
   for (const tk of w.talks ?? []) {
     if (!tk.at || now - tk.at > TALK_MS || now < tk.at) continue;
+    if (w.raid?.phase === 'gece' || w.foreign?.landed) continue; // v1.9.9: nobody chats on the street during a raid/war
     const a = out.get(tk.a), b = out.get(tk.b); if (!a || !b || a.p.jailedDays || b.p.jailedDays) continue;
     if (playerWalking(w, a.p, now) || playerWalking(w, b.p, now)) continue;
     const k = Math.min(1, (now - tk.at) / 6000);

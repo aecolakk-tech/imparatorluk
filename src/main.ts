@@ -29,6 +29,7 @@ import { CRIME_LABEL } from './sim/ai';
 import type { Corpse, CourtCase } from './sim/types';
 import { avatar as av2 } from './ui/panels';
 import { witnessCandidates, hLabel } from './sim/alibi';
+import { inventoryBody, armsShop, personExtras, eventOptions, eventTitle, whatsNewModal, empireNameModal, VERSION } from './ui/v2';
 
 const app = document.getElementById('app')!;
 const be: Backend = makeBackend();
@@ -68,7 +69,7 @@ function loginScreen(): void {
       start();
     };
     box.replaceChildren(
-      h('h1', { style: 'margin:0;color:#e8c14a' }, '👑 İmparatorluk'),
+      h('h1', { style: 'margin:0;color:#e8c14a' }, '👑 Medieval Empire'),
       h('div', { class: 'muted' }, 'Davetlilere açık, ortak ve hiç durmayan bir dünya.'),
       h('div', { class: 'row', style: 'margin-top:10px' }, h('button', { class: mode === 'giris' ? 'primary' : '', onclick: () => { mode = 'giris'; render(); } }, 'Giriş'), h('button', { class: mode === 'kayit' ? 'primary' : '', onclick: () => { mode = 'kayit'; render(); } }, 'Davetle kayıt')),
       ...(mode === 'kayit' ? [h('label', {}, 'Davet şifresi (kurucudan alın)'), access,
@@ -167,7 +168,7 @@ function rerenderSheet(force = false): void {
 function closeSheet(): void { const s = sheet; if (s) { s.classList.add('leave'); setTimeout(() => s.remove(), lowGfx ? 0 : 200); } sheet = null; sheetRender = null; selected = null; }
 function openPersonSheet(id: string): void {
   selected = id;
-  openSheet(() => { const p = findPerson(world!, id); return p ? personCard(ctx(), p) : h('div', {}, 'Kişi yok.'); });
+  openSheet(() => { const p = findPerson(world!, id); if (!p) return h('div', {}, 'Kişi yok.'); const card = personCard(ctx(), p); const x = personExtras(ctx(), p); if (x) card.prepend(x); return card; });
 }
 
 function modal(content: HTMLElement, onClose?: () => void): void {
@@ -237,6 +238,9 @@ function renderHud(): void {
       ruler ? chip('castle', fmt(w.treasury), 'Hazine') : '',
       ruler && w.regime === 'imparatorluk' ? chip('banner', String(Math.round(w.cumhuriyet)), 'Cumhuriyet isteği', w.cumhuriyet > 50 ? 'warn' : '') : '',
       !ruler ? chip('crown', w.regime === 'cumhuriyet' ? (k?.name ?? 'seçim') : (k?.name ?? 'Naip'), 'Devletin başı') : '',
+      m?.infected ? h('span', { class: 'stat warn pulse', title: 'Salgına yakalandınız', onclick: () => { toast('🦠 Hastasınız! Her saat can kaybediyorsunuz ve yakınınızdakilere bulaştırırsınız. Hekimhane’ye gidip tedavi olun.'); const b = world?.buildings.find((x) => x.id === 'hekimhane'); if (b) { walkTo(doorSpot(b)); openSheet(() => bPanel(b)); } } }, '🦠 Hastasınız → Hekim') : '',
+      m?.drawn ? h('span', { class: 'stat warn', title: 'Çekili silah', onclick: () => void send({ t: 'drawWeapon', kind: null }) }, `⚔ ${({ hancer: 'Hançer', kilic: 'Kılıç', yay: 'Yay' } as Record<string, string>)[m.drawn]} çekili (kınına koy)`) : '',
+      w.empireName ? chip('crown', w.empireName, 'Devletin adı') : '',
       ...events.slice(0, 1)),
     h('div', { class: 'hud-r' },
       ruler ? h('span', { class: 'speed seg', title: 'Oyun hızı (Kayzer, her yerden)' }, ...[0.5, 1, 2].map((s) => h('button', { class: `mini${w.speed === s ? ' on' : ''}`, onclick: () => { void send({ t: 'setSpeed', speed: s }); } }, `${s === 0.5 ? '½' : s}x`))) : '',
@@ -273,7 +277,7 @@ function alertPop(icon: string, text: string, key: string): void {
 }
 
 // ---------------- one menu with sections ----------------
-type Section = 'yap' | 'hedef' | 'cemiyet' | 'soylu' | 'ben' | 'mesaj' | 'divan' | 'aile' | 'gazete' | 'ayar' | 'saray' | 'meclis' | 'tarih' | 'olay' | 'kural';
+type Section = 'canta' | 'yap' | 'hedef' | 'cemiyet' | 'soylu' | 'ben' | 'mesaj' | 'divan' | 'aile' | 'gazete' | 'ayar' | 'saray' | 'meclis' | 'tarih' | 'olay' | 'kural';
 let section: Section = (localStorage.getItem('imp-sec') as Section) || 'yap';
 function badges(): Partial<Record<Section, number>> {
   const w = world; const m = me(); if (!w || !m) return {};
@@ -290,13 +294,14 @@ function openMenu(sec: Section): void {
   selected = null;
   openSheet(() => {
     const w = world!; const m = me(); const ruler = !!m && w.kayzerId === m.id; const b = badges();
-    const tabs: [Section, string, string][] = [['yap', 'bolt', 'Yap'], ['ben', 'person', 'Ben'], ['hedef', 'goal', 'Hedef'], ['cemiyet', 'candle', 'Cemiyet'], ...(ruler ? [['soylu', 'noble', 'Soylular'] as [Section, string, string], ['divan', w.regime === 'cumhuriyet' ? 'banner' : 'crown', w.regime === 'cumhuriyet' ? 'Makam' : 'Divan'] as [Section, string, string]] : []), ...(m?.meclis ? [['meclis', 'scales', 'Meclis'] as [Section, string, string]] : []), ['mesaj', 'talk', 'Mesaj'], ['aile', 'family', 'Aile'], ['gazete', 'scroll', 'Haberler'], ['ayar', 'cog', 'Ayarlar']];
+    const tabs: [Section, string, string][] = [['yap', 'bolt', 'Yap'], ['canta', 'bag', 'Çanta'], ['ben', 'person', 'Ben'], ['hedef', 'goal', 'Hedef'], ['cemiyet', 'candle', 'Cemiyet'], ...(ruler ? [['soylu', 'noble', 'Soylular'] as [Section, string, string], ['divan', w.regime === 'cumhuriyet' ? 'banner' : 'crown', w.regime === 'cumhuriyet' ? 'Makam' : 'Divan'] as [Section, string, string]] : []), ...(m?.meclis ? [['meclis', 'scales', 'Meclis'] as [Section, string, string]] : []), ['mesaj', 'talk', 'Mesaj'], ['aile', 'family', 'Aile'], ['gazete', 'scroll', 'Haberler'], ['ayar', 'cog', 'Ayarlar']];
     if (!tabs.some((t) => t[0] === section)) section = 'yap';
     const bar_ = h('div', { class: 'tabs' }, ...tabs.map(([id, icon, label]) => h('button', { class: `tab${section === id ? ' on' : ''}`, onclick: () => openMenu(id) }, ic(icon), h('span', {}, label), b[id] ? h('span', { class: 'badge' }, String(b[id])) : '')));
     let body: HTMLElement;
     switch (section) {
       case 'yap': { body = quickPanel(ctx()); const mm = me(); if (mm && (mm.inv.sut > 0 || mm.inv.yumurta > 0)) body.append(h('div', { class: 'row' }, mm.inv.sut > 0 ? h('button', { onclick: () => void send({ t: 'drinkMilk' }) }, ic('milk'), ` Süt iç (${mm.inv.sut})`) : '', mm.inv.yumurta > 0 ? h('button', { onclick: () => void send({ t: 'eatEgg' }) }, ic('egg'), ` Yumurta ye (${mm.inv.yumurta})`) : '')); if (mm && mm.home && mm.home.startsWith('ev')) body.append(h('div', { class: 'row' }, h('button', { onclick: () => void doAct({ t: 'goHome', sleep: true }) }, ic('moon'), ' Eve git, uyu'))); else if (mm && !mm.home) body.append(h('div', { class: 'card muted' }, 'Eviniz yok. Boş yeri olan bir eve dokunun: yer satın alın ya da kiralayın.'));
         if ((mm?.animals?.at ?? 0) > 0) body.append(mm!.riding ? h('div', { class: 'row' }, h('button', { onclick: () => void send({ t: 'ride', on: false }) }, ic('horse'), ' Attan in')) : h('div', { class: 'muted' }, 'Ata binmek için haritada atınıza (üstünde mavi işaret) dokunun.')); break; }
+      case 'canta': body = inventoryBody(ctx()); break;
       case 'ben': body = m ? personCard(ctx(), m) : h('div', {}, '—'); break;
       case 'mesaj': body = chatBody(); break;
       case 'hedef': body = goalsBody(); break;
@@ -313,6 +318,7 @@ function openMenu(sec: Section): void {
       default: body = h('div', { class: 'stack' }, h('h2', {}, 'Ayarlar'),
         h('div', { class: 'row' }, h('button', { onclick: () => { lowGfx = !lowGfx; localStorage.setItem('imp-lowgfx', lowGfx ? '1' : '0'); document.body.classList.toggle('low', lowGfx); dispatchEvent(new Event('resize')); rerenderSheet(true); } }, lowGfx ? 'Düşük grafik: AÇIK' : 'Düşük grafik: kapalı'), h('button', { onclick: () => { closeSheet(); guide(0); } }, 'Rehber')),
         be.session()?.founder ? h('button', { onclick: openAdmin }, 'Kurucu paneli') : '',
+        h('div', { class: 'row' }, h('button', { onclick: () => app.append(whatsNewModal(() => undefined)) }, `✨ Neler yeni? (${VERSION})`), be.session()?.founder || world?.kayzerId === me()?.id ? h('button', { onclick: () => app.append(empireNameModal(nameSend, world?.empireName)) }, '👑 Devletin adını değiştir') : ''),
         h('h3', {}, 'Kurallar ve kullanım'), ...RULES.map(([t, ls]) => h('details', {}, h('summary', {}, t), ...ls.map((l) => h('div', { class: 'msg' }, l)))),
         h('h3', {}, 'Emeği geçenler'), h('div', { class: 'muted' }, CREDITS),
         h('div', {}, h('button', { class: 'danger', onclick: () => { void be.logout().then(loginScreen); } }, 'Çıkış')));
@@ -326,6 +332,7 @@ function bPanel(b: import('./sim/types').Building): HTMLElement {
   if (b.id === 'saray' || b.id === 'okul') box.append(h('button', { onclick: () => openSheet(historyBody) }, '📖 Tarih Kitabı’nı oku'));
   if (b.id === 'ciftlik') box.append(farmBody());
   if (b.id === 'hayvan') box.append(animalMarketBody());
+  { const x = armsShop(ctx(), b); if (x) box.prepend(x); }
   return box;
 }
 function historyBody(): HTMLElement {
@@ -430,7 +437,7 @@ function goalsBody(): HTMLElement {
 
 function gazetteBody(): HTMLElement {
   {
-    const w = world!; const box = h('div', {}, h('h2', {}, '📜 İmparatorluk Gazetesi'), h('div', { class: 'muted' }, 'Kalemşörler ve Maecenas her gün yazar.'));
+    const w = world!; const box = h('div', {}, h('h2', {}, `📜 ${w.empireName ?? 'İmparatorluk'} Gazetesi`), h('div', { class: 'muted' }, 'Kalemşörler ve Maecenas her gün yazar.'));
     for (const g of [...w.gazette].reverse().slice(0, 10)) box.append(h('div', { class: 'card' }, h('b', {}, `Gün ${g.day}: ${g.headline}`), ...g.lines.map((l) => h('div', { class: 'muted' }, l)), ...(g.meclis?.length ? [h('div', { class: 'muted', style: 'margin-top:4px' }, '🏛 Meclis:'), ...g.meclis.map((l) => h('div', { class: 'muted' }, `• ${l}`))] : [])));
     if (!w.gazette.length) box.append(h('div', { class: 'muted' }, 'İlk sayı gün sonunda çıkacak.'));
     box.append(h('h3', {}, 'Bugün olanlar'), ...w.events.slice(-12).reverse().map((e) => h('div', { class: 'msg' }, `${String(e.hour).padStart(2, '0')}:00 ${e.text}`)));
@@ -620,7 +627,7 @@ async function tick(): Promise<void> {
     const mm = me(); if (localWalk && mm && mm.id === localWalk.id && gameNow() < walkEnd(localWalk.walk) + 15_000) mm.walk = localWalk.walk;
     if (first) { stat = buildStatic(world); const m = me(); const b = m ? world.buildings.find((x) => x.id === m.home) : undefined; if (b) { cam.x = b.x - canvas.width / (cam.z * T) / 2; cam.y = b.y - canvas.height / (cam.z * T) / 2; clampCam(); } }
     if (r.summary) modal(maecenas(r.summary));
-    renderDock(); events(first); trialPopup(); disasterPopup();
+    renderDock(); events(first); trialPopup(); disasterPopup(); v2Popups();
   } catch (e) { console.warn('heartbeat', e); } finally { ticking = false; }
 }
 
@@ -728,29 +735,30 @@ function openWitnessPicker(c: CourtCase): void {
 let disasterSeen = Number(localStorage.getItem('imp-disaster-seen') ?? '0'); let disasterFirst = true;
 /** v1.9.6: a disaster pops up for every online player, with vibration. */
 function disasterPopup(): void {
-  const d = world?.disaster; if (!d) { disasterFirst = false; return; }
-  if (disasterFirst) { disasterFirst = false; if (world!.day - d.day > 1) { disasterSeen = Math.max(disasterSeen, d.id); return; } }
-  if (d.id <= disasterSeen) return; disasterSeen = d.id; localStorage.setItem('imp-disaster-seen', String(d.id));
+  const w = world; if (!w) return;
+  const list = (w.notices?.length ? w.notices : w.disaster ? [w.disaster] : []);
+  if (disasterFirst) { disasterFirst = false; for (const d of list) if (w.day - d.day > 1) disasterSeen = Math.max(disasterSeen, d.id); }
+  const fresh = list.filter((d) => d.id > disasterSeen).slice(-3); if (!fresh.length) return;
+  disasterSeen = Math.max(...fresh.map((d) => d.id)); localStorage.setItem('imp-disaster-seen', String(disasterSeen));
   try { navigator.vibrate?.([300, 120, 300, 120, 300]); } catch { /* no vibration */ }
   sfx('drums');
-  const icon: Record<string, string> = { kuraklik: '☀️', salgin: '🦠', sel: '🌊', kitlik: '🍞', yangin: '🔥', kervan: '🐪', tehdit: '⚔️', zafer: '🏆', yenilgi: '💀' };
-  const title: Record<string, string> = { kervan: 'KERVAN GELDİ', tehdit: 'SINIRDA TEHLİKE', zafer: 'ZAFER', yenilgi: 'YENİLGİ' };
-  const w = world!; const m = me(); const ruler = !!m && w.kayzerId === m.id;
-  const close = (): void => el.remove();
-  const opts: HTMLElement[] = [];
-  if (d.kind === 'kervan' && w.caravan) {
-    const lim = w.buildings.find((b) => b.kind === 'liman');
-    const goods = w.listings.filter((l) => l.sellerId === 'dis' && l.qty > 0).map((l) => `${GOOD_LABEL[l.good]} ${l.qty} adet × ${fmt(l.price)} D`).join(' · ');
-    if (goods) opts.push(h('div', { class: 'muted' }, `Limanda: ${goods}`));
-    if (lim) opts.push(h('button', { class: 'primary', onclick: () => { close(); walkTo(doorSpot(lim)); openSheet(() => bPanel(lim)); } }, '🐪 Limana git, kervandan al'));
+  const m = me(); const ruler = !!m && w.kayzerId === m.id;
+  for (const d of fresh) {
+    const close = (): void => el.remove();
+    const opts = eventOptions(d.kind, { w, me: m, ruler, act: (a) => void doAct(a), goTo: (bid) => { const b = w.buildings.find((x) => x.id === bid); if (b) { walkTo(doorSpot(b)); openSheet(() => bPanel(b)); } } }, close);
+    const el = h('div', { class: 'modal disaster' }, h('div', { class: 'box' }, h('h2', {}, eventTitle(d.kind)), h('div', { class: 'card warn' }, h('b', {}, d.text)), ...opts, h('button', { class: opts.length ? '' : 'primary', onclick: close }, 'Anladım')));
+    app.append(el);
   }
-  if (d.kind === 'tehdit' && w.threat) {
-    if (ruler) opts.push(h('div', { class: 'row' }, h('button', { onclick: () => { close(); void doAct({ t: 'tribute', pay: true }); } }, `Haracı öde (${w.threat.demand} D)`), h('button', { class: 'danger', onclick: () => { close(); void doAct({ t: 'tribute', pay: false }); } }, '⚔️ Reddet, ordu savaşsın')));
-    else opts.push(h('div', { class: 'muted' }, 'Kararı Kayzer verir (Yönetim → haraç). Asker ya da bekçi olarak çalışmak ordunun gücüne katkı sağlar.'));
-  }
-  const el = h('div', { class: 'modal disaster' }, h('div', { class: 'box' }, h('h2', {}, `${icon[d.kind] ?? '⚠'} ${title[d.kind] ?? 'AFET!'}`), h('div', { class: 'card warn' }, h('b', {}, d.text)), ...opts, h('button', { class: opts.length ? '' : 'primary', onclick: close }, 'Anladım')));
-  app.append(el);
 }
+let newsShown = false; let namePrompted = false;
+/** v2.0: “Neler yeni?” once per player (server-tracked), and the Kayzer names the empire. */
+function v2Popups(): void {
+  const w = world; const m = me(); const s = be.session(); if (!w || !m || !s) return;
+  if (document.querySelector('.look-modal')) return;
+  if (!newsShown && w.whatsNew?.[s.playerId] !== VERSION) { newsShown = true; app.append(whatsNewModal(() => void be.act({ t: 'seenNews', v: VERSION } as never))); return; }
+  if (!namePrompted && !w.empireName && w.kayzerId === m.id && !document.querySelector('.whatsnew')) { namePrompted = true; app.append(empireNameModal(nameSend)); }
+}
+async function nameSend(name: string): Promise<string | null> { const r = await be.act({ t: 'nameEmpire', name } as never); if (!r.ok) return r.msg; await tick(); return null; }
 function trialPopup(): void {
   const w = world; const m = me(); if (!w || !m) return;
   const c: CourtCase | undefined = w.cases.find((x) => x.trial && (x.accusedId === m.id || x.trial.judgeId === m.id || x.trial.prosecutorId === m.id || x.trial.blamedId === m.id || (x.eyeIds ?? []).includes(m.id) || (x.witnesses ?? []).some((v) => v.id === m.id) || (x.called ?? []).some((v) => v.id === m.id)) && (!x.trial.done || (!trialSeen.has(tKey(x.id)) && x.stage !== 'kapandi' ? true : !trialSeen.has(tKey(x.id)) && gameNow() - (x.trial.doneAt ?? 0) < 120_000)) && !(x.trial.done && x.verdict === 'dusuruldu' && x.sentence?.startsWith('Aynı olay')));
@@ -784,7 +792,7 @@ void be.restore().then((s) => (s ? start() : loginScreen()));
 
 // ---- v1.9 landscape: rotate overlay (phones in portrait) + low-graphics class ----
 document.body.classList.toggle('low', lowGfx);
-document.body.append(h('div', { class: 'rotate-ov' }, ic('phone'), h('b', {}, 'Telefonu yatay çevirin'), h('div', { class: 'muted' }, 'İmparatorluk yatay ekranda oynanır.')));
+document.body.append(h('div', { class: 'rotate-ov' }, ic('phone'), h('b', {}, 'Telefonu yatay çevirin'), h('div', { class: 'muted' }, 'Medieval Empire yatay ekranda oynanır.')));
 try { void (screen.orientation as unknown as { lock?: (o: string) => Promise<void> }).lock?.('landscape').catch(() => {}); } catch { /* only in fullscreen / installed PWA */ }
 // ---- v1.8 PWA: service worker (static only) + "Ana ekrana ekle" hint ----
 if ('serviceWorker' in navigator && location.protocol === 'https:') void navigator.serviceWorker.register('./sw.js').catch(() => {});

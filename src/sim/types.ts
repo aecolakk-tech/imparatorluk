@@ -17,7 +17,7 @@ export type BuildingKind =
 export interface Building {
   id: string;
   name: string;
-  kind: BuildingKind; ownerId?: string;
+  kind: BuildingKind; ownerId?: string; burned?: { day: number; prevOwner: string | null };
   x: number; y: number; w: number; h: number; // tiles
   door: { x: number; y: number };
   market?: boolean;
@@ -75,6 +75,8 @@ export interface Person {
   taxDue: number; smuggle: boolean;
   nightOut: boolean;
   bought?: Partial<Record<Good, number>>; // bought today – cannot be resold the same day
+  arms?: Partial<Record<'hancer' | 'kilic' | 'yay' | 'ok' | 'kalkan', number>>; drawn?: 'hancer' | 'kilic' | 'yay' | null; kitDay?: number; armsFines?: number; // v1.9.9 weapons
+  recruit?: { prof: string; work: string }; infected?: { day: number }; captive?: { by: string; day: number }; // v1.9.9 war
   walk?: import('./move').Walk; // player characters: current walk (real-time path)
 }
 
@@ -88,7 +90,7 @@ export interface Trial { at: number; until: number; judgeId: string | null; pros
 export interface NpcMsg { fromPersonId: string; fromName: string; toPersonId: string | null; text: string; at: number }
 export interface Offer { id: string; from: string; to: string; kind: 'mal' | 'borc' | 'is' | 'rusvet'; good?: Good; qty?: number; price?: number; amount?: number; arrestId?: string; day: number; text: string }
 export interface Nature { kind: 'kuraklik' | 'salgin' | 'sel' | 'bereket' | 'balik'; start: number; until: number }
-export interface Caravan { day: number; until: number; goods: Partial<Record<Good, number>>; name: string; earned?: number; spent?: number }
+export interface Caravan { day: number; until: number; goods: Partial<Record<Good, number>>; name: string; earned?: number; spent?: number; arriveAt?: number; leaveAt?: number; ship?: boolean; hour?: number }
 export interface Threat { name: string; demand: number; day: number; deadline: number; strength: number }
 
 /** A minor (bebek/çocuk/genç). Becomes a full Person (same id) at ADULT_AGE game days. */
@@ -210,6 +212,13 @@ export interface World {
   arrests: Arrest[];
   chatOut: NpcMsg[];
   talks: Talk[];
+  chests?: Record<string, { goods: Partial<Record<Good, number>>; arms: Partial<Record<'hancer' | 'kilic' | 'yay' | 'ok' | 'kalkan', number>> }>;
+  armsReg?: { ownerId: string; kind: 'hancer' | 'kilic' | 'yay'; day: number; by: 'demirci' | 'kisla' }[]; armsV?: number;
+  raid?: { phase: 'uyari' | 'gece'; day: number; robbers?: { id: string; hp: number }[]; startAt?: number; killed?: number; stolen?: number; dead?: string[]; hurt?: string[]; defDead?: string[]; defHurt?: string[] } | null; raidNext?: number;
+  foreign?: { name: string; demand: number; troops: number; phase: 'talep' | 'savas'; day: number; deadline: number; landDay?: number; landed?: boolean; landAt?: number; alive?: number; killed?: number; ourDead?: string[]; ourHurt?: number; recruits: string[] } | null;
+  notices?: { id: number; kind: string; text: string; day: number }[]; whatsNew?: Record<string, string>;
+  fire?: { bid: string; startH: number; cause: string } | null; empireName?: string; empireNamedBy?: string;
+  warNext?: number; wars?: number; vassal?: { name: string; until: number } | null;
   posLog?: Record<string, [number, number, number][]>; posAt?: number; crimeLog?: { criminalId: string; victimId: string | null; H: number; x: number; y: number }[]; // v1.9.8 alibi history
   corpses?: Corpse[]; crimeReports?: { criminalId: string; victimId: string; crime: CrimeKind; amount: number; at: number; eyes?: number; eyeIds?: string[] }[]; escorts?: Escort[];
   llm?: { day: string; n: number; talkAt: number; speechAt?: number };
@@ -308,6 +317,6 @@ export type Action =
   | { t: 'smuggle'; on: boolean }
   | { t: 'borrow'; amount: number } | { t: 'repay'; loanId: string } | { t: 'festivalOpen'; cost: number } | { t: 'buildAt'; plotId: string; kind: string }
   | { t: 'move'; x: number; y: number } | { t: 'report'; corpseId: string } | { t: 'defense'; caseId: string; text: string } | { t: 'restCase'; caseId: string }
-  | { t: 'tribute'; pay: boolean } | { t: 'caravanBuy'; good: Good; qty: number };
+  | { t: 'tribute'; pay: boolean } | { t: 'buyArm'; item: 'hancer' | 'kilic' | 'yay' | 'ok' | 'kalkan'; qty?: number } | { t: 'kislaKit' } | { t: 'drawWeapon'; kind: 'hancer' | 'kilic' | 'yay' | null } | { t: 'stash'; item: string; qty: number; toChest: boolean } | { t: 'useItem'; good: Good } | { t: 'searchPerson'; personId: string } | { t: 'foreignAnswer'; choice: 'pay' | 'vassal' | 'war' } | { t: 'recruit'; n: number } | { t: 'ransom'; personId: string } | { t: 'rebuild'; buildingId: string } | { t: 'nameEmpire'; name: string } | { t: 'seenNews'; v: string } | { t: 'caravanBuy'; good: Good; qty: number };
 
 export interface ActionResult { ok: boolean; msg: string; }

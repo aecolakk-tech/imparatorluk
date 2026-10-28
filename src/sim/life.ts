@@ -5,6 +5,9 @@ import { revealOrder } from './orders';
 import { makeCorpse } from './v16';
 import { placePeople } from './place';
 import { recordCrime } from './alibi';
+import { plagueStart } from './events3';
+import { chronicle } from './realm';
+import { autoDraw, weaponInHand, strike, buyArm, ARM_LABEL, ARM_PRICE } from './arms';
 /**
  * Daily life: needs (3 meals + 5 water), health & doctors, religiosity (cami / meyhane / vaaz / devlet yönlendirmesi),
  * crafts that matter (elbise, mobilya, alet, odun), nature (kuraklık every 180 days, salgın, sel, bereket),
@@ -79,7 +82,7 @@ export function seeDoctor(w: World, p: Person, stateFunds = false): string {
   const fee = Math.round(DOCTOR_FEE * rankOf(h).mult);
   const payer = transfer(w, p.id, h.id, fee, 'hekim ücreti') ? p.id : stateFunds && transfer(w, 'saray', h.id, fee * 0.6, 'darülaceze') ? 'saray' : null;
   if (!payer) return `Hekim ${fee} Dinar istiyor; paranız yetmiyor.`;
-  h.incomeToday += fee; h.xp += 1; p.health = clamp(Math.max(p.health, 70) + 10); p.wounded = false;
+  h.incomeToday += fee; h.xp += 1; p.infected = undefined; p.health = clamp(Math.max(p.health, 70) + 10); p.wounded = false;
   rel(p, h, 4, 'beni iyileştirdi');
   return `${h.name} sizi iyileştirdi (${payer === 'saray' ? 'darülaceze ödedi' : `${fee} Dinar`}).`;
 }
@@ -170,21 +173,20 @@ export function endOfDayLife(w: World): void {
 }
 
 // ---------------- nature ----------------
-const NATURE_TEXT = { kuraklik: 'KURAKLIK başladı! İki hafta boyunca buğday az çıkacak, ekmek pahalanacak.', salgin: 'SALGIN! Hastalık yayılıyor; hekimler çok çalışacak.', sel: 'SEL baskını! Tarlalar ve liman zarar gördü.', bereket: 'BEREKET yılı: tarlalar bol ürün veriyor.', balik: 'Denizde balık bolluğu var!' } as const;
+const NATURE_TEXT = { kuraklik: 'KURAKLIK başladı (13 gün)! Buğday üretimi %65, su %15 düşer; ekmek pahalanır. Ambar her gün 40 buğday salar. Ekmek ve suyu sandığınıza stoklayın.', salgin: 'SALGIN başladı (5 gün)! Hastalık yakındakilere bulaşıyor (2 adım). Hastalanan her saat can kaybeder; tedavi Hekimhane’de. Kalabalıktan uzak durun; hastalandıysanız (üstte 🦠) hemen hekime gidin.', sel: 'SEL baskını (3 gün)! Buğday ve balık üretimi %40 düşer; ambar her gün 40 buğday satar. Fiyatlar artabilir: stok yapın.', bereket: 'BEREKET yılı: tarlalar bol ürün veriyor.', balik: 'Denizde balık bolluğu var!' } as const;
 /** v1.9.6: a disaster everybody must hear about (popup + vibration on every online client, and the log). */
-export function disaster(w: World, kind: string, text: string): void { w.disaster = { id: (w.disaster?.id ?? 0) + 1, kind, text, day: w.day }; log(w, `⚠ ${text}`); }
+export function disaster(w: World, kind: string, text: string): void { w.disaster = { id: (w.disaster?.id ?? 0) + 1, kind, text, day: w.day }; w.notices = [...(w.notices ?? []), w.disaster].slice(-12); log(w, `⚠ ${text}`); chronicle(w, 'olay', text); }
 export function nature(w: World): void {
   const n = w.nature;
   if (n && w.day > n.until) { log(w, `${n.kind === 'kuraklik' ? 'Kuraklık' : n.kind === 'salgin' ? 'Salgın' : n.kind === 'sel' ? 'Sel' : n.kind === 'bereket' ? 'Bereket' : 'Balık bolluğu'} sona erdi.`); w.nature = null; }
   if (!w.nature && w.day >= w.nextDrought) { w.nature = { kind: 'kuraklik', start: w.day, until: w.day + 13 }; w.nextDrought = w.day + 180; disaster(w, 'kuraklik', NATURE_TEXT.kuraklik); }
   else if (!w.nature && chance(w, 0.02)) {
     const kind = pick(w, ['salgin', 'sel', 'bereket', 'balik'] as const);
-    w.nature = { kind, start: w.day, until: w.day + (kind === 'bereket' ? 7 : kind === 'salgin' ? 5 : 3) }; if (kind === 'salgin' || kind === 'sel') disaster(w, kind, NATURE_TEXT[kind]); else log(w, NATURE_TEXT[kind]);
+    w.nature = { kind, start: w.day, until: w.day + (kind === 'bereket' ? 7 : kind === 'salgin' ? 5 : 3) }; if (kind === 'salgin') plagueStart(w); disaster(w, kind, NATURE_TEXT[kind]);
   }
   // hunger crisis / kıtlık: many people starving at once (at most every 5 days)
   { const adults = w.people.filter((p) => p.prof !== 'naip'); const starving = adults.filter((p) => p.hunger >= 70).length / Math.max(1, adults.length);
     if (starving >= 0.35 && (w.disaster?.kind !== 'kitlik' || w.day - w.disaster.day >= 5)) disaster(w, 'kitlik', `KITLIK! Halkın %${Math.round(starving * 100)}’i aç. Ekmek bulmak zorlaştı; ambar ve fırınlar kritik.`); }
-  if (w.nature?.kind === 'salgin') for (const p of w.people) if (p.prof !== 'naip' && chance(w, 0.25)) p.health = clamp(p.health - 12);
 }
 
 // ---------------- tahıl ambarı ----------------
@@ -217,16 +219,26 @@ function granaryDay(w: World): void {
 function outsideWorld(w: World): void {
   // caravans: when a staple stays expensive, or every ~2 weeks
   const short = (['ekmek', 'bugday', 'su'] as Good[]).filter((g) => w.prices[g] > BASE_PRICE[g] * 2.2);
-  if (w.caravan && w.day > w.caravan.until) { caravanBuys(w, true); for (const l of w.listings.filter((x) => x.sellerId === 'dis')) l.qty = 0; w.listings = w.listings.filter((l) => l.qty > 0); w.caravan = null; }
+  if (w.caravan && (w.day > w.caravan.until || (w.day === w.caravan.until && w.hour >= (w.caravan.hour ?? 0)))) { caravanBuys(w, true); for (const l of w.listings.filter((x) => x.sellerId === 'dis')) l.qty = 0; w.listings = w.listings.filter((l) => l.qty > 0); w.caravan = null; }
   w.shortDays = short.length ? (w.shortDays ?? 0) + 1 : 0;
   if (w.caravan && w.day <= w.caravan.until) caravanBuys(w);
   if (!w.caravan && ((short.length && (w.shortDays ?? 0) >= 3) || chance(w, 0.06))) {
+    // v1.9.9: camels walk to the Pazar (the Venedik ship docks at the Liman) and stay one game day.
+    // Mixed prices: goods the city lacks (price ≥ 1.5× base) are dear, everything else is cheaper than the market.
+    const name = pick(w, ['Halep kervanı', 'Venedik gemisi', 'Bağdat kervanı', 'Ceneviz tüccarları']); const ship = name === 'Venedik gemisi';
     const goods: Partial<Record<Good, number>> = {};
-    for (const g of short.length ? short : (['alet', 'elbise', 'icki', 'yun'] as Good[])) goods[g] = g === 'bugday' ? 200 : g === 'su' ? 150 : g === 'ekmek' ? 80 : 8;
-    w.caravan = { day: w.day, until: w.day + 2, goods, name: pick(w, ['Halep kervanı', 'Venedik gemisi', 'Bağdat kervanı', 'Ceneviz tüccarları']) };
-    for (const [g, q] of Object.entries(goods) as [Good, number][]) w.listings.push({ id: nextId(w, 'L'), sellerId: 'dis', good: g, qty: q, price: Math.round(Math.max(BASE_PRICE[g] * 1.6, w.prices[g] * 1.15) * 100) / 100, market: 'liman' });
-    const gl = Object.keys(goods).map((g) => GOOD_LABEL[g as Good]).join(', ');
-    disaster(w, 'kervan', `${w.caravan.name} limana geldi (${w.caravan.until}. güne dek)! Satıyor: ${gl} – piyasanın üstünde fiyatla ama bol. Her satıştan hazineye gümrük girer. Kervan ayrıca pazardaki ucuz el işi ve tahılınızı nakit alır: satacak malınız varsa pazara koyun. Ayrılınca satılmayan malı geri götürür.`);
+    const pool = [...new Set([...short, ...(['alet', 'elbise', 'icki', 'yun', 'kumas', 'balik', 'et'] as Good[])])].slice(0, 6);
+    for (const g of pool) goods[g] = g === 'bugday' ? 200 : g === 'su' ? 150 : g === 'ekmek' ? 80 : 10;
+    const now = w.serverNow ?? w.lastTickAt;
+    w.caravan = { day: w.day, until: w.day + 1, hour: w.hour, goods, name, arriveAt: now, ship };
+    const lines: string[] = [];
+    for (const [g, q] of Object.entries(goods) as [Good, number][]) {
+      const cur = w.prices[g]; const scarce = cur >= BASE_PRICE[g] * 1.5;
+      const price = Math.round((scarce ? Math.max(BASE_PRICE[g] * 1.6, cur * 1.15) : Math.max(BASE_PRICE[g] * 0.6, cur * 0.85)) * 100) / 100;
+      w.listings.push({ id: nextId(w, 'L'), sellerId: 'dis', good: g, qty: q, price, market: ship ? 'liman' : 'pazar' });
+      lines.push(`${GOOD_LABEL[g]} ${price} D${scarce ? ' (kıt, pahalı)' : ' (ucuz)'}`);
+    }
+    disaster(w, 'kervan', `${ship ? '⛵ Venedik gemisi nehirden Liman’a yanaştı' : `🐪 ${name} deveyle Pazar’a geldi`} (yarın bu saate kadar). Satıyor: ${lines.join(', ')}. Şehirde kıt olan mallar pahalı, diğerleri piyasadan ucuz. Her satıştan hazineye gümrük girer; kervan pazardaki ucuz el işi ve tahılı nakit alır.`);
   }
   // border threats
   if (!w.threat && w.day > 15 && chance(w, 0.025)) {
@@ -414,19 +426,37 @@ export function steal(w: World, thief: Person, victim: Person): number {
   crimeSeen(w, thief, victim, 'hirsizlik', amt);
   return amt;
 }
+/** v1.9.9: hurting someone needs a drawn weapon (NPCs draw automatically). Without one it is only a shove. */
 export function assault(w: World, a: Person, v: Person): string {
   if (isProtected(w, v)) return `${v.name} şehre yeni geldi; ona dokunulmaz (koruma süresi).`;
   if (atHomeSafe(w, v)) return `${v.name} evinde; kapı kilitli, dışarıdan ulaşamazsınız.`;
-  v.health = clamp(v.health - 35); v.wounded = true; v.mood = clamp(v.mood - 10); rel(v, a, -60, 'beni dövdü');
-  for (const x of w.people) if (x.relations[v.id] && (x.relations[v.id] ?? 0) > 40) rel(x, a, -20, `${ek(v.name, 'ı')} dövdü`);
-  log(w, `${a.name}, ${ek(v.name, 'a')} saldırdı ve yaraladı! Yaralı hekime gitmeli.`, v.id);
+  if (fullAI(a)) autoDraw(a);
+  if (!weaponInHand(a)) {
+    v.health = clamp(v.health - 5); v.mood = clamp(v.mood - 10); rel(v, a, -40, 'beni itip kaktı');
+    log(w, `${a.name}, ${ek(v.name, 'ı')} itip kaktı (silahsız).`, v.id); crimeSeen(w, a, v, 'saldiri', 0);
+    return `Silahınız çekili değil: ${ek(v.name, 'ı')} sadece itip kaktınız. Yaralamak için envanterden bir silah çekin (Demirci’den alınır).`;
+  }
+  const hit = strike(w, a, v)!; if (hit.res === 'kill') { v.health = clamp(v.health - 20); if (v.health < 5) v.health = 5; }
+  v.mood = clamp(v.mood - 10); rel(v, a, -60, 'beni yaraladı');
+  for (const x of w.people) if (x.relations[v.id] && (x.relations[v.id] ?? 0) > 40) rel(x, a, -20, `${ek(v.name, 'ı')} yaraladı`);
+  log(w, `${a.name}, ${ek(v.name, 'ı')} ${ARM_LABEL[hit.weapon].toLocaleLowerCase('tr')} ile yaraladı! Yaralı hekime gitmeli.`, v.id);
   crimeSeen(w, a, v, 'saldiri', 0);
-  return `${ek(v.name, 'ı')} yaraladınız.`;
+  return `${ek(v.name, 'ı')} ${ARM_LABEL[hit.weapon].toLocaleLowerCase('tr')} ile yaraladınız (can ${Math.round(v.health)}).`;
 }
+/** Killing takes two blows: the first wounds; a blow on a wounded victim (health ≤ 65) kills. NPCs strike twice. */
 export function murder(w: World, a: Person, v: Person): string {
   if (isProtected(w, v)) return `${ek(v.name, 'a')} dokunulmaz.`;
   if (atHomeSafe(w, v)) return `${v.name} evinde; kapı kilitli, dışarıdan ulaşamazsınız.`;
-  if (v.playerId || v.prof === 'asker' && chance(w, 0.7)) { v.health = 5; v.wounded = true; log(w, `${a.name}, ${ek(v.name, 'ı')} öldürmeye kalktı; ağır yaralı kurtuldu!`, v.id); crimeSeen(w, a, v, 'cinayet', 0); return `${v.name} ağır yaralı kurtuldu.`; }
+  const npc = fullAI(a); if (npc) { autoDraw(a); if (!weaponInHand(a) && a.money >= ARM_PRICE.hancer) { buyArm(w, a, 'hancer'); autoDraw(a); } }
+  if (!weaponInHand(a)) return 'Silahsız öldüremezsiniz. Envanterinizden bir silah çekin (Demirci’den hançer/kılıç/yay alınır).';
+  let hit = strike(w, a, v)!;
+  if (hit.res === 'wound' && npc) hit = strike(w, a, v) ?? hit;
+  if (hit.res === 'wound') {
+    rel(v, a, -70, 'beni öldürmeye kalktı'); log(w, `${a.name}, ${ek(v.name, 'a')} ${ARM_LABEL[hit.weapon].toLocaleLowerCase('tr')} ile saldırdı; ${v.name} yaralı!`, v.id);
+    crimeSeen(w, a, v, 'saldiri', 0);
+    return `${ek(v.name, 'ı')} yaraladınız (can ${Math.round(v.health)}). Öldürmek için bir darbe daha gerekir.`;
+  }
+  if (v.playerId || v.prof === 'asker' && chance(w, 0.5)) { v.health = 5; v.wounded = true; log(w, `${a.name}, ${ek(v.name, 'ı')} öldürmeye kalktı; ağır yaralı kurtuldu!`, v.id); crimeSeen(w, a, v, 'cinayet', 0); return `${v.name} ağır yaralı kurtuldu.`; }
   const co = makeCorpse(w, v, a, w.serverNow ?? w.lastTickAt);
   for (const x of w.people) if ((x.relations[v.id] ?? 0) > 20 && co.witnesses.includes(x.id)) rel(x, a, -70, `${ek(v.name, 'ı')} öldürdü`);
   die(w, v, `CİNAYET! ${v.name} öldürüldü. Cesedi yerde yatıyor…`);

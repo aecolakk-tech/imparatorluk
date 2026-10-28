@@ -1,4 +1,5 @@
 import { ek } from './tr';
+import { startFire } from './events3';
 import { rehouse } from './housing';
 import { migrateMeclis16 } from './meclis';
 import { startIsyanHook } from './hooks';
@@ -285,7 +286,7 @@ export function orgAct(w: World, by: Person, deed: OrgDeed): string {
     if (o.kind === 'hirsiz') return 'Lonca siyasete karışmaz.';
     for (const p of w.people) if (p.prof === 'asker') p.loyalty = clamp(p.loyalty - 3);
     w.treasury = Math.max(0, w.treasury); const proj = (w.projects ?? []).find((x) => !x.done); if (proj) proj.progress = Math.max(0, proj.progress - 2);
-    o.suspicion = clamp(o.suspicion + 12); w.disaster = { id: (w.disaster?.id ?? 0) + 1, kind: 'yangin', text: 'YANGIN! Kışla’nın ambarı ateşe verildi; askerlerin morali düştü.', day: w.day }; log(w, '💥 Gece Kışla’nın ambarı ateşe verildi! Faili meçhul.');
+    o.suspicion = clamp(o.suspicion + 12); { const kb = w.buildings.find((b) => b.id === 'kisla'); if (kb) startFire(w, kb, 'sabotaj: ateşe verildi'); }
     if (chance(w, 0.2 + o.suspicion / 250)) reveal(w, o, [by.id], 'Sabotajcılar görüldü');
     return 'Sabotaj başarılı: askerlerin morali düştü' + (proj ? ', şantiye gecikti.' : '.');
   }

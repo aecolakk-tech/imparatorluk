@@ -22,6 +22,9 @@ export function activeEvents(w: World): { text: string; tip: string }[] {
   if (w.nature && w.day <= w.nature.until) out.push({ text: `${NATURE_LABEL[w.nature.kind]} (${w.nature.until}. güne dek)`, tip: 'Doğal olay: üretimi etkiler. Kurallar → Doğa.' });
   if ((w.festivalUntil ?? 0) >= w.day) out.push({ text: '🎉 Festival', tip: 'Festival Alanı açık: oraya gidin, mutluluk artar.' });
   if (w.caravan && w.day <= w.caravan.until) out.push({ text: `🐪 ${w.caravan.name}`, tip: 'Limanda kervan: pahalı ama bol mal; şehrin fazlasını da alır.' });
+  if (w.raid) out.push({ text: w.raid.phase === 'gece' ? `🗡 Eşkıya baskını! (${(w.raid.robbers ?? []).filter((r) => r.hp > 0).length} eşkıya)` : '🗡 Bu gece eşkıya bekleniyor', tip: 'Gece dışarıda kalmayın; asker ve bekçiler savaşır.' });
+  if (w.foreign) out.push({ text: w.foreign.landed ? `⚔ ${w.foreign.name}: ${w.foreign.alive} düşman askeri şehirde` : w.foreign.phase === 'savas' ? `⚔ ${w.foreign.name} ${w.foreign.landDay}. gün çıkarma yapacak` : `📜 ${w.foreign.name} elçisi cevap bekliyor`, tip: 'Yabancı devlet.' });
+  if (w.fire) out.push({ text: `🔥 ${w.buildings.find((b) => b.id === w.fire!.bid)?.name ?? ''} yanıyor`, tip: 'İçerideyseniz hemen çıkın.' });
   if (w.threat) out.push({ text: `⚔️ ${w.threat.name}: ${w.threat.demand} D haraç (${w.threat.deadline}. gün)`, tip: 'Sınırda tehdit. Kayzer haraç öder ya da ordu savaşır.' });
   const ph = electionPhase(w); if (ph.phase !== 'bekleme' || w.election.nextDay - w.day <= 9) out.push({ text: `🗳 ${ph.label}`, tip: 'Seçim takvimi: adaylık → propaganda (afiş, konuşma) → oylama günü.' });
   if (w.bans?.includes('icki')) out.push({ text: '🚫🍺 İçki yasak', tip: 'İçki Yasağı kanunu yürürlükte.' });
