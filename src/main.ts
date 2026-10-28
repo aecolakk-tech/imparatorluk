@@ -8,7 +8,7 @@ import type { Backend } from './backend/api';
 import { MOCK_FOUNDER_EMAIL } from './backend/mock';
 import { buildStatic, drawFrame, hitTest, placePeople, T, tapFx, type Camera, type Placed } from './ui/map';
 import { bar, fmt, h, select } from './ui/dom';
-import { ic, CREDITS, iconify } from './ui/icons';
+import { ic, CREDITS, iconify, installIconify } from './ui/icons';
 import { electionCard, avatar, buildingPanel, familyPanel, isyanBar, personCard, type Ctx } from './ui/panels';
 import { GUIDE, RULES } from './ui/texts';
 import { feedPanel, hudChips, quickPanel } from './ui/life';
@@ -663,9 +663,10 @@ function trialPopup(): void {
 }
 void ({} as Corpse);
 
+installIconify();
 void be.restore().then((s) => (s ? start() : loginScreen()));
 // expose for headless smoke tests
-(window as unknown as { __imp: () => unknown }).__imp = () => ({ mute: setMuted, act: doAct, openB: (id: string) => { const b = world!.buildings.find((x) => x.id === id); if (b) openSheet(() => bPanel(b)); }, menu: openMenu, admin: openAdmin, world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (lowGfx ? 1 : window.devicePixelRatio || 1), r.top + (y - cam.y) * cam.z * T / (lowGfx ? 1 : window.devicePixelRatio || 1)]; } });
+(window as unknown as { __imp: () => unknown }).__imp = () => ({ mute: setMuted, look: (x: number, y: number) => { followCam = false; cam.x = x - canvas.width / (cam.z * T) / 2; cam.y = y - canvas.height / (cam.z * T) / 2; }, act: doAct, openB: (id: string) => { const b = world!.buildings.find((x) => x.id === id); if (b) openSheet(() => bPanel(b)); }, menu: openMenu, admin: openAdmin, world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (lowGfx ? 1 : window.devicePixelRatio || 1), r.top + (y - cam.y) * cam.z * T / (lowGfx ? 1 : window.devicePixelRatio || 1)]; } });
 
 // ---- v1.9 landscape: rotate overlay (phones in portrait) + low-graphics class ----
 document.body.classList.toggle('low', lowGfx);

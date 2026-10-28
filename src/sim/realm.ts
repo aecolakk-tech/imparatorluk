@@ -129,7 +129,7 @@ export function animalsDay(w: World): void {
 }
 /** The animal seller keeps a little herd so the market has milk/eggs; buys stock when cheap. */
 export function hayvanciDay(w: World): void {
-  for (const p of w.people.filter((x) => x.prof === 'hayvanci' && x.npc !== false && !x.playerId)) { p.farm = true; const hd = herd(p); if (hd.inek < 3) hd.inek += 1; if (hd.tavuk < 10) hd.tavuk += 3; if (hd.koyun < 4) hd.koyun += 1; }
+  for (const p of w.people.filter((x) => x.prof === 'hayvanci' && x.npc !== false && !x.playerId)) { p.farm = true; const hd = herd(p); if (hd.inek < 3) hd.inek += 1; if (hd.tavuk < 10) hd.tavuk += 3; if (hd.koyun < 4) hd.koyun += 1; if (hd.at < 2) hd.at += 1; }
 }
 
 // ======================= nobility =======================
@@ -386,6 +386,19 @@ const MAJOR: [RegExp, string][] = [[/kanun|ferman|yasa(k|sı)|tasarı.*kabul/i, 
 export function maybeChronicle(w: World, text: string): void { if (/oylamaya açıldı|teklif verdi|→ RET|günlük bütçe|propaganda|protesto/.test(text)) return; for (const [r, k] of MAJOR) if (r.test(text)) { chronicle(w, k, text); return; } }
 
 // ======================= migration (schema 5) =======================
+/** v1.9.1: make sure the town really has animals: a stocked seller and a few NPC farmers with herds. */
+export function seedAnimals(w: World): void {
+  let sel = w.people.find((p) => p.prof === 'hayvanci');
+  if (!sel) { sel = w.people.find((p) => !p.playerId && p.prof === 'hamal') ?? w.people.find((p) => !p.playerId && p.prof === 'ciftci'); if (sel) { sel.prof = 'hayvanci'; log(w, `${sel.name} artık hayvan tüccarı: Hayvan Pazarı'nda inek, koyun, tavuk ve at satıyor.`, sel.id); } }
+  if (sel) { sel.work = 'hayvan'; sel.farm = true; const hd = herd(sel); hd.inek = Math.max(hd.inek, 3); hd.koyun = Math.max(hd.koyun, 4); hd.tavuk = Math.max(hd.tavuk, 8); hd.at = Math.max(hd.at, 2); }
+  const farmers = w.people.filter((p) => !p.playerId && p.prof === 'ciftci');
+  const herds: Record<Animal, number>[] = [{ inek: 2, koyun: 3, tavuk: 6, at: 0 }, { inek: 1, koyun: 4, tavuk: 0, at: 1 }, { inek: 3, koyun: 0, tavuk: 8, at: 0 }, { inek: 0, koyun: 3, tavuk: 5, at: 0 }];
+  farmers.slice(0, 4).forEach((p, i) => { const hd = herd(p); if (ANIMALS.some((a) => hd[a] > 0)) return; Object.assign(hd, herds[i]); p.farm = true; p.barn = { ahir: Math.ceil((hd.inek + hd.koyun + hd.at) / 6), kumes: hd.tavuk ? 1 : 0 }; p.inv.bugday = Math.max(p.inv.bugday, 20); });
+}
+export function migrate8(w: World): World {
+  w = migrate7(w); if ((w.schema ?? 1) >= 8) return w;
+  seedAnimals(w); w.schema = 8; return w;
+}
 export function migrate7(w: World): World {
   w = migrate6(w); if ((w.schema ?? 1) >= 7) return w;
   migrateMeclis16(w); rehouse(w); for (const p of w.people) if (p.playerId && p.energy === undefined) p.energy = 80;

@@ -1657,12 +1657,12 @@ function migrateWorld(w) {
   return migrate3(w);
 }
 function migrate3(w) {
-  if ((w.schema ?? 1) >= 3) return migrate7(migrate4(w));
+  if ((w.schema ?? 1) >= 3) return migrate8(migrate4(w));
   const any = w;
   for (const [k, v] of Object.entries({ customLaws: [], suspicion: {}, treasuryBook: [], priceHist: {}, serving: [] })) if (any[k] === void 0) any[k] = v;
   if (w.granary < 800) w.granary = 800;
   w.schema = 3;
-  return migrate7(migrate4(w));
+  return migrate8(migrate4(w));
 }
 
 // src/sim/hooks.ts
@@ -3609,7 +3609,8 @@ var QUESTS = [
   { text: "Camide namaz k\u0131l\u0131n ya da meyhanede bir kadeh i\xE7in", done: (_w, p) => p.lastAction.includes("namaz") || p.lastAction.includes("i\xE7ti") },
   { text: "Bir vatanda\u015Fla sohbet edin (birine dokunun \u2192 Sohbet)", done: (_w, p) => Object.values(p.relNote).some((x) => x.includes("sohbet")) },
   { text: "Saraya bir dilek\xE7e yaz\u0131n (Saray binas\u0131)", done: (w, p) => w.petitions.some((x) => x.fromId === p.id) },
-  { text: "Meclis se\xE7iminde aday olun ya da oy verin (Meclis binas\u0131)", done: (w, p) => w.election.candidates.includes(p.id) || !!w.election.votes[p.id] || p.meclis }
+  { text: "Meclis se\xE7iminde aday olun ya da oy verin (Meclis binas\u0131)", done: (w, p) => w.election.candidates.includes(p.id) || !!w.election.votes[p.id] || p.meclis },
+  { text: "Hayvan Pazar\u0131\u2019na gidin (Bu\u011Fday Tarlalar\u0131\u2019n\u0131n g\xFCneyindeki \xE7itli a\u011F\u0131l) ve bir tavuk ya da arsa al\u0131n", done: (_w, p) => !!p.farm || ["inek", "koyun", "tavuk", "at"].some((a) => (p.animals?.[a] ?? 0) > 0) }
 ];
 function questReward(w, playerId) {
   const pl = w.players[playerId];
@@ -4752,7 +4753,7 @@ function createWorld(seed = 42, now = Date.now()) {
   }
   log(w, "\u0130mparatorluk kuruldu. \u0130lk Meclis se\xE7imi 10. g\xFCn: adayl\u0131k \u015Fimdi a\xE7\u0131k (3. g\xFCne kadar), ard\u0131ndan propaganda.");
   w.todayEvents = [];
-  return migrate7(w);
+  return migrate8(w);
 }
 function findPerson(w, id) {
   if (!id) return void 0;
@@ -5082,6 +5083,7 @@ function hayvanciDay(w) {
     if (hd.inek < 3) hd.inek += 1;
     if (hd.tavuk < 10) hd.tavuk += 3;
     if (hd.koyun < 4) hd.koyun += 1;
+    if (hd.at < 2) hd.at += 1;
   }
 }
 var RANKS_N = ["Vezir", "Pa\u015Fa", "Bey", "A\u011Fa"];
@@ -5502,6 +5504,42 @@ function maybeChronicle(w, text) {
     chronicle(w, k, text);
     return;
   }
+}
+function seedAnimals(w) {
+  let sel = w.people.find((p) => p.prof === "hayvanci");
+  if (!sel) {
+    sel = w.people.find((p) => !p.playerId && p.prof === "hamal") ?? w.people.find((p) => !p.playerId && p.prof === "ciftci");
+    if (sel) {
+      sel.prof = "hayvanci";
+      log(w, `${sel.name} art\u0131k hayvan t\xFCccar\u0131: Hayvan Pazar\u0131'nda inek, koyun, tavuk ve at sat\u0131yor.`, sel.id);
+    }
+  }
+  if (sel) {
+    sel.work = "hayvan";
+    sel.farm = true;
+    const hd = herd(sel);
+    hd.inek = Math.max(hd.inek, 3);
+    hd.koyun = Math.max(hd.koyun, 4);
+    hd.tavuk = Math.max(hd.tavuk, 8);
+    hd.at = Math.max(hd.at, 2);
+  }
+  const farmers = w.people.filter((p) => !p.playerId && p.prof === "ciftci");
+  const herds = [{ inek: 2, koyun: 3, tavuk: 6, at: 0 }, { inek: 1, koyun: 4, tavuk: 0, at: 1 }, { inek: 3, koyun: 0, tavuk: 8, at: 0 }, { inek: 0, koyun: 3, tavuk: 5, at: 0 }];
+  farmers.slice(0, 4).forEach((p, i) => {
+    const hd = herd(p);
+    if (ANIMALS.some((a) => hd[a] > 0)) return;
+    Object.assign(hd, herds[i]);
+    p.farm = true;
+    p.barn = { ahir: Math.ceil((hd.inek + hd.koyun + hd.at) / 6), kumes: hd.tavuk ? 1 : 0 };
+    p.inv.bugday = Math.max(p.inv.bugday, 20);
+  });
+}
+function migrate8(w) {
+  w = migrate7(w);
+  if ((w.schema ?? 1) >= 8) return w;
+  seedAnimals(w);
+  w.schema = 8;
+  return w;
 }
 function migrate7(w) {
   w = migrate6(w);

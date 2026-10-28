@@ -120,6 +120,7 @@ export const GUIDE: string[] = [
   'BİNALARA DOKUNARAK etkileşirsiniz: Pazar’da alışveriş, Kuyu’da su, Camide namaz, Meyhanede içki, Hekimhane’de tedavi, Saray’da dilekçe, Mahkeme’de davalar, Meclis’te seçim.',
   'Üstteki çubukta saat, ihtiyaçlarınız (🍞 öğün x/3, 💧 su x/5), sağlık, aktif olaylar ve seçim takvimi var. ⚡ “Ne yapabilirim?” düğmesi her an yapabileceklerinizi listeler.',
   'Her gün 3 öğün ve 5 su gerekir, yoksa sağlığınız düşer. Görevler (🎯) size adım adım şehri öğretir ve ödül verir.',
+  'HAYVANLAR: Buğday Tarlaları’nın hemen güneyindeki çitli ağıl HAYVAN PAZARI’dır. Satılık inek, koyun, tavuk ve atlar içinde dolaşır; tarlalarda çiftçilerin sürüleri otlar. Hayvancıdan arsa ve hayvan alın, ahır/kümes kurun, besleyin; süt, yumurta, yün toplayın. Ata binince daha hızlı yürürsünüz.',
   'Yürüyen herhangi birine dokunun: kartında parasını, ihtiyaçlarını, ne düşündüğünü görürsünüz; para verebilir, mesaj atabilirsiniz.',
   'Karakteriniz her gün kendi mesleğinde otomatik çalışır ve kazandığıyla ekmek, su alır. Siz daha fazlasını yapabilirsiniz: ticaret, dilekçe, seçim… ya da darbe.',
   '📜 Gazete her günün özetini verir, 💬 Meydan’da herkesle konuşursunuz. Kurallar 📖 sayfasında. Hayırlı olsun!',
