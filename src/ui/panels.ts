@@ -46,6 +46,7 @@ export function personCard(c: Ctx, p: Person): HTMLElement {
     h('div', { class: 'row' }, avatar(p, 72), h('div', {}, h('h2', {}, p.name), h('div', { class: 'muted' }, officeOf(w, p), p.playerId ? ' · oyuncu' : ' · yapay vatandaş', p.jailedDays > 0 ? ' · ⛓ zindanda' : ''))),
     h('div', { class: 'card' }, `💭 “${p.thought || '…'}”`),
     h('table', {},
+      (() => { const an = p.animals; const lbl: Record<string, string> = { inek: 'İnek', koyun: 'Koyun', tavuk: 'Tavuk', at: 'At' }; const txt = an ? Object.entries(an).filter(([, n]) => n > 0).map(([k, n]) => `${lbl[k] ?? k} ${n}`).join(', ') : ''; if (!txt) return ''; const where = p.prof === 'hayvanci' ? 'Hayvan Pazarı ağılında' : p.farm ? 'çiftlikte' : 'evinin kapısında'; return h('tr', {}, h('td', {}, 'Hayvanlar'), h('td', {}, `${txt} (${where}${p.riding && (an?.at ?? 0) > 0 ? ' · atın üstünde' : ''}) `, mine && (an?.at ?? 0) > 0 ? h('button', { class: 'sm', onclick: () => c.act({ t: 'ride', on: !p.riding }) }, p.riding ? 'İn' : 'Bin') : '')); })(),
       h('tr', {}, h('td', {}, 'Kese'), h('td', {}, `${fmt(p.money)} Dinar`)),
       h('tr', { title: 'Kişisel hayat: yemek, aile, eğlence, din' }, h('td', {}, 'Mutluluk'), h('td', {}, bar(p.mood, '#5fae5a'), ` ${Math.round(p.mood)}`)),
       h('tr', { title: 'Devlete ve tahta bakış (eski memnuniyet + sadakat)' }, h('td', {}, 'Memnuniyet'), h('td', {}, bar(p.loyalty, '#e8c14a'), ` ${Math.round(p.loyalty)}`)),

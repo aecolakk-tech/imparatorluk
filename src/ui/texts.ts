@@ -7,7 +7,7 @@ export const RULES: [string, string[]][] = [
     'Hamallar inşaatta yük taşır (günde 3 D, inşaat ilerler) ya da pazarda tüccara taşıma yapar (2 D). Kuraklıkta buğday pahalanır; ambar her gün piyasaya buğday salar.',
   ]],
   ['Hayvanlar ve Çiftlik', [
-    'Hayvan Pazarı (Buğday Tarlaları’nın yanında, çitli ağıl): hayvan tüccarından inek, koyun, tavuk ve at alınır; çiftlik arsası da buradan alınır (250 D).',
+    'Hayvan Pazarı (Buğday Tarlaları’nın batısında, çitli ağıl): hayvan tüccarından inek, koyun, tavuk ve at alınır; çiftlik arsası da buradan alınır (250 D).',
     'Çiftliğinize (Buğday Tarlaları) gidip ahır (120 D, 6 büyükbaş/at) ya da kümes (50 D, 15 tavuk) yapın. Hayvan almadan önce yer olmalı.',
     'Hayvanları HER GÜN çiftlikte “Yem ver” ile buğdayla besleyin. Beslenen hayvan ertesi gün ürün verir: inek 3 süt (süt susuzluğu da giderir), tavuk 1 yumurta, koyun yün. Ürünleri “Topla” ile alın, pazarda satın ya da tüketin.',
     'Kesim: inek 8, koyun 4 (+2 yün), tavuk 1 et verir. At kesilmez: ata binince %50 daha hızlı yürürsünüz (Yap → Ata bin).',

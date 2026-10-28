@@ -395,6 +395,21 @@ export function seedAnimals(w: World): void {
   const herds: Record<Animal, number>[] = [{ inek: 2, koyun: 3, tavuk: 6, at: 0 }, { inek: 1, koyun: 4, tavuk: 0, at: 1 }, { inek: 3, koyun: 0, tavuk: 8, at: 0 }, { inek: 0, koyun: 3, tavuk: 5, at: 0 }];
   farmers.slice(0, 4).forEach((p, i) => { const hd = herd(p); if (ANIMALS.some((a) => hd[a] > 0)) return; Object.assign(hd, herds[i]); p.farm = true; p.barn = { ahir: Math.ceil((hd.inek + hd.koyun + hd.at) / 6), kumes: hd.tavuk ? 1 : 0 }; p.inv.bugday = Math.max(p.inv.bugday, 20); });
 }
+export function placeHayvan(w: World): void {
+  if (!w.buildings.some((b) => b.id === 'hayvan')) {
+    const free = (x: number, y: number): boolean => x >= 1 && y >= 1 && x + 8 < 99 && y + 7 <= 48 && !w.buildings.some((o) => o.id !== 'hayvan' && x < o.x + o.w + 1 && x + 9 > o.x && y < o.y + o.h + 2 && y + 7 > o.y) && ![13, 20, 29, 35, 44].some((ry) => ry >= y && ry < y + 6) && ![6, 17, 29, 44, 56, 68, 80, 92].some((rx) => rx >= x && rx < x + 8);
+    let spot: [number, number] | null = null;
+    for (let r = 0; r < 40 && !spot; r++) for (let dx = -r; dx <= r && !spot; dx++) for (const dy of [-r, r, ...Array.from({ length: 2 * r - 1 }, (_, i) => i - r + 1)]) { if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue; if (free(70 + dx, 37 + dy)) { spot = [70 + dx, 37 + dy]; break; } }
+    const [x, y] = spot ?? [70, 37];
+    w.buildings.push({ id: 'hayvan', name: 'Hayvan Pazarı', kind: 'hayvan', x, y, w: 8, h: 5, door: { x: x + 4, y: y + 5 }, market: false });
+  }
+}
+export function migrate9(w: World): World {
+  w = migrate8(w); if ((w.schema ?? 1) >= 9) return w;
+  const hv = w.buildings.find((b) => b.id === 'hayvan');
+  if (hv && hv.y + hv.h + 2 > 48) { w.buildings = w.buildings.filter((b) => b !== hv); placeHayvan(w); } // v1.9 placed it in the sea
+  w.schema = 9; return w;
+}
 export function migrate8(w: World): World {
   w = migrate7(w); if ((w.schema ?? 1) >= 8) return w;
   seedAnimals(w); w.schema = 8; return w;
@@ -406,13 +421,7 @@ export function migrate7(w: World): World {
 }
 export function migrate6(w: World): World {
   w = migrate5(w); if ((w.schema ?? 1) >= 6) return w;
-  if (!w.buildings.some((b) => b.id === 'hayvan')) {
-    const free = (x: number, y: number): boolean => x >= 1 && y >= 1 && x + 8 < 99 && y + 5 < 54 && !w.buildings.some((o) => x < o.x + o.w + 1 && x + 9 > o.x && y < o.y + o.h + 2 && y + 7 > o.y) && ![13, 20, 29, 35, 44].some((ry) => ry >= y && ry < y + 6) && ![6, 17, 29, 44, 56, 68, 80, 92].some((rx) => rx >= x && rx < x + 8);
-    let spot: [number, number] | null = null;
-    for (let r = 0; r < 40 && !spot; r++) for (let dx = -r; dx <= r && !spot; dx++) for (const dy of [-r, r, ...Array.from({ length: 2 * r - 1 }, (_, i) => i - r + 1)]) { if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue; if (free(70 + dx, 37 + dy)) { spot = [70 + dx, 37 + dy]; break; } }
-    const [x, y] = spot ?? [70, 37];
-    w.buildings.push({ id: 'hayvan', name: 'Hayvan Pazarı', kind: 'hayvan', x, y, w: 8, h: 5, door: { x: x + 4, y: y + 5 }, market: false });
-  }
+  placeHayvan(w);
   for (const p of w.people) { if (p.prof === 'hayvanci') p.work = 'hayvan'; if (p.farm && !p.barn) { const hd = herd(p); p.barn = { ahir: Math.ceil((hd.inek + hd.koyun + hd.at) / BARN.ahir.cap), kumes: Math.ceil(hd.tavuk / BARN.kumes.cap) }; } }
   w.schema = 6; return w;
 }

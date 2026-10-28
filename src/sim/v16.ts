@@ -155,7 +155,7 @@ export function finishTrial(w: World, c: CourtCase, now: number): void {
 // ---------------- movement ----------------
 export function startWalk(w: World, me: Person, to: Pt, now: number): void {
   const q = placeOf(w, me.id, now); const from = q ? { x: q.x, y: q.y } : to;
-  me.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * (me.riding && (me.animals?.at ?? 0) > 0 ? 1.5 : 1) }; // 🐎 riders are faster
+  me.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * (me.riding && (me.animals?.at ?? 0) > 0 ? 2 : 1) }; // 🐎 riders are faster
 }
 export function myPos(w: World, me: Person, now: number): Pt { if (playerWalking(w, me, now)) return walkPos(me.walk!, now).pt; const q = placeOf(w, me.id, now); return q ? { x: q.x, y: q.y } : { x: 0, y: 0 }; }
 

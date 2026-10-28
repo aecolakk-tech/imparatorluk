@@ -326,7 +326,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'buildBarn': { const r = buildBarn(w, me, a.kind); return r.includes('yapıldı') ? ok(r) : no(r); }
     case 'feedAnimals': { const r = feedAnimals(w, me); return r.includes('beslendi') ? ok(r) : no(r); }
     case 'collectFarm': { const r = collectFarm(me); return r.startsWith('Toplandı') ? ok(r) : no(r); }
-    case 'ride': { if (a.on && !hasHorse(me)) return no('Atınız yok. Hayvan Pazarı’ndan alın.'); me.riding = !!a.on; return ok(a.on ? 'Atınıza bindiniz: %50 daha hızlısınız.' : 'Attan indiniz.'); }
+    case 'ride': { if (a.on && !hasHorse(me)) return no('Atınız yok. Hayvan Pazarı’ndan alın.'); me.riding = !!a.on; return ok(a.on ? 'Atınıza bindiniz: iki kat hızlısınız.' : 'Attan indiniz.'); }
     case 'buyFarm': { const r = buyFarm(w, me); return r.includes('arsanız hazır') ? ok(r) : no(r); }
     case 'buyAnimal': { const r = buyAnimal(w, me, a.animal, Math.max(1, Math.min(10, Math.round(a.n ?? 1)))); return / aldınız/.test(r) ? ok(r) : no(r); }
     case 'slaughter': { const r = slaughter(w, me, a.animal); return r.includes('kesildi') ? ok(r) : no(r); }

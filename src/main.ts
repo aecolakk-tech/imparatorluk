@@ -130,7 +130,7 @@ function walkTo(to: Pt): void {
   const w = world; const m = me(); if (!w || !m) return;
   if (m.jailedDays > 0) { toast('Zindandasınız.'); return; }
   const now = gameNow(); const from = myPos(w, m, now);
-  m.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * (m.riding && (m.animals?.at ?? 0) > 0 ? 1.5 : 1) }; // local prediction; the server computes the same path
+  m.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * (m.riding && (m.animals?.at ?? 0) > 0 ? 2 : 1) }; // local prediction; the server computes the same path
   localWalk = { walk: m.walk, id: m.id }; followCam = true; if (!lowGfx) { tapFx.x = to.x; tapFx.y = to.y; tapFx.t = performance.now(); }
   const pl = Object.values(w.players).find((x) => x.personId === m.id); if (pl) pl.lastSeen = Date.now();
   walkTarget = m.walk.path[m.walk.path.length - 1] ?? to;

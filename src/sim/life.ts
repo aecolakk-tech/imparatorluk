@@ -435,7 +435,7 @@ export const QUESTS: { text: string; done: (w: World, p: Person) => boolean }[] 
   { text: 'Bir vatandaşla sohbet edin (birine dokunun → Sohbet)', done: (_w, p) => Object.values(p.relNote).some((x) => x.includes('sohbet')) },
   { text: 'Saraya bir dilekçe yazın (Saray binası)', done: (w, p) => w.petitions.some((x) => x.fromId === p.id) },
   { text: 'Meclis seçiminde aday olun ya da oy verin (Meclis binası)', done: (w, p) => w.election.candidates.includes(p.id) || !!w.election.votes[p.id] || p.meclis },
-  { text: 'Hayvan Pazarı’na gidin (Buğday Tarlaları’nın güneyindeki çitli ağıl) ve bir tavuk ya da arsa alın', done: (_w, p) => !!p.farm || ['inek', 'koyun', 'tavuk', 'at'].some((a) => ((p.animals as Record<string, number> | undefined)?.[a] ?? 0) > 0) },
+  { text: 'Hayvan Pazarı’na gidin (Buğday Tarlaları’nın batısındaki çitli ağıl) ve bir tavuk ya da arsa alın', done: (_w, p) => !!p.farm || ['inek', 'koyun', 'tavuk', 'at'].some((a) => ((p.animals as Record<string, number> | undefined)?.[a] ?? 0) > 0) },
 ];
 export function questReward(w: World, playerId: string): string | null {
   const pl = w.players[playerId]; const p = findPerson(w, pl?.personId); if (!pl || !p) return null;

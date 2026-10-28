@@ -1,4 +1,4 @@
-import { migrate8 } from './realm';
+import { migrate9 } from './realm';
 import type { Building, BuildingKind, Good, Law, Person, Profession, World } from './types';
 import { GOODS } from './types';
 import { BASE_PRICE, DEFAULT_SALARY, MAP_H, MAP_W } from './constants';
@@ -208,7 +208,7 @@ export function createWorld(seed = 42, now = Date.now()): World {
   for (const s of w.meclis.seats) s.holder = null; for (const p of w.people) { p.meclis = false; p.immune = false; }
   log(w, 'İmparatorluk kuruldu. İlk Meclis seçimi 10. gün: adaylık şimdi açık (3. güne kadar), ardından propaganda.');
   w.todayEvents = [];
-  return migrate8(w);
+  return migrate9(w);
 }
 
 export function findPerson(w: World, id: string | null | undefined): Person | undefined {

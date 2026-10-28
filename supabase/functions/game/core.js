@@ -1657,12 +1657,12 @@ function migrateWorld(w) {
   return migrate3(w);
 }
 function migrate3(w) {
-  if ((w.schema ?? 1) >= 3) return migrate8(migrate4(w));
+  if ((w.schema ?? 1) >= 3) return migrate9(migrate4(w));
   const any = w;
   for (const [k, v] of Object.entries({ customLaws: [], suspicion: {}, treasuryBook: [], priceHist: {}, serving: [] })) if (any[k] === void 0) any[k] = v;
   if (w.granary < 800) w.granary = 800;
   w.schema = 3;
-  return migrate8(migrate4(w));
+  return migrate9(migrate4(w));
 }
 
 // src/sim/hooks.ts
@@ -2839,7 +2839,7 @@ function finishTrial(w, c, now) {
 function startWalk(w, me, to, now) {
   const q = placeOf(w, me.id, now);
   const from = q ? { x: q.x, y: q.y } : to;
-  me.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * (me.riding && (me.animals?.at ?? 0) > 0 ? 1.5 : 1) };
+  me.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * (me.riding && (me.animals?.at ?? 0) > 0 ? 2 : 1) };
 }
 function myPos(w, me, now) {
   if (playerWalking(w, me, now)) return walkPos(me.walk, now).pt;
@@ -3610,7 +3610,7 @@ var QUESTS = [
   { text: "Bir vatanda\u015Fla sohbet edin (birine dokunun \u2192 Sohbet)", done: (_w, p) => Object.values(p.relNote).some((x) => x.includes("sohbet")) },
   { text: "Saraya bir dilek\xE7e yaz\u0131n (Saray binas\u0131)", done: (w, p) => w.petitions.some((x) => x.fromId === p.id) },
   { text: "Meclis se\xE7iminde aday olun ya da oy verin (Meclis binas\u0131)", done: (w, p) => w.election.candidates.includes(p.id) || !!w.election.votes[p.id] || p.meclis },
-  { text: "Hayvan Pazar\u0131\u2019na gidin (Bu\u011Fday Tarlalar\u0131\u2019n\u0131n g\xFCneyindeki \xE7itli a\u011F\u0131l) ve bir tavuk ya da arsa al\u0131n", done: (_w, p) => !!p.farm || ["inek", "koyun", "tavuk", "at"].some((a) => (p.animals?.[a] ?? 0) > 0) }
+  { text: "Hayvan Pazar\u0131\u2019na gidin (Bu\u011Fday Tarlalar\u0131\u2019n\u0131n bat\u0131s\u0131ndaki \xE7itli a\u011F\u0131l) ve bir tavuk ya da arsa al\u0131n", done: (_w, p) => !!p.farm || ["inek", "koyun", "tavuk", "at"].some((a) => (p.animals?.[a] ?? 0) > 0) }
 ];
 function questReward(w, playerId) {
   const pl = w.players[playerId];
@@ -4753,7 +4753,7 @@ function createWorld(seed = 42, now = Date.now()) {
   }
   log(w, "\u0130mparatorluk kuruldu. \u0130lk Meclis se\xE7imi 10. g\xFCn: adayl\u0131k \u015Fimdi a\xE7\u0131k (3. g\xFCne kadar), ard\u0131ndan propaganda.");
   w.todayEvents = [];
-  return migrate8(w);
+  return migrate9(w);
 }
 function findPerson(w, id) {
   if (!id) return void 0;
@@ -5534,6 +5534,32 @@ function seedAnimals(w) {
     p.inv.bugday = Math.max(p.inv.bugday, 20);
   });
 }
+function placeHayvan(w) {
+  if (!w.buildings.some((b2) => b2.id === "hayvan")) {
+    const free = (x2, y2) => x2 >= 1 && y2 >= 1 && x2 + 8 < 99 && y2 + 7 <= 48 && !w.buildings.some((o) => o.id !== "hayvan" && x2 < o.x + o.w + 1 && x2 + 9 > o.x && y2 < o.y + o.h + 2 && y2 + 7 > o.y) && ![13, 20, 29, 35, 44].some((ry) => ry >= y2 && ry < y2 + 6) && ![6, 17, 29, 44, 56, 68, 80, 92].some((rx) => rx >= x2 && rx < x2 + 8);
+    let spot = null;
+    for (let r = 0; r < 40 && !spot; r++) for (let dx = -r; dx <= r && !spot; dx++) for (const dy of [-r, r, ...Array.from({ length: 2 * r - 1 }, (_, i) => i - r + 1)]) {
+      if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+      if (free(70 + dx, 37 + dy)) {
+        spot = [70 + dx, 37 + dy];
+        break;
+      }
+    }
+    const [x, y] = spot ?? [70, 37];
+    w.buildings.push({ id: "hayvan", name: "Hayvan Pazar\u0131", kind: "hayvan", x, y, w: 8, h: 5, door: { x: x + 4, y: y + 5 }, market: false });
+  }
+}
+function migrate9(w) {
+  w = migrate8(w);
+  if ((w.schema ?? 1) >= 9) return w;
+  const hv = w.buildings.find((b2) => b2.id === "hayvan");
+  if (hv && hv.y + hv.h + 2 > 48) {
+    w.buildings = w.buildings.filter((b2) => b2 !== hv);
+    placeHayvan(w);
+  }
+  w.schema = 9;
+  return w;
+}
 function migrate8(w) {
   w = migrate7(w);
   if ((w.schema ?? 1) >= 8) return w;
@@ -5553,19 +5579,7 @@ function migrate7(w) {
 function migrate6(w) {
   w = migrate5(w);
   if ((w.schema ?? 1) >= 6) return w;
-  if (!w.buildings.some((b2) => b2.id === "hayvan")) {
-    const free = (x2, y2) => x2 >= 1 && y2 >= 1 && x2 + 8 < 99 && y2 + 5 < 54 && !w.buildings.some((o) => x2 < o.x + o.w + 1 && x2 + 9 > o.x && y2 < o.y + o.h + 2 && y2 + 7 > o.y) && ![13, 20, 29, 35, 44].some((ry) => ry >= y2 && ry < y2 + 6) && ![6, 17, 29, 44, 56, 68, 80, 92].some((rx) => rx >= x2 && rx < x2 + 8);
-    let spot = null;
-    for (let r = 0; r < 40 && !spot; r++) for (let dx = -r; dx <= r && !spot; dx++) for (const dy of [-r, r, ...Array.from({ length: 2 * r - 1 }, (_, i) => i - r + 1)]) {
-      if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-      if (free(70 + dx, 37 + dy)) {
-        spot = [70 + dx, 37 + dy];
-        break;
-      }
-    }
-    const [x, y] = spot ?? [70, 37];
-    w.buildings.push({ id: "hayvan", name: "Hayvan Pazar\u0131", kind: "hayvan", x, y, w: 8, h: 5, door: { x: x + 4, y: y + 5 }, market: false });
-  }
+  placeHayvan(w);
   for (const p of w.people) {
     if (p.prof === "hayvanci") p.work = "hayvan";
     if (p.farm && !p.barn) {
@@ -6641,7 +6655,7 @@ function applyAction(w, playerId, a, now) {
     case "ride": {
       if (a.on && !hasHorse(me)) return no("At\u0131n\u0131z yok. Hayvan Pazar\u0131\u2019ndan al\u0131n.");
       me.riding = !!a.on;
-      return ok2(a.on ? "At\u0131n\u0131za bindiniz: %50 daha h\u0131zl\u0131s\u0131n\u0131z." : "Attan indiniz.");
+      return ok2(a.on ? "At\u0131n\u0131za bindiniz: iki kat h\u0131zl\u0131s\u0131n\u0131z." : "Attan indiniz.");
     }
     case "buyFarm": {
       const r = buyFarm(w, me);
