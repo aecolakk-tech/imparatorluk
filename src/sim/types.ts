@@ -119,7 +119,7 @@ export type CaseStage = 'savci' | 'hakim' | 'kapandi';
 export interface CourtCase {
   id: string; accusedId: string; crime: CrimeKind; victimId: string | null;
   amount: number; evidence: number; stage: CaseStage; day: number; deadline: number;
-  verdict?: 'suclu' | 'beraat' | 'dusuruldu' | 'af'; sentence?: string; trial?: Trial; bribed?: boolean; defenders?: string[]; witnesses?: { id: string; against: boolean }[]; eyewitnesses?: number; basis?: string; eyeIds?: string[]; complainantId?: string | null;
+  verdict?: 'suclu' | 'beraat' | 'dusuruldu' | 'af'; sentence?: string; trial?: Trial; bribed?: boolean; defenders?: string[]; witnesses?: { id: string; against: boolean }[]; called?: { id: string; at: number }[]; crimeH?: number; crimeX?: number; crimeY?: number; eyewitnesses?: number; basis?: string; eyeIds?: string[]; complainantId?: string | null;
 }
 
 export interface Law { id: string; name: string; desc: string; active: boolean; param?: number; paramLabel?: string; }
@@ -210,6 +210,7 @@ export interface World {
   arrests: Arrest[];
   chatOut: NpcMsg[];
   talks: Talk[];
+  posLog?: Record<string, [number, number, number][]>; posAt?: number; crimeLog?: { criminalId: string; victimId: string | null; H: number; x: number; y: number }[]; // v1.9.8 alibi history
   corpses?: Corpse[]; crimeReports?: { criminalId: string; victimId: string; crime: CrimeKind; amount: number; at: number; eyes?: number; eyeIds?: string[] }[]; escorts?: Escort[];
   llm?: { day: string; n: number; talkAt: number; speechAt?: number };
   offers: Offer[];
@@ -303,7 +304,7 @@ export type Action =
   | { t: 'directive'; topic: 'namaz' | 'icki' | 'laik' }
   | { t: 'granary'; op: 'buy' | 'release'; qty: number }
   | { t: 'priceCap'; good: Good; price: number | null }
-  | { t: 'defend'; caseId: string } | { t: 'witness'; caseId: string; against: boolean; text?: string } | { t: 'customize'; look: import('./look').Look; where: 'ilk' | 'terzi' | 'berber' }
+  | { t: 'defend'; caseId: string } | { t: 'witness'; caseId: string; against: boolean; text?: string } | { t: 'callWitness'; caseId: string; personId: string } | { t: 'customize'; look: import('./look').Look; where: 'ilk' | 'terzi' | 'berber' }
   | { t: 'smuggle'; on: boolean }
   | { t: 'borrow'; amount: number } | { t: 'repay'; loanId: string } | { t: 'festivalOpen'; cost: number } | { t: 'buildAt'; plotId: string; kind: string }
   | { t: 'move'; x: number; y: number } | { t: 'report'; corpseId: string } | { t: 'defense'; caseId: string; text: string } | { t: 'restCase'; caseId: string }

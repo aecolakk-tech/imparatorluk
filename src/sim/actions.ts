@@ -1,4 +1,5 @@
 import { cleanLook, lookFromSeeds, TERZI_PRICE, BERBER_PRICE } from './look';
+import { callWitness } from './alibi';
 import { ek } from './tr';
 import { moveIn, goInside, leaveHome, atHomeSafe } from './housing';
 import { kayzerBill, foundFaction, members } from './meclis';
@@ -99,8 +100,8 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
   const pl = w.players[playerId]; if (!pl || pl.banned) return no('Hesap bulunamadı.');
   const me = findPerson(w, pl.personId); if (!me) return no('Karakter bulunamadı.');
   const isKayzer = (ww: World, p: Person): boolean => canRule(ww, p, now, ONLINE_WINDOW_MS);
-  if ((me.homeUntil ?? 0) > now && !['goHome', 'setSpeed', 'setGoal', 'petition', 'answerProposal', 'defense', 'restCase'].includes(a.t)) leaveHome(me); // any other action = you step outside
-  const jailedOk: Action['t'][] = ['petition', 'eat', 'divorce', 'answerProposal', 'defense', 'restCase', 'offerBribe', 'setSpeed', 'setGoal'];
+  if ((me.homeUntil ?? 0) > now && !['goHome', 'setSpeed', 'setGoal', 'petition', 'answerProposal', 'defense', 'callWitness', 'restCase'].includes(a.t)) leaveHome(me); // any other action = you step outside
+  const jailedOk: Action['t'][] = ['petition', 'eat', 'divorce', 'answerProposal', 'defense', 'callWitness', 'restCase', 'offerBribe', 'setSpeed', 'setGoal'];
   const cellRising = (a.t === 'orgAct' && a.deed === 'ayaklanma') || (a.t === 'customize' && a.where === 'ilk'); // v1.9.6: a jailed leader can still give the signal
   if (me.jailedDays > 0 && !jailedOk.includes(a.t) && !cellRising) return no('Zindandasınız; şimdilik sadece dilekçe yazabilirsiniz.');
   const exileOk: Action['t'][] = [...jailedOk, 'restore', 'buy', 'sell', 'marry', 'haveChild', 'school', 'cure'];
@@ -448,6 +449,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       if (!transfer(w, me.id, 'saray', BERBER_PRICE, 'berber')) return no(`Berber ${BERBER_PRICE} Dinar ister.`);
       me.look = nl; return ok(`Berber işini bitirdi (${BERBER_PRICE} D).`);
     }
+    case 'callWitness': { const c = w.cases.find((x) => x.id === a.caseId); if (!c) return no('Dava yok.'); const e = callWitness(w, c, me, String(a.personId), now); return e ? no(e) : ok('Tanık çağrıldı.'); }
     case 'witness': {
       const c = w.cases.find((x) => x.id === a.caseId && x.stage !== 'kapandi'); if (!c || c.accusedId === me.id) return no('Dava yok.');
       c.witnesses = c.witnesses ?? []; if (c.witnesses.some((x) => x.id === me.id)) return no('Zaten tanıksınız.');

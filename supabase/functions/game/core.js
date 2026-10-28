@@ -2518,7 +2518,7 @@ function actionNeed(w, me, a) {
       return B([me.work, "santiye"], "i\u015F yerinize");
     case "witness": {
       const c = w.cases.find((x) => x.id === a.caseId);
-      if (c?.trial && !c.trial.done && ((c.eyeIds ?? []).includes(me.id) || c.trial.blamedId === me.id)) return null;
+      if (c?.trial && !c.trial.done && ((c.eyeIds ?? []).includes(me.id) || c.trial.blamedId === me.id || (c.called ?? []).some((x) => x.id === me.id))) return null;
       return B(["mahkeme"], "Mahkeme\u2019ye");
     }
     // summoned / eyewitness speak from the popup
@@ -2911,6 +2911,124 @@ function placeOf(w, id, now) {
   return placePeople(w, now).find((q) => q.p.id === id);
 }
 
+// src/sim/alibi.ts
+var POS_EVERY = 0.25;
+var POS_KEEP_H = 36;
+var NEAR_R = 3;
+var MAX_CALLS = 3;
+function gameH(w, ms) {
+  return w.day * 24 + w.hour + Math.max(0, Math.min(0.999, (ms - w.lastTickAt) / hourMs(w)));
+}
+function hLabel(w, H) {
+  const d = Math.floor(H / 24);
+  const hr = Math.floor(H - d * 24);
+  const mn = Math.floor((H - Math.floor(H)) * 4) * 15;
+  return `${d === w.day ? "" : d === w.day - 1 ? "d\xFCn " : `${d}. g\xFCn `}${String(hr).padStart(2, "0")}:${String(mn).padStart(2, "0")}`;
+}
+function samplePositions(w, now) {
+  const H = gameH(w, now);
+  if (H - (w.posAt ?? -99) < POS_EVERY) return;
+  w.posAt = H;
+  const log2 = w.posLog ??= {};
+  const alive = new Set(w.people.map((p) => p.id));
+  for (const q of placePeople(w, now)) {
+    const arr = log2[q.p.id] ??= [];
+    const last = arr[arr.length - 1];
+    const x = Math.round(q.x), y = Math.round(q.y);
+    if (!last || Math.hypot(last[1] - x, last[2] - y) >= 2 || H - last[0] >= 2) arr.push([Math.round(H * 100) / 100, x, y]);
+    while (arr.length > 2 && arr[1][0] < H - POS_KEEP_H) arr.shift();
+  }
+  for (const id of Object.keys(log2)) if (!alive.has(id)) delete log2[id];
+}
+function posAt(w, id, H) {
+  const arr = w.posLog?.[id];
+  if (!arr?.length) return null;
+  let best = null;
+  for (const s of arr) {
+    if (s[0] <= H + 0.01) best = s;
+    else break;
+  }
+  return best ? { x: best[1], y: best[2] } : null;
+}
+function placeName(w, pt) {
+  const b2 = w.buildings.find((b3) => pt.x >= b3.x - 0.5 && pt.x <= b3.x + b3.w + 0.5 && pt.y >= b3.y - 0.5 && pt.y <= b3.y + b3.h + 1);
+  return b2 ? b2.name : "sokakta";
+}
+function recordCrime(w, criminalId, victimId, now, x, y) {
+  w.crimeLog = [...w.crimeLog ?? [], { criminalId, victimId, H: Math.round(gameH(w, now) * 100) / 100, x: Math.round(x), y: Math.round(y) }].slice(-30);
+}
+function crimeTime(w, c) {
+  if (c.crimeH != null) return;
+  const e = [...w.crimeLog ?? []].reverse().find((x) => x.criminalId === c.accusedId && (!c.victimId || x.victimId === c.victimId)) ?? [...w.crimeLog ?? []].reverse().find((x) => x.criminalId === c.accusedId);
+  if (e) {
+    c.crimeH = e.H;
+    c.crimeX = e.x;
+    c.crimeY = e.y;
+  }
+}
+function together(w, a, b2, H0, H1) {
+  const ts = /* @__PURE__ */ new Set([H0]);
+  for (const id of [a, b2]) for (const s of w.posLog?.[id] ?? []) if (s[0] >= H0 && s[0] <= H1) ts.add(s[0]);
+  const out = [];
+  for (const t of [...ts].sort((x, y) => x - y)) {
+    const pa = posAt(w, a, t), pb = posAt(w, b2, t);
+    if (pa && pb && Math.hypot(pa.x - pb.x, pa.y - pb.y) <= NEAR_R) out.push(t);
+  }
+  return out;
+}
+function alibiTestimony(w, c, wit) {
+  const a = findPerson(w, c.accusedId);
+  const an = a?.name ?? "san\u0131k";
+  const H = c.crimeH;
+  if ((c.eyeIds ?? []).includes(wit.id)) return { text: `Ben olay\u0131 g\xF6rd\xFCm. ${an} oradayd\u0131 ve yapt\u0131.`, favor: false };
+  if (H == null) return { text: `Olay\u0131n ne zaman oldu\u011Funu bilmiyorum; ${an} hakk\u0131nda bir \u015Fey s\xF6yleyemem.`, favor: null };
+  const crimeL = hLabel(w, H);
+  const at = together(w, c.accusedId, wit.id, H - 0.5, H + 0.5);
+  if (at.length) {
+    const pl = placeName(w, posAt(w, wit.id, at[0]));
+    return { text: `Olay saatinde (${crimeL}) ${an} benim yan\u0131mdayd\u0131, ${pl === "sokakta" ? "sokakta" : ek(pl, "da")}. Su\xE7u ben g\xF6rmedim; o saatte yan\u0131mda olan biri orada olamaz.`, favor: true };
+  }
+  const after = together(w, c.accusedId, wit.id, H + 0.01, H + 4);
+  if (after.length) {
+    const t = after[0];
+    const pl = placeName(w, posAt(w, wit.id, t));
+    return { text: `${an} olay saatinde (${crimeL}) yan\u0131mda de\u011Fildi. Yan\u0131ma ancak ${hLabel(w, t)} civar\u0131 geldi (${pl}). Ondan \xF6ncesini bilmem.`, favor: false };
+  }
+  const before = together(w, c.accusedId, wit.id, H - 3, H - 0.5);
+  if (before.length) {
+    const t = before[before.length - 1];
+    return { text: `${an} ${hLabel(w, t)} civar\u0131 yan\u0131mdayd\u0131 ama sonra ayr\u0131ld\u0131; olay saatinde (${crimeL}) nerede oldu\u011Funu bilmiyorum.`, favor: null };
+  }
+  return { text: `O saatlerde (${crimeL}) ${an} ile hi\xE7 kar\u015F\u0131la\u015Fmad\u0131m. Lehine bir \u015Fey s\xF6yleyemem.`, favor: false };
+}
+function callWitness(w, c, me, witId, now) {
+  const tr = c.trial;
+  if (!tr || tr.done) return "\u015Eu an g\xF6r\xFClen bir dava yok.";
+  if (c.accusedId !== me.id) return "Tan\u0131\u011F\u0131 sadece san\u0131k \xE7a\u011F\u0131r\u0131r.";
+  if ((c.called ?? []).length >= MAX_CALLS) return `En fazla ${MAX_CALLS} tan\u0131k \xE7a\u011F\u0131rabilirsiniz.`;
+  const wit = findPerson(w, witId);
+  if (!wit || wit.id === me.id || wit.prof === "naip") return "B\xF6yle biri yok.";
+  if ((c.called ?? []).some((x) => x.id === wit.id)) return "Bu ki\u015Fi zaten \xE7a\u011Fr\u0131ld\u0131.";
+  crimeTime(w, c);
+  (c.called ??= []).push({ id: wit.id, at: now });
+  const judge = findPerson(w, tr.judgeId)?.name ?? "Kad\u0131";
+  tr.msgs.push({ who: "hakim", name: judge, text: `San\u0131\u011F\u0131n tan\u0131\u011F\u0131 ${wit.name} mahkemeye \xE7a\u011Fr\u0131ls\u0131n.`, at: now });
+  if (wit.playerId && !wit.npc) {
+    personal(w, wit.playerId, `\u2696 ${me.name} davas\u0131nda sizi tan\u0131k olarak \xE7a\u011F\u0131rd\u0131. Duru\u015Fma ekran\u0131ndan tan\u0131kl\u0131k edin.`, now);
+    return null;
+  }
+  if (!fullAI(wit) && wit.playerId) return null;
+  const t = alibiTestimony(w, c, wit);
+  tr.msgs.push({ who: "tanik", name: wit.name, text: t.text, at: now + 1 });
+  if (t.favor !== null) {
+    (c.witnesses ??= []).push({ id: wit.id, against: !t.favor });
+    rel(me, wit, t.favor ? 10 : -5, t.favor ? "lehime tan\u0131kl\u0131k etti" : "aleyhime tan\u0131kl\u0131k etti");
+  }
+  if (t.favor === true) tr.persuasion = Math.min(12, tr.persuasion + 3);
+  if (t.favor === false) tr.persuasion = Math.max(-12, tr.persuasion - 1);
+  return null;
+}
+
 // src/sim/v16.ts
 var CORPSE_MS = 5 * 6e4;
 var TRIAL_MS = 15e4;
@@ -2918,6 +3036,7 @@ var CUSTODY_MS = 6e4;
 function makeCorpse(w, v, killer, now) {
   const q = placeOf(w, v.id, now);
   const x = q?.x ?? 32, y = q?.y ?? 28;
+  if (killer) recordCrime(w, killer.id, v.id, now, x, y);
   const witnesses = placePeople(w, now).filter((o) => o.visible && o.p.id !== v.id && o.p.id !== killer?.id && Math.hypot(o.x - x, o.y - y) <= WITNESS_R).map((o) => o.p.id).slice(0, 6);
   const co = { id: nextId(w, "C"), personId: v.id, name: v.name, look: { hairColor: v.hairColor, skin: v.skin, shirt: v.shirt, female: v.female, prof: v.prof }, x, y, at: now, killerId: killer?.id ?? null, witnesses, stage: "yerde" };
   w.corpses = [...w.corpses ?? [], co].slice(-12);
@@ -2952,6 +3071,7 @@ function investigate(w, co, now) {
   log(w, `\u{1F50E} ${co.note}`, co.killerId ?? void 0, now);
 }
 function realtime(w, now) {
+  samplePositions(w, now);
   runTasks(w, now);
   processReports(w, now);
   for (const a of w.arrests) {
@@ -3002,6 +3122,7 @@ function realtime(w, now) {
 function startTrial(w, c, now) {
   const a = findPerson(w, c.accusedId);
   if (!a) return;
+  crimeTime(w, c);
   const judge = w.people.find((p) => p.prof === "hakim" && p.jailedDays === 0) ?? null;
   const pros = w.people.find((p) => p.prof === "savci" && p.jailedDays === 0) ?? null;
   const victim = findPerson(w, c.victimId)?.name ?? w.corpses?.find((x) => x.personId === c.victimId)?.name;
@@ -3009,7 +3130,7 @@ function startTrial(w, c, now) {
     { who: "savci", name: pros?.name ?? "Savc\u0131", text: `Say\u0131n Kad\u0131, san\u0131k ${a.name} ${CRIME_LABEL[c.crime].toLocaleLowerCase("tr")} ile itham ediliyor${victim ? `; ma\u011Fdur ${victim}` : ""}. Deliller ${c.evidence >= 70 ? "g\xFC\xE7l\xFC" : c.evidence >= 45 ? "yeterli" : "zay\u0131f"}${c.witnesses?.length ? `, ${c.witnesses.length} tan\u0131k var` : ""}. Cezaland\u0131r\u0131lmas\u0131n\u0131 talep ediyorum.`, at: now },
     { who: "hakim", name: judge?.name ?? "Kad\u0131", text: openingStatement(w, c, a), at: now + 500 },
     ...eyeTestimony(w, c, a, now + 700),
-    { who: "hakim", name: judge?.name ?? "Kad\u0131", text: `San\u0131k ${a.name}, s\xF6z sizde. Ba\u015Fkas\u0131n\u0131 su\xE7luyorsan\u0131z ad\u0131n\u0131 s\xF6yleyin; mahkemeye \xE7a\u011Fr\u0131l\u0131r. Kendinizi savunun; ${Math.round(TRIAL_MS / 6e4 * 10) / 10} dakikan\u0131z var.`, at: now + 1e3 }
+    { who: "hakim", name: judge?.name ?? "Kad\u0131", text: `San\u0131k ${a.name}, s\xF6z sizde. Ba\u015Fkas\u0131n\u0131 su\xE7luyorsan\u0131z ad\u0131n\u0131 s\xF6yleyin; mahkemeye \xE7a\u011Fr\u0131l\u0131r. Lehinize tan\u0131k \xE7a\u011F\u0131rabilirsiniz (\u201CTan\u0131k \xE7a\u011F\u0131r\u201D). Kendinizi savunun; ${Math.round(TRIAL_MS / 6e4 * 10) / 10} dakikan\u0131z var.`, at: now + 1e3 }
   ] };
   c.deadline = w.day + 2;
   log(w, `\u2696 ${ek(a.name, "\u0131n")} ${CRIME_LABEL[c.crime].toLocaleLowerCase("tr")} davas\u0131 g\xF6r\xFCl\xFCyor. Kad\u0131: ${judge?.name ?? "\u2014"}, Savc\u0131: ${pros?.name ?? "\u2014"}.`, a.id, now);
@@ -3623,12 +3744,13 @@ function outsideWorld(w) {
     for (const g of short.length ? short : ["alet", "elbise", "icki", "yun"]) goods[g] = g === "bugday" ? 200 : g === "su" ? 150 : g === "ekmek" ? 80 : 8;
     w.caravan = { day: w.day, until: w.day + 2, goods, name: pick(w, ["Halep kervan\u0131", "Venedik gemisi", "Ba\u011Fdat kervan\u0131", "Ceneviz t\xFCccarlar\u0131"]) };
     for (const [g, q] of Object.entries(goods)) w.listings.push({ id: nextId(w, "L"), sellerId: "dis", good: g, qty: q, price: Math.round(Math.max(BASE_PRICE[g] * 1.6, w.prices[g] * 1.15) * 100) / 100, market: "liman" });
-    log(w, `${w.caravan.name} limana geldi: ${Object.keys(goods).map((g) => GOOD_LABEL[g]).join(", ")} (pahal\u0131ca) sat\u0131yor. Hazine g\xFCmr\xFCk al\u0131r.`);
+    const gl = Object.keys(goods).map((g) => GOOD_LABEL[g]).join(", ");
+    disaster(w, "kervan", `${w.caravan.name} limana geldi (${w.caravan.until}. g\xFCne dek)! Sat\u0131yor: ${gl} \u2013 piyasan\u0131n \xFCst\xFCnde fiyatla ama bol. Her sat\u0131\u015Ftan hazineye g\xFCmr\xFCk girer. Kervan ayr\u0131ca pazardaki ucuz el i\u015Fi ve tah\u0131l\u0131n\u0131z\u0131 nakit al\u0131r: satacak mal\u0131n\u0131z varsa pazara koyun. Ayr\u0131l\u0131nca sat\u0131lmayan mal\u0131 geri g\xF6t\xFCr\xFCr.`);
   }
   if (!w.threat && w.day > 15 && chance(w, 0.025)) {
     const strength2 = 6 + Math.round(rand(w) * 10);
     w.threat = { name: pick(w, ["Da\u011F a\u015Firetleri", "Korsanlar", "Kom\u015Fu bey", "E\u015Fk\u0131ya \xE7etesi"]), demand: 150 + strength2 * 25, day: w.day, deadline: w.day + 2, strength: strength2 };
-    log(w, `SINIRDA TEHL\u0130KE: ${w.threat.name} ${w.threat.demand} Dinar hara\xE7 istiyor! \xD6denmezse ${w.threat.deadline}. g\xFCn sald\u0131racaklar.`);
+    disaster(w, "tehdit", `SINIRDA TEHL\u0130KE: ${w.threat.name} (g\xFC\xE7 ~${strength2}) ${w.threat.demand} Dinar hara\xE7 istiyor! \xD6denmezse ${w.threat.deadline}. g\xFCn sald\u0131racaklar. Ordumuzun g\xFCc\xFC \u015Fu an ~${armyPower(w).toFixed(1)} (asker + yar\u0131m g\xFC\xE7le bek\xE7iler). Kayzer harac\u0131 \xF6derse askerlerin sadakati d\xFC\u015Fer; sava\u015F\u0131l\u0131p kazan\u0131l\u0131rsa ganimet hazineye girer, kaybedilirse hazine ya\u011Fmalan\u0131r ve askerler \xF6l\xFCr.`);
   }
   if (w.threat && w.day >= w.threat.deadline) borderBattle(w);
 }
@@ -3653,7 +3775,7 @@ function caravanBuys(w, leaving = false) {
   c.spent = (c.spent ?? 0) + (start - budget);
 }
 function armyPower(w) {
-  return w.people.filter((p) => p.prof === "asker" && active2(p)).reduce((s, p) => s + 0.5 + p.loyalty / 100 + (p.inv.alet > 0 ? 0.2 : 0), 0);
+  return w.people.filter((p) => (p.prof === "asker" || p.prof === "bekci") && active2(p)).reduce((s, p) => s + (0.5 + p.loyalty / 100 + (p.inv.alet > 0 ? 0.2 : 0)) * (p.prof === "bekci" ? 0.5 : 1), 0);
 }
 function payTribute(w) {
   const t = w.threat;
@@ -3679,7 +3801,7 @@ function borderBattle(w) {
       }
       p.mood = clamp(p.mood + 2);
     }
-    log(w, `ZAFER! Ordu ${t.name}'n\u0131 p\xFCsk\xFCrtt\xFC; ${loot} Dinar ganimet hazineye girdi.`);
+    disaster(w, "zafer", `ZAFER! Ordu ${t.name} sald\u0131r\u0131s\u0131n\u0131 p\xFCsk\xFCrtt\xFC; ${loot} Dinar ganimet hazineye girdi. Askerlerin sadakati +6, herkesin morali +2.`);
   } else {
     const loss = Math.min(w.treasury, t.demand * 1.5);
     transfer(w, "saray", "dis", loss, "ya\u011Fma");
@@ -3689,7 +3811,7 @@ function borderBattle(w) {
       p.mood = clamp(p.mood - 5);
       p.loyalty = clamp(p.loyalty - 4);
     }
-    log(w, `YEN\u0130LG\u0130! ${t.name} \u015Fehri ya\u011Fmalad\u0131: hazineden ${Math.round(loss)} Dinar gitti.`);
+    disaster(w, "yenilgi", `YEN\u0130LG\u0130! ${t.name} \u015Fehri ya\u011Fmalad\u0131: hazineden ${Math.round(loss)} Dinar gitti, ${dead.length} asker \u015Fehit d\xFC\u015Ft\xFC. Herkesin morali \u22125, sadakati \u22124.`);
   }
 }
 function collectTaxes(w) {
@@ -3781,6 +3903,7 @@ function crimeSeen(w, criminal, victim, crime, amount) {
   const placed = placePeople(w, now);
   const cq = placed.find((q) => q.p.id === criminal.id);
   const near = cq ? placed.filter((q) => q.visible && q.p.id !== criminal.id && q.p.id !== victim?.id && Math.hypot(q.x - cq.x, q.y - cq.y) <= WITNESS_R) : [];
+  if (cq) recordCrime(w, criminal.id, victim?.id ?? null, now, cq.x, cq.y);
   const bekci = near.find((q) => q.p.prof === "bekci" && q.p.jailedDays === 0 && q.p.id !== criminal.id);
   const eyes = near.length;
   if (bekci) return arrest(w, criminal, crime, victim?.id ?? null, amount, bekci.p, { evidence: Math.min(95, 80 + eyes * 3), eyewitnesses: eyes, eyeIds: near.map((q) => q.p.id), complainantId: bekci.p.id, basis: `su\xE7\xFCst\xFC: bek\xE7i 2 m i\xE7inde g\xF6rd\xFC${eyes > 1 ? `, ${eyes - 1} g\xF6rg\xFC tan\u0131\u011F\u0131 daha` : ""}` });
@@ -6653,8 +6776,8 @@ function applyAction(w, playerId, a, now) {
   const me = findPerson(w, pl.personId);
   if (!me) return no("Karakter bulunamad\u0131.");
   const isKayzer = (ww, p) => canRule(ww, p, now, ONLINE_WINDOW_MS);
-  if ((me.homeUntil ?? 0) > now && !["goHome", "setSpeed", "setGoal", "petition", "answerProposal", "defense", "restCase"].includes(a.t)) leaveHome(me);
-  const jailedOk = ["petition", "eat", "divorce", "answerProposal", "defense", "restCase", "offerBribe", "setSpeed", "setGoal"];
+  if ((me.homeUntil ?? 0) > now && !["goHome", "setSpeed", "setGoal", "petition", "answerProposal", "defense", "callWitness", "restCase"].includes(a.t)) leaveHome(me);
+  const jailedOk = ["petition", "eat", "divorce", "answerProposal", "defense", "callWitness", "restCase", "offerBribe", "setSpeed", "setGoal"];
   const cellRising = a.t === "orgAct" && a.deed === "ayaklanma" || a.t === "customize" && a.where === "ilk";
   if (me.jailedDays > 0 && !jailedOk.includes(a.t) && !cellRising) return no("Zindandas\u0131n\u0131z; \u015Fimdilik sadece dilek\xE7e yazabilirsiniz.");
   const exileOk = [...jailedOk, "restore", "buy", "sell", "marry", "haveChild", "school", "cure"];
@@ -7417,6 +7540,12 @@ function applyAction(w, playerId, a, now) {
       if (!transfer(w, me.id, "saray", BERBER_PRICE, "berber")) return no(`Berber ${BERBER_PRICE} Dinar ister.`);
       me.look = nl;
       return ok2(`Berber i\u015Fini bitirdi (${BERBER_PRICE} D).`);
+    }
+    case "callWitness": {
+      const c = w.cases.find((x) => x.id === a.caseId);
+      if (!c) return no("Dava yok.");
+      const e = callWitness(w, c, me, String(a.personId), now);
+      return e ? no(e) : ok2("Tan\u0131k \xE7a\u011Fr\u0131ld\u0131.");
     }
     case "witness": {
       const c = w.cases.find((x) => x.id === a.caseId && x.stage !== "kapandi");

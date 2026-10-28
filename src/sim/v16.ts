@@ -19,6 +19,7 @@ import { marketPrice } from './economy';
 import { findPath, WALK_SPEED, walkPos, type Pt } from './move';
 import { playerWalking } from './place';
 import { runTasks } from './orders';
+import { samplePositions, recordCrime, crimeTime } from './alibi';
 
 export const CORPSE_MS = 5 * 60_000; // a body lies on the street for 5 real minutes
 export const TRIAL_MS = 150_000;
@@ -27,6 +28,7 @@ export const CUSTODY_MS = 60_000; // a caught player waits 1 real minute in cust
 /** A murder: the victim falls where he stood; who was close enough saw it. */
 export function makeCorpse(w: World, v: Person, killer: Person | null, now: number): Corpse {
   const q = placeOf(w, v.id, now); const x = q?.x ?? 32, y = q?.y ?? 28;
+  if (killer) recordCrime(w, killer.id, v.id, now, x, y);
   const witnesses = placePeople(w, now).filter((o) => o.visible && o.p.id !== v.id && o.p.id !== killer?.id && Math.hypot(o.x - x, o.y - y) <= WITNESS_R).map((o) => o.p.id).slice(0, 6);
   const co: Corpse = { id: nextId(w, 'C'), personId: v.id, name: v.name, look: { hairColor: v.hairColor, skin: v.skin, shirt: v.shirt, female: v.female, prof: v.prof }, x, y, at: now, killerId: killer?.id ?? null, witnesses, stage: 'yerde' };
   w.corpses = [...(w.corpses ?? []), co].slice(-12);
@@ -58,7 +60,7 @@ function investigate(w: World, co: Corpse, now: number): void {
 
 /** Called on every heartbeat/action with the real time. Idempotent. */
 export function realtime(w: World, now: number): void {
-  runTasks(w, now); processReports(w, now);
+  samplePositions(w, now); runTasks(w, now); processReports(w, now);
   // v1.7: a caught PLAYER goes arrest → custody (1 min bribe window) → savcı → live hearing; never straight to the zindan
   for (const a of w.arrests) {
     if (a.status !== 'bekliyor') continue; const cr = findPerson(w, a.criminalId); if (!cr?.playerId || cr.npc) continue;
@@ -92,7 +94,7 @@ export function realtime(w: World, now: number): void {
 
 // ---------------- trials ----------------
 export function startTrial(w: World, c: CourtCase, now: number): void {
-  const a = findPerson(w, c.accusedId); if (!a) return;
+  const a = findPerson(w, c.accusedId); if (!a) return; crimeTime(w, c);
   const judge = w.people.find((p) => p.prof === 'hakim' && p.jailedDays === 0) ?? null;
   const pros = w.people.find((p) => p.prof === 'savci' && p.jailedDays === 0) ?? null;
   const victim = findPerson(w, c.victimId)?.name ?? w.corpses?.find((x) => x.personId === c.victimId)?.name;
@@ -100,7 +102,7 @@ export function startTrial(w: World, c: CourtCase, now: number): void {
     { who: 'savci', name: pros?.name ?? 'Savcı', text: `Sayın Kadı, sanık ${a.name} ${CRIME_LABEL[c.crime].toLocaleLowerCase('tr')} ile itham ediliyor${victim ? `; mağdur ${victim}` : ''}. Deliller ${c.evidence >= 70 ? 'güçlü' : c.evidence >= 45 ? 'yeterli' : 'zayıf'}${c.witnesses?.length ? `, ${c.witnesses.length} tanık var` : ''}. Cezalandırılmasını talep ediyorum.`, at: now },
     { who: 'hakim', name: judge?.name ?? 'Kadı', text: openingStatement(w, c, a), at: now + 500 },
     ...eyeTestimony(w, c, a, now + 700),
-    { who: 'hakim', name: judge?.name ?? 'Kadı', text: `Sanık ${a.name}, söz sizde. Başkasını suçluyorsanız adını söyleyin; mahkemeye çağrılır. Kendinizi savunun; ${Math.round(TRIAL_MS / 60000 * 10) / 10} dakikanız var.`, at: now + 1000 },
+    { who: 'hakim', name: judge?.name ?? 'Kadı', text: `Sanık ${a.name}, söz sizde. Başkasını suçluyorsanız adını söyleyin; mahkemeye çağrılır. Lehinize tanık çağırabilirsiniz (“Tanık çağır”). Kendinizi savunun; ${Math.round(TRIAL_MS / 60000 * 10) / 10} dakikanız var.`, at: now + 1000 },
   ] };
   c.deadline = w.day + 2;
   log(w, `⚖ ${ek(a.name, 'ın')} ${CRIME_LABEL[c.crime].toLocaleLowerCase('tr')} davası görülüyor. Kadı: ${judge?.name ?? '—'}, Savcı: ${pros?.name ?? '—'}.`, a.id, now);

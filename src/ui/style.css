@@ -177,3 +177,17 @@ body.low *, body.low *::before, body.low *::after { animation:none !important; t
 body.inside-home canvas { filter: brightness(0.55) saturate(0.7); transition: filter .4s; }
 .inside-ov { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 30; display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 14px; background: rgba(28,20,12,.92); color: #f4ecd8; font-size: 14px; box-shadow: 0 4px 18px rgba(0,0,0,.4); }
 .inside-ov svg { width: 20px; height: 20px; }
+/* v1.9.8: small landscape phones (360–412px tall, keyboard open): every login/modal scrolls instead of overflowing */
+.login { overflow-y:auto; -webkit-overflow-scrolling:touch; align-items:flex-start; overscroll-behavior:contain; }
+.login .box { margin:auto; max-height:none; }
+.modal { overflow-y:auto; -webkit-overflow-scrolling:touch; align-items:flex-start; overscroll-behavior:contain; }
+.modal .box { margin:auto; max-height:calc(100dvh - 24px); overflow-y:auto; -webkit-overflow-scrolling:touch; }
+@media (max-height: 460px) {
+  .login { padding:6px; } .login .box { padding:10px 14px; width:min(560px,100%); }
+  .login h1, .login h2 { font-size:18px; margin:2px 0 6px; }
+  .login label { margin:4px 0 1px; font-size:12px; }
+  .login input, .login select { padding:6px 8px; font-size:15px; }
+  .modal { padding:6px; } .modal .box { padding:10px 12px; max-height:calc(100dvh - 12px); }
+  .look-modal .look-prev { width:80px !important; height:80px !important; }
+  .look-modal .look-row { margin:2px 0; } .look-modal h2 { font-size:16px; margin:0 0 4px; }
+}

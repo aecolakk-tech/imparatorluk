@@ -4,6 +4,7 @@ import { interrogate } from './realm';
 import { revealOrder } from './orders';
 import { makeCorpse } from './v16';
 import { placePeople } from './place';
+import { recordCrime } from './alibi';
 /**
  * Daily life: needs (3 meals + 5 water), health & doctors, religiosity (cami / meyhane / vaaz / devlet yönlendirmesi),
  * crafts that matter (elbise, mobilya, alet, odun), nature (kuraklık every 180 days, salgın, sel, bereket),
@@ -224,13 +225,14 @@ function outsideWorld(w: World): void {
     for (const g of short.length ? short : (['alet', 'elbise', 'icki', 'yun'] as Good[])) goods[g] = g === 'bugday' ? 200 : g === 'su' ? 150 : g === 'ekmek' ? 80 : 8;
     w.caravan = { day: w.day, until: w.day + 2, goods, name: pick(w, ['Halep kervanı', 'Venedik gemisi', 'Bağdat kervanı', 'Ceneviz tüccarları']) };
     for (const [g, q] of Object.entries(goods) as [Good, number][]) w.listings.push({ id: nextId(w, 'L'), sellerId: 'dis', good: g, qty: q, price: Math.round(Math.max(BASE_PRICE[g] * 1.6, w.prices[g] * 1.15) * 100) / 100, market: 'liman' });
-    log(w, `${w.caravan.name} limana geldi: ${Object.keys(goods).map((g) => GOOD_LABEL[g as Good]).join(', ')} (pahalıca) satıyor. Hazine gümrük alır.`);
+    const gl = Object.keys(goods).map((g) => GOOD_LABEL[g as Good]).join(', ');
+    disaster(w, 'kervan', `${w.caravan.name} limana geldi (${w.caravan.until}. güne dek)! Satıyor: ${gl} – piyasanın üstünde fiyatla ama bol. Her satıştan hazineye gümrük girer. Kervan ayrıca pazardaki ucuz el işi ve tahılınızı nakit alır: satacak malınız varsa pazara koyun. Ayrılınca satılmayan malı geri götürür.`);
   }
   // border threats
   if (!w.threat && w.day > 15 && chance(w, 0.025)) {
     const strength = 6 + Math.round(rand(w) * 10);
     w.threat = { name: pick(w, ['Dağ aşiretleri', 'Korsanlar', 'Komşu bey', 'Eşkıya çetesi']), demand: 150 + strength * 25, day: w.day, deadline: w.day + 2, strength };
-    log(w, `SINIRDA TEHLİKE: ${w.threat.name} ${w.threat.demand} Dinar haraç istiyor! Ödenmezse ${w.threat.deadline}. gün saldıracaklar.`);
+    disaster(w, 'tehdit', `SINIRDA TEHLİKE: ${w.threat.name} (güç ~${strength}) ${w.threat.demand} Dinar haraç istiyor! Ödenmezse ${w.threat.deadline}. gün saldıracaklar. Ordumuzun gücü şu an ~${armyPower(w).toFixed(1)} (asker + yarım güçle bekçiler). Kayzer haracı öderse askerlerin sadakati düşer; savaşılıp kazanılırsa ganimet hazineye girer, kaybedilirse hazine yağmalanır ve askerler ölür.`);
   }
   if (w.threat && w.day >= w.threat.deadline) borderBattle(w);
 }
@@ -246,7 +248,8 @@ function caravanBuys(w: World, leaving = false): void {
   }
   c.spent = (c.spent ?? 0) + (start - budget);
 }
-export function armyPower(w: World): number { return w.people.filter((p) => p.prof === 'asker' && active(p)).reduce((s, p) => s + 0.5 + p.loyalty / 100 + (p.inv.alet > 0 ? 0.2 : 0), 0); }
+/** v1.9.8: bekçiler fight at half strength. */
+export function armyPower(w: World): number { return w.people.filter((p) => (p.prof === 'asker' || p.prof === 'bekci') && active(p)).reduce((s, p) => s + (0.5 + p.loyalty / 100 + (p.inv.alet > 0 ? 0.2 : 0)) * (p.prof === 'bekci' ? 0.5 : 1), 0); }
 export function payTribute(w: World): string {
   const t = w.threat; if (!t) return 'Haraç isteyen yok.';
   if (!transfer(w, 'saray', 'dis', t.demand, 'haraç')) return 'Hazine haraca yetmiyor!';
@@ -259,13 +262,13 @@ export function borderBattle(w: World): void {
   if (ours >= t.strength) {
     const loot = Math.round(t.demand * 0.6); transfer(w, 'dis', 'saray', loot, 'ganimet');
     for (const p of w.people) { if (p.prof === 'asker') { p.loyalty = clamp(p.loyalty + 6); p.xp += 3; } p.mood = clamp(p.mood + 2); }
-    log(w, `ZAFER! Ordu ${t.name}'nı püskürttü; ${loot} Dinar ganimet hazineye girdi.`);
+    disaster(w, 'zafer', `ZAFER! Ordu ${t.name} saldırısını püskürttü; ${loot} Dinar ganimet hazineye girdi. Askerlerin sadakati +6, herkesin morali +2.`);
   } else {
     const loss = Math.min(w.treasury, t.demand * 1.5); transfer(w, 'saray', 'dis', loss, 'yağma');
     const dead = w.people.filter((p) => p.prof === 'asker' && !p.playerId).slice(0, 2);
     for (const p of dead) die(w, p, `Asker ${p.name} sınırda şehit düştü.`);
     for (const p of w.people) { p.mood = clamp(p.mood - 5); p.loyalty = clamp(p.loyalty - 4); }
-    log(w, `YENİLGİ! ${t.name} şehri yağmaladı: hazineden ${Math.round(loss)} Dinar gitti.`);
+    disaster(w, 'yenilgi', `YENİLGİ! ${t.name} şehri yağmaladı: hazineden ${Math.round(loss)} Dinar gitti, ${dead.length} asker şehit düştü. Herkesin morali −5, sadakati −4.`);
   }
 }
 
@@ -354,6 +357,7 @@ export function crimeSeen(w: World, criminal: Person, victim: Person | null, cri
   const now = w.serverNow ?? w.lastTickAt;
   const placed = placePeople(w, now); const cq = placed.find((q) => q.p.id === criminal.id);
   const near = cq ? placed.filter((q) => q.visible && q.p.id !== criminal.id && q.p.id !== victim?.id && Math.hypot(q.x - cq.x, q.y - cq.y) <= WITNESS_R) : [];
+  if (cq) recordCrime(w, criminal.id, victim?.id ?? null, now, cq.x, cq.y);
   const bekci = near.find((q) => q.p.prof === 'bekci' && q.p.jailedDays === 0 && q.p.id !== criminal.id);
   const eyes = near.length;
   if (bekci) return arrest(w, criminal, crime, victim?.id ?? null, amount, bekci.p, { evidence: Math.min(95, 80 + eyes * 3), eyewitnesses: eyes, eyeIds: near.map((q) => q.p.id), complainantId: bekci.p.id, basis: `suçüstü: bekçi 2 m içinde gördü${eyes > 1 ? `, ${eyes - 1} görgü tanığı daha` : ''}` });

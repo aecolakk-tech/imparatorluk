@@ -28,6 +28,7 @@ import { electionDates, electionPhase } from './sim/tick';
 import { CRIME_LABEL } from './sim/ai';
 import type { Corpse, CourtCase } from './sim/types';
 import { avatar as av2 } from './ui/panels';
+import { witnessCandidates, hLabel } from './sim/alibi';
 
 const app = document.getElementById('app')!;
 const be: Backend = makeBackend();
@@ -706,8 +707,23 @@ const markSeen = (id: string): void => { trialSeen.add(tKey(id)); localStorage.s
 function witnessBox(c: CourtCase, blamed: boolean): HTMLElement {
   const wi = h('input', { maxlength: '300', placeholder: blamed ? 'Suçlamaya cevap verin…' : 'Ne gördünüz? Tanıklığınızı yazın…', style: 'flex:1' });
   const go = (against: boolean): void => { void send({ t: 'witness', caseId: c.id, against, text: wi.value }).then(() => trialPopup()); wi.value = ''; };
-  return h('div', {}, h('div', { class: 'muted' }, blamed ? '❗ Sanık sizi suçladı; mahkemeye çağrıldınız.' : '👁 Tanıklık yap: sözünüz kararı etkiler.'), h('div', { class: 'row' }, wi),
+  return h('div', {}, h('div', { class: 'muted' }, blamed ? '❗ Sanık sizi suçladı; mahkemeye çağrıldınız.' : (c.called ?? []).some((x) => x.id === me()?.id) ? '📣 Sanık sizi tanık olarak çağırdı: olay saatinde onu gördünüz mü? Doğruyu söyleyin.' : '👁 Tanıklık yap: sözünüz kararı etkiler.'), h('div', { class: 'row' }, wi),
     h('div', { class: 'row' }, h('button', { class: 'danger', onclick: () => go(true) }, blamed ? 'Sanık yaptı' : 'Aleyhte tanıklık'), h('button', { class: 'primary', onclick: () => go(false) }, blamed ? 'Bilmiyorum, ben yapmadım' : 'Lehte tanıklık')));
+}
+/** v1.9.8: the defendant picks alibi witnesses; those near him around the crime time come first. */
+function openWitnessPicker(c: CourtCase): void {
+  const w = world; if (!w) return;
+  if ((c.called ?? []).length >= 3) { toast('En fazla 3 tanık çağırabilirsiniz.'); return; }
+  const all = witnessCandidates(w, c); const q = h('input', { placeholder: 'İsim ara…', style: 'flex:1' });
+  const list = h('div', { class: 'wit-list' });
+  const draw = (): void => {
+    const t = q.value.toLocaleLowerCase('tr').trim();
+    const rows = all.filter((x) => (t ? x.name.toLocaleLowerCase('tr').includes(t) : true)).slice(0, t ? 40 : 25);
+    list.replaceChildren(...rows.map((x) => { const p = findPerson(w, x.id); return h('div', { class: 'card row', style: 'align-items:center;gap:8px' }, p ? av2(p, 36) : '', h('div', { style: 'flex:1' }, h('b', {}, x.name), p ? ` · ${PROF_LABEL[p.prof] ?? ''}` : '', h('div', { class: 'muted' }, x.near ? `📍 ${x.hint}` : 'Olay saatine yakın yanınızda görülmedi')), h('button', { class: x.near ? 'primary' : '', onclick: () => { el.remove(); void send({ t: 'callWitness', caseId: c.id, personId: x.id }).then(() => trialPopup()); } }, 'Çağır')); }));
+  };
+  q.addEventListener('input', draw); draw();
+  const el = h('div', { class: 'modal' }, h('div', { class: 'box' }, h('h2', {}, '👥 Tanık çağır'), h('div', { class: 'muted' }, `Olay saati: ${c.crimeH != null ? hLabel(w, c.crimeH) : 'bilinmiyor'}. Tanık, kayıtlı konumlara göre doğruyu söyler: olay saatinde yanınızdaysa lehinize konuşur, değilse “yanımda değildi” der.`), h('div', { class: 'row' }, q), list, h('button', { onclick: () => el.remove() }, 'Kapat')));
+  el.style.zIndex = '60'; app.append(el);
 }
 let disasterSeen = Number(localStorage.getItem('imp-disaster-seen') ?? '0'); let disasterFirst = true;
 /** v1.9.6: a disaster pops up for every online player, with vibration. */
@@ -717,13 +733,27 @@ function disasterPopup(): void {
   if (d.id <= disasterSeen) return; disasterSeen = d.id; localStorage.setItem('imp-disaster-seen', String(d.id));
   try { navigator.vibrate?.([300, 120, 300, 120, 300]); } catch { /* no vibration */ }
   sfx('drums');
-  const icon: Record<string, string> = { kuraklik: '☀️', salgin: '🦠', sel: '🌊', kitlik: '🍞', yangin: '🔥' };
-  const el = h('div', { class: 'modal disaster' }, h('div', { class: 'box' }, h('h2', {}, `${icon[d.kind] ?? '⚠'} AFET!`), h('div', { class: 'card warn' }, h('b', {}, d.text)), h('button', { class: 'primary', onclick: () => el.remove() }, 'Anladım')));
+  const icon: Record<string, string> = { kuraklik: '☀️', salgin: '🦠', sel: '🌊', kitlik: '🍞', yangin: '🔥', kervan: '🐪', tehdit: '⚔️', zafer: '🏆', yenilgi: '💀' };
+  const title: Record<string, string> = { kervan: 'KERVAN GELDİ', tehdit: 'SINIRDA TEHLİKE', zafer: 'ZAFER', yenilgi: 'YENİLGİ' };
+  const w = world!; const m = me(); const ruler = !!m && w.kayzerId === m.id;
+  const close = (): void => el.remove();
+  const opts: HTMLElement[] = [];
+  if (d.kind === 'kervan' && w.caravan) {
+    const lim = w.buildings.find((b) => b.kind === 'liman');
+    const goods = w.listings.filter((l) => l.sellerId === 'dis' && l.qty > 0).map((l) => `${GOOD_LABEL[l.good]} ${l.qty} adet × ${fmt(l.price)} D`).join(' · ');
+    if (goods) opts.push(h('div', { class: 'muted' }, `Limanda: ${goods}`));
+    if (lim) opts.push(h('button', { class: 'primary', onclick: () => { close(); walkTo(doorSpot(lim)); openSheet(() => bPanel(lim)); } }, '🐪 Limana git, kervandan al'));
+  }
+  if (d.kind === 'tehdit' && w.threat) {
+    if (ruler) opts.push(h('div', { class: 'row' }, h('button', { onclick: () => { close(); void doAct({ t: 'tribute', pay: true }); } }, `Haracı öde (${w.threat.demand} D)`), h('button', { class: 'danger', onclick: () => { close(); void doAct({ t: 'tribute', pay: false }); } }, '⚔️ Reddet, ordu savaşsın')));
+    else opts.push(h('div', { class: 'muted' }, 'Kararı Kayzer verir (Yönetim → haraç). Asker ya da bekçi olarak çalışmak ordunun gücüne katkı sağlar.'));
+  }
+  const el = h('div', { class: 'modal disaster' }, h('div', { class: 'box' }, h('h2', {}, `${icon[d.kind] ?? '⚠'} ${title[d.kind] ?? 'AFET!'}`), h('div', { class: 'card warn' }, h('b', {}, d.text)), ...opts, h('button', { class: opts.length ? '' : 'primary', onclick: close }, 'Anladım')));
   app.append(el);
 }
 function trialPopup(): void {
   const w = world; const m = me(); if (!w || !m) return;
-  const c: CourtCase | undefined = w.cases.find((x) => x.trial && (x.accusedId === m.id || x.trial.judgeId === m.id || x.trial.prosecutorId === m.id || x.trial.blamedId === m.id || (x.eyeIds ?? []).includes(m.id) || (x.witnesses ?? []).some((v) => v.id === m.id)) && (!x.trial.done || (!trialSeen.has(tKey(x.id)) && x.stage !== 'kapandi' ? true : !trialSeen.has(tKey(x.id)) && gameNow() - (x.trial.doneAt ?? 0) < 120_000)) && !(x.trial.done && x.verdict === 'dusuruldu' && x.sentence?.startsWith('Aynı olay')));
+  const c: CourtCase | undefined = w.cases.find((x) => x.trial && (x.accusedId === m.id || x.trial.judgeId === m.id || x.trial.prosecutorId === m.id || x.trial.blamedId === m.id || (x.eyeIds ?? []).includes(m.id) || (x.witnesses ?? []).some((v) => v.id === m.id) || (x.called ?? []).some((v) => v.id === m.id)) && (!x.trial.done || (!trialSeen.has(tKey(x.id)) && x.stage !== 'kapandi' ? true : !trialSeen.has(tKey(x.id)) && gameNow() - (x.trial.doneAt ?? 0) < 120_000)) && !(x.trial.done && x.verdict === 'dusuruldu' && x.sentence?.startsWith('Aynı olay')));
   if (!c?.trial) { trialEl?.remove(); trialEl = null; return; }
   if (trialEl?.contains(document.activeElement) && document.activeElement?.tagName === 'INPUT') { const n = trialEl.querySelectorAll('.msg').length; if (n === c.trial.msgs.length) return; }
   const tr = c.trial; const role = (id: string | null, label: string): HTMLElement => { const p = findPerson(w, id); return h('div', { class: 'role' }, p ? av2(p, 56) : h('div', { class: 'avatar' }), h('b', {}, label), h('div', { class: 'muted' }, p?.name ?? '—')); };
@@ -737,7 +767,7 @@ function trialPopup(): void {
   const box = h('div', { class: 'box trial' }, h('h2', {}, `⚖ Duruşma: ${CRIME_LABEL[c.crime]} – ${acc?.name ?? ''}`),
     h('div', { class: 'roles' }, role(tr.judgeId, 'Kadı'), role(tr.prosecutorId, 'Savcı'), role(c.accusedId, 'Sanık')), list,
     tr.done ? h('div', { class: 'card verdict' }, h('b', {}, tr.verdictText ?? 'Karar verildi.'), h('div', { style: 'margin-top:8px' }, h('button', { class: 'primary', onclick: () => { markSeen(c.id); trialEl?.remove(); trialEl = null; } }, 'Tamam')))
-      : c.accusedId === m.id ? h('div', {}, h('div', { class: 'row' }, inp, h('button', { class: 'primary', onclick: () => void go() }, 'Savun')), h('div', { class: 'row' }, h('span', { class: 'muted' }, `Kalan süre ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} · en fazla 5 söz`), h('button', { onclick: () => void send({ t: 'restCase', caseId: c.id }) }, 'Savunmam bitti, karar verilsin')))
+      : c.accusedId === m.id ? h('div', {}, h('div', { class: 'row' }, inp, h('button', { class: 'primary', onclick: () => void go() }, 'Savun')), h('div', { class: 'row' }, h('span', { class: 'muted' }, `Kalan süre ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} · en fazla 5 söz`), h('button', { onclick: () => openWitnessPicker(c) }, `👥 Tanık çağır (${3 - (c.called ?? []).length})`), h('button', { onclick: () => void send({ t: 'restCase', caseId: c.id }) }, 'Savunmam bitti, karar verilsin')))
         : tr.judgeId === m.id || tr.prosecutorId === m.id ? h('div', { class: 'muted' }, 'Duruşmayı izliyorsunuz.') : witnessBox(c, tr.blamedId === m.id));
   const wasDone = trialEl?.dataset.done === '1';
   const el = h('div', { class: 'modal trial-modal' }, box); el.dataset.done = tr.done ? '1' : '0';
@@ -760,7 +790,7 @@ try { void (screen.orientation as unknown as { lock?: (o: string) => Promise<voi
 if ('serviceWorker' in navigator && location.protocol === 'https:') void navigator.serviceWorker.register('./sw.js').catch(() => {});
 let installEvt: (Event & { prompt?: () => void }) | null = null;
 addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; showInstallHint(); });
-function showInstallHint(): void {
+function showInstallHint(): void { if ((window as unknown as { Capacitor?: unknown }).Capacitor || /wv\)/.test(navigator.userAgent)) return; // inside the Android app
   const standalone = matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches || (navigator as { standalone?: boolean }).standalone;
   if (standalone || localStorage.getItem('imp-a2hs') === '1' || document.querySelector('.a2hs')) return;
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent); if (!ios && !installEvt) return;
