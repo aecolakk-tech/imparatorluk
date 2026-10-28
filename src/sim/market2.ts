@@ -1,9 +1,10 @@
 /**
  * v2.0.1 economy: one price source (shelf prices), Liman toptancısı vs Çarşı price gap, tüccar arbitrage,
- * Pazar Günü every 5 days, sipariş ilanları, wage index, poverty effects (complaints, hunger, petitions, migration),
+ * Panayır every 5 days, sipariş ilanları, wage index, poverty effects (complaints, hunger, petitions, migration),
  * Kayzer tools (ithalat izni, ambar dağıtımı, narh → karaborsa), price-spike news and the Şehir Göstergesi history.
  * All money moves through transfer() (money is conserved; 'dis' is the outside world).
  */
+import { use } from './usage';
 import type { Good, Person, World } from './types';
 import { BASE_PRICE, GOOD_LABEL, PRODUCES, PROF_LABEL } from './constants';
 import { buy, groupOf, lawOn, lawParam, transfer } from './economy';
@@ -12,7 +13,7 @@ import { findPerson } from './world';
 import { log, personal } from './log';
 import { openPetition } from './ai';
 
-export const PAZAR_EVERY = 5; // game days between Pazar Günleri
+export const PANAYIR_EVERY = 5; // game days between Panayırlar
 export const WHOLESALE: Partial<Record<Good, number>> = { bugday: 60, un: 20, odun: 20, yun: 8, kumas: 4, alet: 2 };
 export const WHOLESALE_MUL = 0.85; // Liman toptan price vs normal price
 const STATE_PROFS = ['memur', 'tahsildar', 'bekci', 'savci', 'hakim', 'asker', 'hoca', 'imam', 'kayzer', 'naip'];
@@ -27,7 +28,7 @@ export function shelf(w: World, g: Good, group?: string, wholesale = false): { p
 }
 /** Price quoted in the gazete / Göstergesi: the Çarşı shelf price, else the last known market price. */
 export function quoted(w: World, g: Good): number { return shelf(w, g, 'carsi').price ?? shelf(w, g).price ?? w.prices[g]; }
-export const isPazarGunu = (w: World): boolean => w.day % PAZAR_EVERY === 0;
+export const isPanayir = (w: World): boolean => w.day % PANAYIR_EVERY === 0;
 const adults = (w: World): Person[] => w.people.filter((p) => p.prof !== 'naip' && p.prof !== 'kayzer');
 export function unemployed(w: World): number { return adults(w).filter((p) => !STATE_PROFS.includes(p.prof) && p.unemployedDays >= 2).length; }
 
@@ -50,7 +51,7 @@ export function migrateEcon(w: World): void {
 export function marketHour(w: World): void {
   migrateEcon(w);
   if (w.hour === 7) limanRestock(w);
-  if (w.hour === 9) { if (isPazarGunu(w)) pazarGunu(w); postOrders(w); }
+  if (w.hour === 9) { if (isPanayir(w)) panayir(w); postOrders(w); }
   if (w.hour === 20) exportsDay(w);
   if (w.hour === 21) arbitrage(w);
   sampleCity(w);
@@ -88,15 +89,15 @@ export function arbitrage(w: World): void {
     for (const g of Object.keys(WHOLESALE) as Good[]) {
       const lim = shelf(w, g, 'liman', true).price; const car = shelf(w, g, 'carsi').price ?? w.prices[g] * 1.3;
       if (lim === null || car < lim * 1.25) continue;
-      const q = Math.min(15, Math.floor((t.money - 30) / lim)); if (q > 0) buy(w, t.id, g, q, car * 0.85, { group: 'liman', wholesale: true });
+      const q = Math.min(15, Math.floor((t.money - 30) / lim)); if (q > 0 && buy(w, t.id, g, q, car * 0.85, { group: 'liman', wholesale: true })) use(w, 'liman_ticaret', t);
     }
   }
 }
 export const TRADE_GOODS: Good[] = ['kumas', 'alet', 'odun', 'bugday', 'un', 'yun'];
 
-// ---------- Pazar Günü ----------
-export function pazarGunu(w: World): void {
-  if (w.pazarGunu === w.day) return; w.pazarGunu = w.day;
+// ---------- Panayır ----------
+export function panayir(w: World): void {
+  if (w.panayir === w.day) return; w.panayir = w.day;
   const rare: Good[] = ['elbise', 'mobilya', 'alet', 'kumas', 'icki'];
   const bring: Partial<Record<Good, number>> = blocked(w) ? {} : { bugday: 80, odun: 20, ...Object.fromEntries(rare.map((g) => [g, g === 'mobilya' ? 2 : g === 'icki' ? 12 : 5])) };
   const lines: string[] = [];
@@ -106,8 +107,8 @@ export function pazarGunu(w: World): void {
     w.prices[g] = Math.round(Math.max(BASE_PRICE[g] * 0.6, w.prices[g] * 0.95) * 100) / 100; // fresh stock: the market cools
     lines.push(`${GOOD_LABEL[g]} ${price.toFixed(2)} D`);
   }
-  for (const p of w.people) p.mood = clamp(p.mood + 1);
-  log(w, `🎪 PAZAR GÜNÜ! ${lines.length ? `Kervanlar geldi: ${lines.join(', ')}. Nadir mallar (elbise, mobilya, alet) bugün ucuz.` : 'Bu hafta kervan gelmedi (ithalat kapalı ya da savaş var).'} Çarşı kalabalık, davul zurna çalıyor.`);
+  for (const p of w.people) p.mood = clamp(p.mood + 1); use(w, 'panayir');
+  log(w, `🎪 PANAYIR! ${lines.length ? `Kervanlar geldi: ${lines.join(', ')}. Nadir mallar (elbise, mobilya, alet) bugün ucuz.` : 'Bu hafta kervan gelmedi (ithalat kapalı ya da savaş var).'} Çarşı kalabalık, davul zurna çalıyor.`);
 }
 
 // ---------- sipariş ilanları ----------
@@ -121,7 +122,7 @@ export function postOrders(w: World): void {
     if (!short) continue;
     const qty = Math.max(5, Math.min(100, need * 2)); const reward = Math.round(qty * Math.max(w.prices[g], BASE_PRICE[g]) * 1.3);
     if (p.money < reward + 10) continue;
-    os.push({ id: nextId(w, 'S'), good: g, qty, reward, byId: p.id, day: w.day, until: w.day + 3 });
+    os.push({ id: nextId(w, 'S'), good: g, qty, reward, byId: p.id, day: w.day, until: w.day + 3 }); use(w, 'siparis_ilani', p);
     log(w, `📜 Sipariş: ${p.name} – “${qty} ${GOOD_LABEL[g]} getirene ${reward} D!” (Pazar’daki ilan tahtası, 3 gün)`, p.id);
     if (os.length >= 4) break;
   }
@@ -133,7 +134,7 @@ export function fulfillOrder(w: World, me: Person, id: string): string | null {
   if (!transfer(w, o.byId, me.id, o.reward, `sipariş teslimi (${o.qty} ${GOOD_LABEL[o.good]})`)) { w.orders = os.filter((x) => x !== o); return 'Siparişi veren artık ödeyemiyor; ilan kaldırıldı.'; }
   me.inv[o.good] -= o.qty; const by = findPerson(w, o.byId); if (by) by.inv[o.good] += o.qty; else if (o.byId === 'saray' && o.good === 'bugday') w.granary += o.qty;
   me.xp += 3; me.rep = clamp(me.rep + 2, -100, 100); if (by) by.relations[me.id] = clamp((by.relations[me.id] ?? 0) + 8, -100, 100);
-  w.orders = os.filter((x) => x !== o);
+  w.orders = os.filter((x) => x !== o); use(w, 'siparis_teslim', me);
   log(w, `${me.name}, ${by?.name ?? 'Saray'} için ${o.qty} ${GOOD_LABEL[o.good]} getirdi ve ${o.reward} D aldı.`, me.id);
   return null;
 }

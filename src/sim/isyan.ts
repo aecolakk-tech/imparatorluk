@@ -3,6 +3,7 @@
  * (or the acting ruler / naip AI / a soldier when nobody rules) commands the troops. The republic is declared ONLY
  * if the rebels win (take the Saray, or the army is gone). Afterwards the rebels decide the deposed Kayzer's fate.
  */
+import { use } from './usage';
 import type { Fate, Person, World } from './types';
 import { transfer } from './economy';
 import { chance, clamp } from './rng';
@@ -32,6 +33,7 @@ export function strength(w: World): { rebels: number; loyal: number } {
 }
 
 export function startIsyan(w: World): void {
+  use(w, 'isyan');
   if (w.isyan || w.regime !== 'imparatorluk' || !w.kayzerId) return;
   const rebels = w.people.filter((p) => discontent(w, p));
   const leader = rebels.find((p) => p.plotting === 'revolution') ?? [...rebels].sort((a, b) => b.republic + b.ambition - a.republic - a.ambition)[0];

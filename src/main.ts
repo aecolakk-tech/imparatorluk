@@ -1,3 +1,4 @@
+import { askConfirm, askText } from './ui/modal';
 import { oldWalk, ageText } from './sim/age';
 import { ek } from './sim/tr';
 import { buildControls, type SlotItem } from './ui/controls';
@@ -5,14 +6,15 @@ import { foePos, liveFoes } from './sim/combatpos';
 import { weaponInHand, bestWeapon } from './sim/arms';
 import { hourMs } from './sim/tick';
 import './ui/style.css';
-import type { Action, Person, Profession, World } from './sim/types';
+import type { Action, Good, Person, Profession, World } from './sim/types';
 import { GOODS } from './sim/types';
 import { GOOD_LABEL, MAP_H, MAP_W, PLAYER_PROFS, PROF_LABEL } from './sim/constants';
 import { findPerson } from './sim/world';
 import { makeBackend } from './backend';
 import type { Backend } from './backend/api';
 import { MOCK_FOUNDER_EMAIL } from './backend/mock';
-import { buildStatic, drawFrame, hitTest, placePeople, T, tapFx, type Camera, type Placed } from './ui/map';
+import { buildStatic, drawFrame, hitTest, placePeople, T, tapFx, GOSTERGE, type Camera, type Placed } from './ui/map';
+import { gostergeModal } from './ui/gosterge';
 import type { PlacedAnimal } from './ui/animals';
 import { bar, fmt, h, select } from './ui/dom';
 import { ic, CREDITS, iconify, installIconify } from './ui/icons';
@@ -26,6 +28,11 @@ import { SKIN_NAMES, HAIR_COLOR_NAMES, HAIR_STYLES_M, HAIR_STYLES_F, BEARDS, EYE
 import { GOALS } from './sim/goals';
 import { season, SEASON_LABEL, ANIMALS, ANIMAL_LABEL, ANIMAL_PRICE, ANIMAL_FEED, FARM_PRICE, BARN, RANKS_N, RANK_INFO, FIEFS, ORG_LABEL, ORG_GOAL, orgGoalProgress, ROLE_LABEL, type OrgRole, type OrgKind, type Rank } from './sim/realm';
 import type { GoalId } from './sim/types';
+import { weekday, isCuma, trait } from './sim/piety';
+import { kidScale, kidHeight, lastKids, SPRITE_SCALE } from './ui/map';
+import { rankLabel, displayName } from './sim/career';
+import { yearsOf } from './sim/age';
+import { DAY_REAL_MIN } from './sim/constants';
 import { ambience, installClickSounds, isMuted, setMuted, sfx, musicOn, setMusic, setMusicMood, musicMood } from './ui/sound';
 import { needTarget, myPos } from './sim/v16';
 import { findPath, WALK_SPEED, walkEnd, doorSpot, distToBuilding, REACH, PERSON_REACH, type Pt } from './sim/move';
@@ -53,7 +60,13 @@ let skew = 0; // server clock minus client clock, so the map animation never fre
 const gameNow = (): number => Date.now() + skew;
 
 function me(): Person | null { const s = be.session(); if (!world || !s) return null; const pl = world.players[s.playerId]; return pl ? findPerson(world, pl.personId) ?? null : null; }
-function toast(text: string): void { document.querySelectorAll('.toast').forEach((x) => x.remove()); const t = h('div', { class: 'toast' }, text); app.append(t); setTimeout(() => t.classList.add('out'), 2300); setTimeout(() => t.remove(), 2600); }
+/** v2.0.1: stacked in-game toasts (max 3 visible; the same text is never shown twice at once). */
+function toast(text: string, ms = 2600): void {
+  if (!text) return; const st = document.querySelector('.toast-stack') ?? (() => { const e = h('div', { class: 'toast-stack' }); app.append(e); return e; })();
+  if ([...st.children].some((x) => x.textContent === text)) return;
+  while (st.children.length >= 3) st.firstChild!.remove();
+  const t = h('div', { class: 'toast' }, text); st.append(t); setTimeout(() => t.classList.add('out'), ms - 300); setTimeout(() => t.remove(), ms);
+}
 /** Floating action feedback over the map (e.g. +12 D, -5 D). */
 function floatText(text: string, cls = ''): void { if (lowGfx) return; const el = h('div', { class: `float-text ${cls}` }, text); document.body.append(el); setTimeout(() => el.remove(), 1300); }
 
@@ -178,7 +191,8 @@ function rerenderSheet(force = false, afterAct = false): void {
   s.addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest('button'); if (b) { b.classList.add('pressed'); setTimeout(() => b.classList.remove('pressed'), 180); } }, true);
 }
 let sheetPointer = false;
-function closeSheet(): void { document.body.classList.remove('has-sheet'); sheetPointer = false; if (heldNpc) { const id = heldNpc; heldNpc = null; const p = world ? findPerson(world, id) : null; if (p) p.hold = undefined; void be.act({ t: 'holdNpc', personId: id, on: false } as never); } const s = sheet; if (s) { s.classList.add('leave'); setTimeout(() => s.remove(), lowGfx ? 0 : 200); } sheet = null; sheetRender = null; selected = null; }
+window.addEventListener('pointerup', () => { setTimeout(() => { sheetPointer = false; }, 250); }); window.addEventListener('pointercancel', () => { sheetPointer = false; }); /* v2.0.1: a drag that ends outside the panel no longer freezes live prices */
+function closeSheet(): void { document.body.classList.remove('has-sheet'); sheetPointer = false; if (heldNpc) { const id = heldNpc; heldNpc = null; const p = world ? findPerson(world, id) : null; if (p) p.hold = undefined; void be.act({ t: 'holdNpc', personId: id, on: false } as never); } const s = sheet; if (s) { s.classList.add('leave'); s.style.pointerEvents = 'none'; s.inert = true; setTimeout(() => s.remove(), lowGfx ? 0 : 200); } /* v2.0.1: a closing panel can't take taps (accidental buys) */ sheet = null; sheetRender = null; selected = null; }
 function openPersonSheet(id: string): void {
   selected = id;
   openSheet(() => { const p = findPerson(world!, id); if (!p) return h('div', {}, 'Kişi yok.'); const card = personCard(ctx(), p); const x = personExtras(ctx(), p); if (x) card.prepend(x); return card; });
@@ -244,7 +258,7 @@ function openLook(mode: 'ilk' | 'terzi' | 'berber'): void {
   const needGender = mode === 'ilk' && !m0.genderSet; const needProfile = mode === 'ilk' && !m0.profile?.set && !ruler;
   const fresh = !!m0.profile?.fresh;
   let female: boolean | null = needGender ? (m0.spouse ? m0.female : null) : m0.female;
-  const pr: { surname: string; age: number; origin: Origin | null; temper: Temper | null } = { surname: '', age: 20, origin: null, temper: null };
+  const pr: { surname: string; age: number; origin: Origin | null; temper: Temper | null; hard: boolean } = { surname: '', age: 20, origin: null, temper: null, hard: false };
   type Row = [keyof Look, string, string[]];
   const rowsFor = (fem: boolean): Row[] => { const all: Row[] = [['skin', 'Ten rengi', SKIN_NAMES], ['hair', 'Saç modeli', fem ? HAIR_STYLES_F : HAIR_STYLES_M], ['hairColor', 'Saç rengi', HAIR_COLOR_NAMES], ...(fem ? [] : [['beard', 'Sakal / bıyık', BEARDS] as Row]), ['eye', 'Göz rengi', EYE_NAMES], ['build', 'Yapı', BUILDS], ['height', 'Boy', HEIGHTS], ['cloth', 'Kıyafet rengi', CLOTH_NAMES], ['outfit', 'Kıyafet', OUTFITS], ['head', 'Başlık', HEADS]];
     return all.filter(([k]) => mode === 'ilk' || (mode === 'terzi' ? ['cloth', 'outfit', 'head'].includes(k) : ['hair', 'hairColor', 'beard'].includes(k))); };
@@ -266,6 +280,8 @@ function openLook(mode: 'ilk' | 'terzi' | 'berber'): void {
     () => !needProfile ? '' : h('div', {}, h('h3', {}, 'Köken *'), choice((Object.keys(ORIGIN) as Origin[]).map((k) => [k, ORIGIN[k].label]), pr.origin, (k) => { pr.origin = k; paint(); }),
       pr.origin ? h('div', { class: 'muted' }, fresh ? `Başlangıç mesleği: ${PROF_LABEL[ORIGIN[pr.origin].prof]} – ${wageOf(ORIGIN[pr.origin].prof)}. Başlangıç parası: ${Math.max(5, ORIGIN[pr.origin].money + AGE[ageGroupOf(pr.age)].money)} D. Beceri: ${ORIGIN[pr.origin].skill}. ${ORIGIN[pr.origin].text}` : `Beceri: ${ORIGIN[pr.origin].skill}. (Var olan karakter: mesleğiniz ve paranız değişmez.)`) : ''),
     () => !needProfile ? '' : h('div', {}, h('h3', {}, 'Mizaç *'), choice((Object.keys(TEMPER) as Temper[]).map((k) => [k, TEMPER[k].label]), pr.temper, (k) => { pr.temper = k; paint(); }), pr.temper ? h('div', { class: 'muted' }, TEMPER[pr.temper].text) : ''),
+    () => !needProfile || !fresh ? '' : h('div', {}, h('h3', {}, 'Zorluk'), choice([['normal', 'İşçi olarak başla'], ['hard', 'Dilenci olarak başla (zor)']] as [string, string][], pr.hard ? 'hard' : 'normal', (k) => { pr.hard = k === 'hard'; paint(); }),
+      h('div', { class: 'muted' }, pr.hard ? 'Zor mod: işsiz, 2 D ile başlarsınız; camide ya da han ahırında yatar, sadaka ve aşevi ile yaşarsınız. 3 gün aç kalmadan 10 D biriktirince İşçi olursunuz.' : 'Kökeninizin mesleğinde İşçi olarak başlarsınız.')),
     // (future identity fields slot in here as one more () => block)
   ];
   const paint = (): void => {
@@ -283,7 +299,7 @@ function openLook(mode: 'ilk' | 'terzi' | 'berber'): void {
     if (mode !== 'ilk') { close(); void doAct({ t: 'customize', look: L, where: mode }); return; }
     if (needGender && female === null) { err.textContent = 'Lütfen cinsiyet seçin (Erkek / Kadın).'; return; }
     if (needProfile && (!pr.surname.trim() || !pr.origin || !pr.temper)) { err.textContent = 'Lütfen soyadı, köken ve mizaç seçin.'; return; }
-    const act = { t: 'customize', look: fem() ? { ...L, beard: 0 } : L, where: 'ilk', ...(needGender ? { female: !!female } : {}), ...(needProfile ? { profile: { surname: pr.surname.trim(), age: pr.age!, origin: pr.origin!, temper: pr.temper! } } : {}) } as Action;
+    const act = { t: 'customize', look: fem() ? { ...L, beard: 0 } : L, where: 'ilk', ...(needGender ? { female: !!female } : {}), ...(needProfile ? { profile: { surname: pr.surname.trim(), age: pr.age!, origin: pr.origin!, temper: pr.temper!, hard: pr.hard } } : {}) } as Action;
     const bt = e.currentTarget as HTMLButtonElement; bt.disabled = true; bt.textContent = 'Kaydediliyor…'; err.textContent = '';
     void be.act(act).then((r) => {
       if (!r.ok) { bt.disabled = false; bt.textContent = 'Kaydet'; err.textContent = r.msg || 'Kaydedilemedi.'; return; }
@@ -314,7 +330,7 @@ function renderHud(): void {
   const chip = (icon: string, text: string, tip: string, cls = ''): HTMLElement => h('span', { class: `stat${cls ? ' ' + cls : ''}`, title: tip, onclick: () => toast(tip) }, ic(icon), h('span', {}, text));
   hudEl.replaceChildren(
     h('div', { class: 'hud-l' },
-      chip(night ? 'moon' : 'sun', `Gün ${w.day} · ${String((w.hour + Math.max(0, Math.min(23, Math.floor((gameNow() - w.lastTickAt) / hourMs(w))))) % 24).padStart(2, '0')}:00${w.speed !== 1 ? ` · ${w.combat ? '🐢 ' : ''}${w.speed}x` : ''}`, `1 oyun günü = 5 gerçek dakika (1x)${w.speed !== 1 ? ` · şu an ${w.speed}x${w.combat ? ' (saldırı sırasında otomatik yavaş)' : ''}` : ''}`, w.combat ? 'warn' : ''),
+      chip(night ? 'moon' : 'sun', `${weekday(w.day)} · Gün ${w.day} · ${String((w.hour + Math.max(0, Math.min(23, Math.floor((gameNow() - w.lastTickAt) / hourMs(w))))) % 24).padStart(2, '0')}:00${w.speed !== 1 ? ` · ${w.combat ? '🐢 ' : ''}${w.speed}x` : ''}`, `${weekday(w.day)}${isCuma(w.day) ? ' (Cuma namazı 13:00)' : ''} · 1 oyun günü = ${DAY_REAL_MIN} gerçek dakika (1x; gündüz 1 saat = 60 sn, gece 30 sn)${w.speed !== 1 ? ` · şu an ${w.speed}x${w.combat ? ' (saldırı sırasında otomatik yavaş)' : ''}` : ''}`, w.combat ? 'warn' : ''),
       chip(SEASON_IC[season(w)]!, SEASON_LABEL[season(w)].replace(/^\S+\s/, ''), 'Mevsim'),
       ...(m ? [
         meterI('heart', m.health, 'var(--red)', `❤️ Sağlık${m.wounded ? ' – yaralısınız, hekime gidin' : ' – hastalık/yara düşürür, hekim ve dinlenme iyileştirir'}`, m.health < 40 || m.wounded, 'hp'),
@@ -341,26 +357,29 @@ function renderHud(): void {
 function meterI(icon: string, v: number, color: string, tip: string, warn: boolean, key: string): HTMLElement {
   return h('span', { class: `stat meter${warn ? ' warn' : ''}${flashKey === key && performance.now() < flashUntil ? ' flash' : ''}`, title: tip, 'data-k': key, onclick: () => toast(tip) }, ic(icon), bar(v, color));
 }
-// v1.9: hunger / thirst alarms – one popup + vibration per threshold crossing (≤15 left), with a cooldown
-let flashKey = ''; let flashUntil = 0; const alarmArmed: Record<string, boolean> = { hunger: true, thirst: true }; const alarmAt: Record<string, number> = { hunger: -1e9, thirst: -1e9 };
+// v2.0.1: warnings for tokluk, su, sağlık below 30 and a nearly empty purse – one popup per crossing (re-armed above 40), never two at once
+let flashKey = ''; let flashUntil = 0; const alarmArmed: Record<string, boolean> = { hunger: true, thirst: true, health: true, money: true }; const alarmAt: Record<string, number> = { hunger: -1e9, thirst: -1e9, health: -1e9, money: -1e9 };
+const ALARM_TITLE: Record<string, string> = { hunger: 'Tokluk düşük', thirst: 'Su düşük', health: 'Sağlık düşük', money: 'Kese boşalıyor' };
 function needAlerts(m: ReturnType<typeof me>): void {
-  if (!m) return;
-  for (const key of ['hunger', 'thirst'] as const) {
-    const left = 100 - (key === 'hunger' ? m.hunger : m.thirst);
-    if (left > 25) alarmArmed[key] = true; // re-arm once the bar is refilled
-    if (left <= 15 && alarmArmed[key] && performance.now() - alarmAt[key]! > 90_000) {
+  if (!m) return; if (document.querySelector('.alert-pop')) return;
+  const vals: [string, number, number, number, string, string][] = [
+    ['hunger', 100 - m.hunger, 30, 40, 'bread', `Tokluk ${Math.round(100 - m.hunger)}/100 – açsınız, bir şeyler yiyin (Çanta ya da Pazar).`],
+    ['thirst', 100 - m.thirst, 30, 40, 'water', `Su ${Math.round(100 - m.thirst)}/100 – susadınız, su için (Kuyu, Çanta).`],
+    ['health', m.health, 30, 40, 'heart', `Sağlık ${Math.round(m.health)}/100 – hekime gidin ya da dinlenin${m.hunger > 70 || m.thirst > 70 ? '; önce yiyip için' : ''}.`],
+    ['money', m.money, 3, 6, 'coin', `Kesede ${m.money.toFixed(2)} D kaldı – İş İlanı Tahtası’ndan iş bulun; aç kalırsanız cami aşevi ücretsiz çorba verir.`]];
+  for (const [key, v, lo, re, icon, msg] of vals) {
+    if (v > re) alarmArmed[key] = true;
+    if (v < lo && alarmArmed[key] && performance.now() - alarmAt[key]! > 90_000) {
       alarmArmed[key] = false; alarmAt[key] = performance.now(); flashKey = key; flashUntil = performance.now() + 4000;
-      const msg = key === 'hunger' ? `Tokluk ${Math.round(left)}/100 – çok açsınız, bir şeyler yiyin.` : `Su ${Math.round(left)}/100 – çok susadınız, su için.`;
-      alertPop(key === 'hunger' ? 'bread' : 'water', msg, key);
-      try { navigator.vibrate?.([180, 90, 180]); } catch { /* not supported */ }
-      sfx('error'); setTimeout(renderHud, 4100);
+      alertPop(icon, msg, key); try { navigator.vibrate?.([180, 90, 180]); } catch { /* not supported */ }
+      sfx('error'); setTimeout(renderHud, 4100); return; // one warning at a time
     }
   }
 }
 function alertPop(icon: string, text: string, key: string): void {
   document.querySelector('.alert-pop')?.remove();
-  const el = h('div', { class: `alert-pop ${key}`, role: 'alert' }, h('span', { class: 'big' }, ic(icon)), h('div', { class: 'grow' }, h('b', {}, key === 'hunger' ? 'Tokluk düşük' : 'Su düşük'), h('div', {}, text)),
-    h('button', { class: 'primary sm', onclick: () => { el.remove(); void send({ t: key === 'hunger' ? 'eat' : 'drinkWater' } as never); } }, key === 'hunger' ? 'Ye' : 'Su iç'), h('button', { class: 'sm', onclick: () => el.remove() }, ic('close')));
+  const el = h('div', { class: `alert-pop ${key}`, role: 'alert' }, h('span', { class: 'big' }, ic(icon)), h('div', { class: 'grow' }, h('b', {}, ALARM_TITLE[key] ?? ''), h('div', {}, text)),
+    key === 'hunger' || key === 'thirst' ? h('button', { class: 'primary sm', onclick: () => { el.remove(); void send({ t: key === 'hunger' ? 'eat' : 'drinkWater' } as never); } }, key === 'hunger' ? 'Ye' : 'Su iç') : '', h('button', { class: 'sm', onclick: () => el.remove() }, ic('close')));
   document.body.append(el); setTimeout(() => el.classList.add('out'), 7000); setTimeout(() => el.remove(), 7600);
 }
 
@@ -447,7 +466,7 @@ function orgsBody(): HTMLElement {
       h('h3', {}, 'Eylemler'),
       h('div', { class: 'row' }, h('button', { onclick: () => void send({ t: 'orgAct', deed: 'propaganda' }) }, 'Propaganda (5 D)'),
         mine.kind === 'hirsiz' ? h('button', { onclick: () => void send({ t: 'orgAct', deed: 'hirsizlik' }) }, 'Zengini soy') : h('button', { onclick: () => void send({ t: 'orgAct', deed: 'sabotaj' }) }, 'Sabotaj'),
-        mine.kind !== 'hirsiz' ? h('button', { class: 'danger', onclick: () => { if (confirm('Ayaklanma başlatılsın mı? Geri dönüşü yok.')) void send({ t: 'orgAct', deed: 'ayaklanma' }); } }, 'Ayaklanma') : '',
+        mine.kind !== 'hirsiz' ? h('button', { class: 'danger', onclick: () => { void askConfirm('Ayaklanma başlatılsın mı? Geri dönüşü yok.').then((yes) => { if (yes) void send({ t: 'orgAct', deed: 'ayaklanma' }); }); } }, 'Ayaklanma') : '',
         ld ? h('button', { onclick: () => void send({ t: 'orgMeet' }) }, 'Gece toplantısı') : '', h('button', { class: 'danger', onclick: () => void send({ t: 'orgLeave' }) }, 'Ayrıl'))));
   } else if (!ruler) {
     const kind = select((Object.keys(ORG_LABEL) as OrgKind[]).map((k): [string, string] => [k, ORG_LABEL[k]])); const nm = h('input', { placeholder: 'Örgütün adı' });
@@ -496,7 +515,7 @@ function farmBody(): HTMLElement {
   box.append(h('div', { class: 'row' }, h('button', { onclick: () => void doAct({ t: 'buildBarn', kind: 'ahir' }) }, `Ahır yap (${BARN.ahir.cost} D)`), h('button', { onclick: () => void doAct({ t: 'buildBarn', kind: 'kumes' }) }, `Kümes yap (${BARN.kumes.cost} D)`)));
   box.append(h('div', { class: 'row' }, h('button', { class: m.fedDay === w.day ? '' : 'primary', disabled: feed === 0 || m.fedDay === w.day, onclick: () => void doAct({ t: 'feedAnimals' }) }, m.fedDay === w.day ? 'Bugün beslendi' : `Yem ver (${feed} buğday)`),
     h('button', { onclick: () => void doAct({ t: 'collectFarm' }) }, `Topla (süt ${st.sut ?? 0} · yumurta ${st.yumurta ?? 0} · yün ${st.yun ?? 0})`)));
-  const kill = ANIMALS.filter((a) => a !== 'at' && hd[a] > 0); if (kill.length) box.append(h('div', { class: 'row' }, ...kill.map((a) => h('button', { class: 'danger sm', onclick: () => { if (confirm(`${ANIMAL_LABEL[a]} kesilsin mi?`)) void doAct({ t: 'slaughter', animal: a }); } }, `${ANIMAL_LABEL[a]} kes`))));
+  const kill = ANIMALS.filter((a) => a !== 'at' && hd[a] > 0); if (kill.length) box.append(h('div', { class: 'row' }, ...kill.map((a) => h('button', { class: 'danger sm', onclick: () => { void askConfirm(`${ANIMAL_LABEL[a]} kesilsin mi?`).then((yes) => { if (yes) void doAct({ t: 'slaughter', animal: a }); }); } }, `${ANIMAL_LABEL[a]} kes`))));
   return box;
 }
 const ANIMAL_ICON: Record<string, string> = { inek: 'cow', koyun: 'sheep', tavuk: 'chicken', at: 'horse' };
@@ -581,11 +600,11 @@ function openAdmin(): void {
       h('div', { class: 'row' }, h('button', { onclick: () => void run({ t: 'allowStateTakeover', allow: !w.allowStateTakeover }) }, w.allowStateTakeover ? '🔓 Devlet görevlileri devralınabilir (kapat)' : '🔒 Devlet görevlileri devralınamaz (aç)')),
       h('div', { class: 'row' }, h('button', { onclick: () => void run({ t: 'releaseAll' }) }, 'Zindanı boşalt'), h('button', { onclick: () => void run({ t: 'resetCumhuriyet' }) }, 'Cumhuriyet isteğini sıfırla')));
     const snapBox = h('div', {}, h('div', { class: 'muted' }, 'yükleniyor…'));
-    void be.snapshots().then((ss) => { snapBox.replaceChildren(...(ss.length ? ss.map((s) => h('div', { class: 'row card' }, `Gün ${s.day} · ${new Date(s.at).toLocaleString('tr-TR')}`, h('button', { class: 'danger', onclick: () => { if (confirm('Dünya bu yedeğe dönecek. Emin misiniz?')) void run({ t: 'restoreSnapshot', id: s.id }); } }, 'Geri yükle'))) : [h('div', { class: 'muted' }, 'Henüz yedek yok.')])); });
+    void be.snapshots().then((ss) => { snapBox.replaceChildren(...(ss.length ? ss.map((s) => h('div', { class: 'row card' }, `Gün ${s.day} · ${new Date(s.at).toLocaleString('tr-TR')}`, h('button', { class: 'danger', onclick: () => { void askConfirm('Dünya bu yedeğe dönecek. Emin misiniz?').then((yes) => { if (yes) void run({ t: 'restoreSnapshot', id: s.id }); }); } }, 'Geri yükle'))) : [h('div', { class: 'muted' }, 'Henüz yedek yok.')])); });
     box.append(h('h3', {}, '⚠️ Oyunu sıfırla'), h('div', { class: 'muted' }, 'Tüm dünya baştan kurulur; oyuncu hesapları kalır, karakterler yeniden doğar. Önce otomatik yedek alınır.'),
-      h('button', { class: 'danger', onclick: () => {
-        if (!confirm('Oyunu sıfırlamak istediğinize emin misiniz? Bütün şehir, para, aileler ve olaylar silinecek.')) return;
-        const t = prompt('Son onay: sıfırlamak için büyük harflerle SIFIRLA yazın'); if (t !== 'SIFIRLA') { toast('İptal edildi.'); return; }
+      h('button', { class: 'danger', onclick: async () => {
+        if (!(await askConfirm('Oyunu sıfırlamak istediğinize emin misiniz? Bütün şehir, para, aileler ve olaylar silinecek.', 'Sıfırla'))) return;
+        const t = await askText('Son onay: sıfırlamak için büyük harflerle SIFIRLA yazın', 'SIFIRLA', 'Son onay'); if (t !== 'SIFIRLA') { toast('İptal edildi.'); return; }
         void run({ t: 'resetWorld', confirm: t });
       } }, '🔄 Oyunu sıfırla'));
     box.append(h('h3', {}, 'Yedekler (3 günde bir otomatik, son 8)'), h('button', { onclick: () => void run({ t: 'snapshot' }) }, 'Şimdi yedek al'), snapBox);
@@ -631,8 +650,10 @@ function setupInput(): void {
         if (foe) tapFoe(foe);
         else if (hit.animal) tapAnimal(hit.animal);
         else if (hit.corpse) openCorpse(hit.corpse.id);
+        else if (hit.gosterge) { sfx('tap'); if (nearGosterge()) openGosterge(); else toast('📊 Şehir Göstergesi – Saray’ın yanındaki tabelaya yürüyün, sonra “Etkileşim” (E).'); }
         else if (hit.sign && !bAt) openElectionSign();
         else if (bAt && bAt.kind === 'pazar' && ty >= bAt.y - 0.6) { selB = bAt.id; selPerson = null; sfx('tap'); const q = myPlaced(); toast(q && distToBuilding(bAt, q) <= REACH + 1 ? `🏠 ${bAt.name} seçildi – açmak için “Etkileşim” (E).` : `🏠 ${bAt.name} seçildi – joystick ile yanına gidin, sonra “Etkileşim” (E).`); ctl?.refresh(); } // a tap on a market stall/roof selects the market, not the seller standing in it
+        else if (hit.kid) { selPerson = hit.kid.id; selUntil = performance.now() + 4000; sfx('tap'); }
         else if (hit.person && hit.person.id !== me()?.id) { selPerson = hit.person.id; selUntil = performance.now() + 4000; sfx('tap'); }
         else if (hit.person) { const mm = me(); if (mm?.riding && (mm.animals?.at ?? 0) > 0) { sfx('step'); void send({ t: 'ride', on: false }); } }
         else if (hit.building || bAt) { const b = (hit.building ?? bAt)!; selB = b.id; sfx('tap'); const q = myPlaced(); toast(q && distToBuilding(b, q) <= REACH ? `🏠 ${b.name} seçildi – girmek için “Etkileşim” (E).` : `🏠 ${b.name} seçildi – joystick ile kapısına gidin, sonra “Etkileşim” (E).`); ctl?.refresh(); }
@@ -663,7 +684,7 @@ function tapAnimal(a: PlacedAnimal): void {
   if (a.kind === 'at') { if (m.riding) { void send({ t: 'ride', on: false }); return; } toast('Atınıza biniyorsunuz…'); void doAct({ t: 'ride', on: true }); return; }
   const lbl: Record<string, string> = { inek: 'İnek', koyun: 'Koyun', tavuk: 'Tavuk' }; const meat: Record<string, string> = { inek: 'bol et', koyun: 'et ve 2 yün', tavuk: 'biraz et' };
   openSheet(() => h('div', { class: 'stack' }, h('h3', {}, ic(a.kind === 'inek' ? 'cow' : a.kind === 'koyun' ? 'sheep' : 'chicken'), ` ${lbl[a.kind]} (sizin)`), h('div', { class: 'muted' }, `Keserseniz ${meat[a.kind]} alırsınız; hayvan gider.`),
-    h('div', { class: 'row' }, h('button', { class: 'danger', onclick: () => { if (confirm(`${lbl[a.kind]} kesilsin mi?`)) { closeSheet(); void doAct({ t: 'slaughter', animal: a.kind }); } } }, 'Kes'), h('button', { onclick: () => closeSheet() }, 'Vazgeç'))));
+    h('div', { class: 'row' }, h('button', { class: 'danger', onclick: () => { void askConfirm(`${lbl[a.kind]} kesilsin mi?`).then((yes) => { if (yes) { closeSheet(); void doAct({ t: 'slaughter', animal: a.kind }); } }); } }, 'Kes'), h('button', { onclick: () => closeSheet() }, 'Vazgeç'))));
 }
 function darkness(w: World): number {
   const t = w.hour; if (t >= 21 || t < 5) return 0.45; if (t >= 19) return (t - 19) / 2 * 0.45; if (t < 7) return (7 - t) / 2 * 0.45; return 0;
@@ -719,6 +740,7 @@ function ctlAttack(): void {
 function nearPeople(): Placed[] { const q = myPlaced(); const m = me(); if (!q || !m) return []; return placed.filter((x) => x.visible && x.p.id !== m.id && Math.hypot(x.x - q.x, x.y - q.y) <= PERSON_REACH); }
 function interactTarget(): { kind: 'person'; id: string; label: string } | { kind: 'building'; id: string; label: string } | { kind: 'none'; label: string } {
   const w0 = world; const q0 = myPlaced(); const sb = selB && w0 ? w0.buildings.find((x) => x.id === selB) : undefined;
+  if (nearGosterge()) return { kind: 'building', id: '__gosterge', label: 'Şehir Göstergesi' };
   if (sb && q0 && distToBuilding(sb, q0) <= REACH + 1) return { kind: 'building', id: sb.id, label: sb.name }; // a tapped (selected) building wins when in reach
   const near = nearPeople();
   if (near.length === 1) return { kind: 'person', id: near[0]!.p.id, label: near[0]!.p.name.split(' ')[0]! };
@@ -726,9 +748,13 @@ function interactTarget(): { kind: 'person'; id: string; label: string } | { kin
   const w = world; const q = myPlaced(); if (w && q) { const b = w.buildings.filter((x) => distToBuilding(x, q) <= 1.2).sort((a, c) => distToBuilding(a, q) - distToBuilding(c, q))[0]; if (b) return { kind: 'building', id: b.id, label: b.name }; }
   return { kind: 'none', label: 'Yakında kimse yok' };
 }
+/** v2.0.1 Şehir Göstergesi: open when standing within ~1 m of the board next to the Saray. */
+function nearGosterge(): boolean { const q = myPlaced(); return !!q && Math.hypot(q.x - (GOSTERGE.x + 0.7), q.y - (GOSTERGE.y + 0.3)) <= 1.4; }
+function openGosterge(): void { const w = world; if (!w || document.querySelector('.gosterge-modal')) return; const el = gostergeModal(w, () => el.remove()); app.append(el); }
 function ctlInteract(): void {
   const t = interactTarget(); const w = world; if (!w) return;
   if (t.kind === 'none') { toast(t.label === 'Kişiye dokunun' ? 'Yakında birden fazla kişi var: önce konuşmak istediğinize dokunun.' : 'Etkileşim için birinin hemen yanında (1 kare) ya da bir binanın kapısında olun.'); return; }
+  if (t.kind === 'building' && t.id === '__gosterge') { openGosterge(); return; }
   if (t.kind === 'building') { const b = w.buildings.find((x) => x.id === t.id); if (b) openSheet(() => bPanel(b)); return; }
   openInteraction(t.id);
 }
@@ -762,7 +788,10 @@ function frameExtras(): void {
   // name + health label above a tapped person
   if (selPerson && performance.now() < selUntil) {
     const q = placed.find((x) => x.p.id === selPerson); const r = canvas.getBoundingClientRect(); const k = cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1));
-    if (q) { if (!labelEl) { labelEl = h('div', { class: 'person-label' }); app.append(labelEl); } labelEl.replaceChildren(h('b', {}, q.p.name), h('div', { class: 'hp' }, h('i', { style: `width:${Math.max(0, Math.min(100, q.p.health))}%` }))); labelEl.style.left = `${r.left + (q.x - cam.x) * k}px`; labelEl.style.top = `${r.top + (q.y - cam.y) * k - 34}px`; }
+    const kid = q ? undefined : lastKids.find((x) => x.id === selPerson);
+    const spr = k * SPRITE_SCALE; // adult sprite height in CSS px
+    if (q) { const kh = kidHeight(kidScale(yearsOf(w, q.p))); const tr = trait(q.p); const rk = q.p.npc === false || q.p.playerId ? rankLabel(w, q.p) : ''; if (!labelEl) { labelEl = h('div', { class: 'person-label' }); app.append(labelEl); } labelEl.replaceChildren(h('b', {}, displayName(w, q.p)), (tr || rk) ? h('div', { class: 'trait' }, [rk, tr].filter(Boolean).join(' · ')) : '', h('div', { class: 'hp' }, h('i', { style: `width:${Math.max(0, Math.min(100, q.p.health))}%` }))); labelEl.style.left = `${r.left + (q.x - cam.x) * k}px`; labelEl.style.top = `${r.top + (q.y - cam.y) * k - 34 + spr * (1 - kh)}px`; }
+    else if (kid) { const kh = kidHeight(kid.s); if (!labelEl) { labelEl = h('div', { class: 'person-label' }); app.append(labelEl); } labelEl.replaceChildren(h('b', {}, kid.name), h('div', { class: 'trait' }, `${kid.years} yaşında${kid.sick ? ' · hasta' : ''}`)); labelEl.style.left = `${r.left + (kid.x - cam.x) * k}px`; labelEl.style.top = `${r.top + (kid.y - cam.y) * k - 34 + spr * (1 - kh)}px`; }
   } else if (labelEl) { labelEl.remove(); labelEl = null; }
   if (heldNpc && sheet && performance.now() % 30000 < 40) void be.act({ t: 'holdNpc', personId: heldNpc, on: true } as never);
   ctl?.refresh();
@@ -790,6 +819,32 @@ function stateNotices(): void {
   else if (Date.now() - ownActAt > 2500) for (const l of fresh.slice(-3)) toast(l.from === m.id ? `💸 −${l.amount.toFixed(2)} D: ${l.reason}` : `💰 +${l.amount.toFixed(2)} D: ${l.reason}`);
   if (lastDrawn !== undefined && lastDrawn && !m.drawn && Date.now() - ownActAt > 2500) toast(`⚔ ${({ hancer: 'Hançeriniz', kilic: 'Kılıcınız', yay: 'Yayınız' } as Record<string, string>)[lastDrawn] ?? 'Silahınız'} artık elinizde değil – ${((m.arms as Record<string, number> | undefined)?.[lastDrawn] ?? 0) > 0 ? 'kınına girdi (ok bitti ya da sandığa kondu)' : 'elinizden alındı (bekçi araması ya da soygun – bildirimlere bakın)'}.`);
   lastDrawn = m.drawn ?? null;
+}
+// v2.0.1: personal notices (itibar, din, iş, terfi …) reach an online player as toasts
+let liveSeen = -1;
+function liveNotices(first: boolean): void {
+  const w = world; const pl = w?.players[be.session()?.playerId ?? '']; if (!pl) return; const n = pl.liveN ?? 0;
+  if (first || liveSeen < 0) { liveSeen = n; return; }
+  for (const x of (pl.live ?? []).filter((y) => y.n > liveSeen).slice(-3)) toast(x.t, 4200); liveSeen = n;
+}
+// v2.0.1 F2: every change to tokluk, su, enerji, sağlık or the Çanta gets a toast with its reason, batched (money has its own ledger toasts)
+type Snap = { hunger: number; thirst: number; energy: number; health: number; inv: Record<string, number> };
+let snap: Snap | null = null; let acc: Record<string, number> = {}; let accAt = 0;
+function statToasts(first: boolean): void {
+  const m = me(); if (!m) return; const cur: Snap = { hunger: m.hunger, thirst: m.thirst, energy: m.energy ?? 80, health: m.health, inv: { ...m.inv } as Record<string, number> };
+  if (first || !snap) { snap = cur; accAt = Date.now(); return; }
+  const mine = Date.now() - ownActAt < 2500; const prev = snap; snap = cur; if (mine) { acc = {}; accAt = Date.now(); return; } // the action's own reply already explains it
+  for (const k of ['hunger', 'thirst', 'energy', 'health'] as const) acc[k] = (acc[k] ?? 0) + (cur[k] - prev[k]);
+  const items: string[] = [];
+  for (const g of new Set([...Object.keys(cur.inv), ...Object.keys(prev.inv)])) { const d = (cur.inv[g] ?? 0) - (prev.inv[g] ?? 0); if (d) items.push(`${d > 0 ? '+' : ''}${d} ${GOOD_LABEL[g as Good] ?? g}`); }
+  const parts: string[] = []; const big = (k: string, lim: number): boolean => Math.abs(acc[k] ?? 0) >= lim;
+  const flush = Date.now() - accAt > 45_000;
+  const why = (k: string, d: number): string => { if (k === 'health') return d < 0 ? (m.hunger > 85 ? 'açlık' : m.thirst > 85 ? 'susuzluk' : m.infected ? 'hastalık' : m.wounded ? 'yara' : 'yorgunluk') : 'dinlenip iyileştiniz'; if (k === 'energy') return d < 0 ? (m.walk ? 'yürüyüş' : 'çalışma ve zaman') : (m.sleeping ? 'uyku' : 'dinlenme'); return d > 0 ? 'zaman geçti' : 'yiyip içtiniz'; };
+  const lbl: Record<string, string> = { hunger: '🍞 Tokluk', thirst: '💧 Su', energy: '⚡ Enerji', health: '❤️ Sağlık' };
+  for (const k of ['hunger', 'thirst', 'energy', 'health']) { if (!(big(k, k === 'health' ? 3 : 8) || (flush && big(k, 1)))) continue; const d = acc[k]!; const shown = k === 'hunger' || k === 'thirst' ? -d : d; parts.push(`${lbl[k]} ${shown > 0 ? '+' : ''}${Math.round(shown)} (${why(k, d)})`); acc[k] = 0; }
+  if (items.length) parts.push(`🎒 Çanta ${items.join(', ')}`);
+  if (flush) accAt = Date.now();
+  if (parts.length) toast(parts.join(' · '), 3600);
 }
 function openPurse(): void {
   openSheet(() => { const w = world!; const m = me(); if (!m) return h('div', {}, '—');
@@ -834,7 +889,7 @@ async function tick(): Promise<void> {
     const mm = me(); if (localWalk && mm && mm.id === localWalk.id && gameNow() < walkEnd(localWalk.walk) + 15_000) mm.walk = localWalk.walk;
     if (first) { stat = buildStatic(world); const m = me(); const b = m ? world.buildings.find((x) => x.id === m.home) : undefined; if (b) { cam.x = b.x - canvas.width / (cam.z * T) / 2; cam.y = b.y - canvas.height / (cam.z * T) / 2; clampCam(); } }
     if (r.summary) modal(maecenas(r.summary));
-    renderDock(); stateNotices(); if (sheet && !sheetPointer) rerenderSheet(); const onb = onboarding(); events(first, onb); trialPopup(); if (!onb) { disasterPopup(); v2Popups(); }
+    renderDock(); stateNotices(); liveNotices(first); statToasts(first); if (sheet && !sheetPointer) rerenderSheet(); const onb = onboarding(); events(first, onb); trialPopup(); if (!onb) { disasterPopup(); v2Popups(); }
   } catch (e) { console.warn('heartbeat', e); } finally { ticking = false; }
 }
 

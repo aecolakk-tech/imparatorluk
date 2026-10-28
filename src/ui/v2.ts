@@ -1,3 +1,4 @@
+import { PRODUCES } from '../sim/constants';
 /** v2.0 UI: inventory & chest, weapon shop, event popups, empire name, “Neler yeni?”, map overlays. */
 import type { Building, Good, Person, World } from '../sim/types';
 import type { Ctx } from './panels';
@@ -71,6 +72,7 @@ export function personExtras(c: Ctx, p: Person): HTMLElement | null {
   if (p.drawn) out.append(h('span', { class: 'chip warn' }, `⚔ elinde ${ARM_LABEL[p.drawn]}`));
   if (p.infected) out.append(h('span', { class: 'chip warn' }, '🦠 hasta'));
   if (m.prof === 'bekci' && m.jailedDays === 0) out.append(h('button', { onclick: () => c.act({ t: 'searchPerson', personId: p.id }) }, '🔎 Üstünü ara'));
+  if (!p.playerId && PRODUCES[p.prof]) out.append(h('button', { class: 'primary', title: 'Esnaf itibarınıza ve rütbenize bakar; uygunsa sizi çırak alır.', onclick: () => c.act({ t: 'askJob', personId: p.id }) }, '💼 Bir iş var mı?'));
   return out.childNodes.length ? out : null;
 }
 

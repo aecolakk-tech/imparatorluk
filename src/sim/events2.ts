@@ -1,3 +1,5 @@
+import { isOnline } from './log';
+import { combatRecord } from './career';
 /**
  * v1.9.9: big events, all rule-based (no AI calls), each announced with a popup (disaster()).
  * - Eşkıya baskını: warning at 09:00, 10 armed robbers 22:00–06:00, NPCs stay home, asker/bekçi fight, result popup.
@@ -62,6 +64,7 @@ export function startRaidWarning(w: World): void {
 }
 function endRaid(w: World, won: boolean): void {
   const r = w.raid!; const cb = w.combat as (NonNullable<World['combat']> & { fallen?: string[]; hurt?: string[] }) | null | undefined; if (cb) { r.defDead = [...(r.defDead ?? []), ...(cb.fallen ?? [])]; r.defHurt = [...new Set([...(r.defHurt ?? []), ...(cb.hurt ?? [])])]; } w.combat = null; const killed = r.killed ?? 0; r.hurt = [...new Set(r.hurt ?? [])]; r.defHurt = [...new Set(r.defHurt ?? [])]; r.dead = [...new Set(r.dead ?? [])];
+  { const fo = cb?.fought ?? {}; const now = w.serverNow ?? w.lastTickAt; combatRecord(w, 'raid', Object.keys(fo), fo, won, w.people.filter((p) => p.prof === 'asker' && p.playerId && !p.npc && isOnline(w, p.playerId, now, 300_000)).map((p) => p.id)); }
   let recovered = 0; if (r.stolen) { recovered = Math.round(r.stolen * killed / RAID_N * 100) / 100; if (recovered > 0) transfer(w, 'dis', 'saray', recovered, 'eşkıyadan geri alınan ganimet'); }
   for (const p of w.people) if (isUniformed(p)) { p.loyalty = clamp(p.loyalty + (won ? 5 : -3)); }
   disaster(w, won ? 'baskin_zafer' : 'baskin_sonu', `${won ? 'EŞKIYA PÜSKÜRTÜLDÜ!' : 'Eşkıya sabah çekildi.'} Öldürülen eşkıya: ${killed}/${RAID_N}. Çalınan: ${Math.round(r.stolen ?? 0)} D, geri alınıp hazineye konan: ${Math.round(recovered)} D. Ölen siviller: ${(r.dead ?? []).join(', ') || 'yok'}. Ağır yaralı: ${(r.hurt ?? []).join(', ') || 'yok'}. Şehit asker/bekçi: ${(r.defDead ?? []).join(', ') || 'yok'}; yaralı: ${(r.defHurt ?? []).length}.`);
@@ -137,6 +140,7 @@ function battleHour(w: World): void {
 }
 function warEnd(w: World, won: boolean): void {
   const f = w.foreign!; const cb = w.combat as (NonNullable<World['combat']> & { fallen?: string[]; hurt?: string[] }) | null | undefined; if (cb) { f.ourDead = [...(f.ourDead ?? []), ...(cb.fallen ?? [])]; f.ourHurt = (f.ourHurt ?? 0) + (cb.hurt ?? []).length; } w.combat = null;
+  { const fo = cb?.fought ?? {}; const now = w.serverNow ?? w.lastTickAt; combatRecord(w, 'war', Object.keys(fo), fo, won, w.people.filter((p) => p.prof === 'asker' && p.playerId && !p.npc && isOnline(w, p.playerId, now, 300_000)).map((p) => p.id)); }
   if (won) {
     const loot = Math.round(f.demand * 0.3); transfer(w, 'dis', 'saray', loot, 'savaş ganimeti');
     for (const p of w.people) { if (isUniformed(p)) p.loyalty = clamp(p.loyalty + 8); p.mood = clamp(p.mood + 5); }

@@ -100,6 +100,11 @@ export function actionNeed(w: World, me: Person, a: Action): Need {
   switch (a.t) {
     case 'buy': case 'sell': return a.market === 'liman' ? B(['liman'], 'Liman’a') : B(MARKET_IDS(w), 'bir pazara');
     case 'fulfillOrder': return B(MARKET_IDS(w), 'Pazar’a (ilan tahtası)');
+    case 'jobApply': case 'jobPost': return B(MARKET_IDS(w), 'Pazar’a (İş İlanı Tahtası)');
+    case 'askJob': return { kind: 'person', id: a.personId };
+    case 'kisla': return B(['kisla'], 'Kışla’ya');
+    case 'sadaka': case 'asevi': case 'sifa': return B(['cami'], 'Cami’ye');
+    case 'talebe': case 'oku': case 'dersVer': return B(['okul', 'cami'], 'Okul’a ya da Cami’ye');
     case 'caravanBuy': return B([...MARKET_IDS(w), 'liman'], 'pazara ya da limana');
     case 'eat': return (['ekmek', 'et', 'balik', 'yumurta', 'sut'] as const).some((g) => (me.inv[g] ?? 0) > 0) ? null : B([...MARKET_IDS(w), 'firin', 'kasaphane', 'bar', me.home], 'evinize, fırına ya da bir pazara');
     case 'askida': return B(['firin'], 'Fırın’a');
@@ -127,7 +132,10 @@ export function actionNeed(w: World, me: Person, a: Action): Need {
     case 'witness': { const c = w.cases.find((x) => x.id === a.caseId); if (c?.trial && !c.trial.done && ((c.eyeIds ?? []).includes(me.id) || c.trial.blamedId === me.id || (c.called ?? []).some((x) => x.id === me.id))) return null; return B(['mahkeme'], 'Mahkeme’ye'); } // summoned / eyewitness speak from the popup
     case 'caseDecision': case 'defend': return B(['mahkeme'], 'Mahkeme’ye');
     case 'customize': return a.where === 'terzi' ? B(['dokuma'], 'Terzi’ye (Dokuma Tezgâhı)') : a.where === 'berber' ? B(['atolye'], 'Berber’e (Zanaat Atölyesi)') : null;
-    case 'runForMeclis': case 'castVote': case 'speak': case 'propose': case 'joinFaction': case 'vote': case 'runForBaskan': case 'voteBaskan': return B(['meclis', 'pazar'], 'Meclis’e ya da Meydan’daki sandığa');
+    case 'vote': return B(['meclis'], 'Meclis’teki sandığa');
+    case 'dilekceAc': case 'dilekceImza': return B(['meclis'], 'Meclis’e (dilekçe masası)');
+    case 'dilekceIste': return { kind: 'person', id: a.personId };
+    case 'runForMeclis': case 'castVote': case 'speak': case 'propose': case 'joinFaction': case 'runForBaskan': case 'voteBaskan': return B(['meclis', 'pazar'], 'Meclis’e ya da Meydan’daki sandığa');
     case 'poster': case 'campaign': return B(['pazar'], 'Meydan’a (Pazar)');
     case 'plot': case 'fundPlot': return B(['kisla', 'bar'], 'Kışla’ya ya da Meyhane’ye');
     case 'seize': return B(['saray'], 'Saray’a');

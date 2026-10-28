@@ -194,14 +194,16 @@ describe('Meclis', () => {
     const ms = members(w);
     expect(ms.length).toBe(16); expect(ms.some((m) => m.prof === 'asker' || m.prof === 'bekci')).toBe(false);
     expect(w.election.last?.results.length).toBeGreaterThan(16);
-    for (const m of ms) { expect(m.faction).not.toBeNull(); expect(m.immune).toBe(true); }
+    for (const m of ms) expect(m.immune).toBe(true);
+    expect(ms.filter((m) => m.faction).length).toBeGreaterThanOrEqual(12); // v2.0.1 D’Hondt: party lists (independents may win a seat)
     expect(w.meclis.factions.some((f) => f.leaderId)).toBe(true);
   });
   it('bills go through debate and a recorded vote; a player member votes himself', () => {
     const w = withMeclis();
     const pm = members(w)[0]!; pm.playerId = 'pm'; pm.npc = false;
     w.players.pm = { playerId: 'pm', personId: pm.id, name: pm.name, founder: false, banned: false, lastSeen: T0, lastSeenDay: 1, awayLog: [], awayMoney: 0 };
-    const b = propose(w, pm, 'insaat', 500, '') as Bill;
+    const plot = w.buildings.find((x) => x.kind === 'arsa')!; w.treasury = 5000; for (const x of w.projects) x.done = true;
+    const b = propose(w, pm, 'insaat', 0, `cesme@${plot.id}`) as Bill;
     expect(typeof b).toBe('object'); expect(b.status).toBe('tartisma');
     expect(applyAction(w, 'pm', { t: 'speak', billId: b.id, text: 'Şehre çeşme lazım!' }, T0).ok).toBe(true);
     expect(applyAction(w, 'pm', { t: 'castVote', billId: b.id, choice: 'cekimser' }, T0).ok).toBe(true);
@@ -254,6 +256,7 @@ describe('Meclis', () => {
     expect(w.cases.some((c) => c.accusedId === m.id)).toBe(false); // immune
     const lift = passedBill(w, 'dokunulmazlik', 0, m.id);
     expect(lift.status).toBe('kabul'); expect(m.immune).toBe(false);
+    w.day += 7; // v2.0.1: the same bill can't return within 7 days
     passedBill(w, 'sorusturma', 0, m.id);
     expect(w.cases.some((c) => c.accusedId === m.id && c.crime === 'zimmet')).toBe(true);
   });

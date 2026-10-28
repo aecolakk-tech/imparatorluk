@@ -1,3 +1,4 @@
+import { itibar } from './career';
 import { ek } from './tr';
 import { BASE_PRICE } from './constants';
 import type { CrimeKind, Person, Petition, PetitionKind, World } from './types';
@@ -166,8 +167,11 @@ export function openCase(w: World, accusedId: string, crime: CrimeKind, victimId
   const acc = findPerson(w, accusedId);
   if (acc?.meclis && acc.immune) { log(w, `${acc.name} yakalandı ama Meclis dokunulmazlığı var; dava açılamadı.`, acc.id); return; }
   w.cases.push({ id: nextId(w, 'C'), accusedId, crime, victimId, amount, evidence, stage: 'savci', day: w.day, deadline: w.day + 1 });
-  const a = findPerson(w, accusedId); if (a) a.jailedDays = Math.max(a.jailedDays, 1);
+  const a = findPerson(w, accusedId); if (a) { a.jailedDays = Math.max(a.jailedDays, 1); const loss = CRIME_ITIBAR[crime]; if (loss) itibar(w, a, -loss, CRIME_WHY[crime] ?? 'suç'); }
 }
+/** v2.0.1 itibar lost when a crime comes to light. */
+const CRIME_ITIBAR: Partial<Record<CrimeKind, number>> = { hirsizlik: 10, cinayet: 30, rusvet: 15, saldiri: 5, zimmet: 5, isyan: 10, kacakcilik: 5 };
+const CRIME_WHY: Partial<Record<CrimeKind, string>> = { hirsizlik: 'hırsızlık', cinayet: 'cinayet', rusvet: 'rüşvet', saldiri: 'kavga/saldırı', zimmet: 'ödenmeyen borç', isyan: 'isyan', kacakcilik: 'kaçakçılık' };
 
 export const CRIME_LABEL: Record<CrimeKind, string> = { hirsizlik: 'Hırsızlık', rusvet: 'Rüşvet', zimmet: 'Zimmet', isyan: 'İsyan', saldiri: 'Saldırı', cinayet: 'Cinayet', kacakcilik: 'Kaçakçılık' };
 export { steal } from './life';

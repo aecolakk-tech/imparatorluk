@@ -1,3 +1,4 @@
+import { migrateCareer, itibar } from './career';
 import { migrateEcon } from './market2';
 import { migrateAge } from './age';
 import { ek } from './tr';
@@ -34,7 +35,7 @@ export function repay(w: World, p: Person, id: string): string {
   const l = w.loans.find((x) => x.id === id && x.debtor === p.id); if (!l) return 'Borç yok.';
   const pay = Math.min(p.money, l.amount); if (pay <= 0) return 'Kesede para yok.';
   transfer(w, p.id, l.lender, pay, 'borç ödemesi'); l.amount = Math.round((l.amount - pay) * 100) / 100;
-  if (l.amount <= 0.01) w.loans = w.loans.filter((x) => x !== l);
+  if (l.amount <= 0.01) { w.loans = w.loans.filter((x) => x !== l); itibar(w, p, 3, 'borcunu kapattı'); }
   return l.amount > 0.01 ? `${pay} ödendi; kalan ${l.amount}.` : 'Borç kapandı.';
 }
 /** Due loans: NPC debtors pay; defaulters get haciz (goods seized and sold to the lender), then zindan. */
@@ -74,7 +75,7 @@ export function lawPreview(w: World, kind: string, value?: number): string {
 
 /** Bring an older saved world up to the current schema without losing people, money or history. */
 export function migrateWorld(w: World): World {
-  migrateArms(w); migrateAge(w); migrateEcon(w);
+  migrateArms(w); migrateAge(w); migrateEcon(w); migrateCareer(w);
   const any = w as unknown as Record<string, unknown>;
   if ((w.schema ?? 1) >= 2) return migrate3(w);
   const def: Record<string, unknown> = { speed: 1, nature: null, nextDrought: w.day + 60, festivalUntil: 0, granary: 400, priceCaps: {}, arrests: [], chatOut: [], talks: [], offers: [], rumors: [], caravan: null, threat: null, bans: [], loans: [] };

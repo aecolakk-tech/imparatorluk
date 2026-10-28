@@ -1,5 +1,10 @@
+import { campaignDay } from './propaganda';
+import { npcCareerDay, npcPietyDay, npcCampaignDay, npcPartyDay, naipPolicy } from './solo';
+import { genelgeDay } from './genelge';
 import { BASE_PRICE, GOOD_LABEL } from './constants';
 import type { Good } from './types';
+import { careerHour, careerDay, refreshJobs, itibar } from './career';
+import { pietyHour } from './piety';
 import { marketHour, marketDay, wageMul, shelf, TRADE_GOODS, WHOLESALE_MUL } from './market2';
 import { energyHour, housingDay } from './housing';
 import { bigEventsHour } from './bigevents';
@@ -14,7 +19,7 @@ import { chance, clamp, pick, rand } from './rng';
 import { findPerson } from './world';
 import { isOnline, kayzerPlayerId, log, personal } from './log';
 import { expirePetitions, naipPetitions, saraykorBonus } from './state';
-import { meclisDay, meclisElection } from './meclis';
+import { meclisDay, meclisElection, sandikHour } from './meclis';
 import { command, isyanHour, settleFate, startIsyan, strength, republicShare, REBEL_SHARE } from './isyan';
 import { actingHead, dethroneForJail, familyDay } from './family';
 import { endOfDayLife, lifeHour, rumor, autoNeed } from './life';
@@ -83,7 +88,9 @@ export function stepHour(w: World, now: number): void {
   needsDrain(w, (p) => autoNeed(w, p, 'yemek'), (p) => autoNeed(w, p, 'su')); lifeHour(w); energyHour(w, w.serverNow ?? w.lastTickAt);
   chatHour(w, now, (p) => isOnline(w, p.playerId, now, ONLINE_WINDOW_MS));
   bigEventsHour(w, now);
-  if (w.hour === 10) campaign(w, now);
+  if (w.hour === 10) { campaign(w, now); campaignDay(w, now); npcCampaignDay(w, now); } // v2.0.1 NPC vaatler, miting, kapı kapı, ikram…
+  if (w.hour === 9) npcCareerDay(w); if (w.hour === 18) npcPietyDay(w); if (w.hour === 15) npcPartyDay(w);
+  sandikHour(w, electionPhase(w).phase === 'oylama'); // v2.0.1 NPCs walk to the sandık on election day
   switch (w.hour) {
     case 2: for (const p of w.people) decide(w, p); break;
     case 7: sellGazette(w); break;
@@ -91,7 +98,7 @@ export function stepHour(w: World, now: number): void {
     case 10: court(w, now); break;
     case 11: meclisDay(w, (p) => !fullAI(p) && isOnline(w, p.playerId, now), kOnline); break;
     case 12: salaries(w); projects(w, kOnline); hamaliye(w); break;
-    case 16: if (!kOnline) { const d = naipPetitions(w, now); if (d.length) naipNote(w, `Naip olarak ${d.length} dilekçeyi karara bağladım.`, now); } break;
+    case 16: if (!kOnline) { const d = naipPetitions(w, now); if (d.length) naipNote(w, `Naip olarak ${d.length} dilekçeyi karara bağladım.`, now); const pol = naipPolicy(w); if (pol.length) naipNote(w, `Hazine ve çarşı için: ${pol.join('; ')}.`, now); } break;
     case 17: stateBread(w); break;
     case 19: for (const p of shuffled(w)) consume(w, p); break;
     case 22: if (w.festivalUntil >= w.day) for (const p of w.people) p.mood = clamp(p.mood + 1.5); break;
@@ -99,7 +106,8 @@ export function stepHour(w: World, now: number): void {
     case 21: traders(w); break;
     default: break;
   }
-  marketHour(w); // v2.0.1 economy (Liman toptan, Pazar Günü, siparişler, Göstergesi)
+  careerHour(w, now); pietyHour(w, now); if (w.hour === 5 || !w.jobs) refreshJobs(w); // v2.0.1 iş, itibar, din
+  marketHour(w); // v2.0.1 economy (Liman toptan, Panayır, siparişler, Göstergesi)
 }
 
 function shuffled(w: World): Person[] {
@@ -122,7 +130,7 @@ function salaries(w: World): void {
   let unpaid = 0;
   for (const p of w.people) {
     if (!isState(p) || p.jailedDays > 0 || p.recruit) continue; // v1.9.9: recruits get their own capped pay
-    const s = Math.round((w.salaries[p.prof] ?? 0) * (p.prof === 'asker' ? saraykorBonus(w) : 1) * wageMul(w) * 100) / 100; // v2.0.1 ücret endeksi
+    const s = Math.round((w.salaries[p.prof] ?? 0) * (p.prof === 'asker' ? saraykorBonus(w) : 1) * Math.min(1.15, wageMul(w)) * 100) / 100; // v2.0.1 ücret endeksi (devlet maaşı en fazla %15 endekslenir)
     if (s <= 0) continue;
     if (transfer(w, 'saray', p.id, s, 'maaş')) { p.incomeToday += s; p.loyalty = clamp(p.loyalty + 0.3); }
     else { unpaid += 1; p.loyalty = clamp(p.loyalty - 5); p.mood = clamp(p.mood - 5); }
@@ -148,7 +156,7 @@ function projects(w: World, kOnline: boolean): void {
       p.incomeToday += 6; pr.progress += 1; p.lastAction = 'şantiyede çalıştı';
     }
     if (pr.progress >= pr.needed) {
-      pr.done = true; log(w, `${pr.name} tamamlandı! Şehirde bayram havası.`);
+      pr.done = true; pr.doneDay = w.day; log(w, `${pr.name} tamamlandı! Şehirde bayram havası.`);
       const plot = w.buildings.find((b) => b.id === pr.plot);
       if (plot) { plot.kind = 'yapi'; plot.name = pr.name.replace(/ inşaatı$/i, ''); }
       for (const p of w.people) { p.mood = clamp(p.mood + 6); p.loyalty = clamp(p.loyalty + 3); }
@@ -245,6 +253,7 @@ export function verdict(w: World, caseId: string, guilty: boolean, now: number):
     if (c.victimId) transfer(w, a.id, c.victimId, Math.min(a.money, c.amount), 'tazminat');
     const fine = Math.min(a.money, c.crime === 'isyan' || c.crime === 'cinayet' ? a.money : 10 + c.amount * 0.5);
     transfer(w, a.id, 'saray', fine, 'para cezası');
+    itibar(w, a, -20, 'zindan cezası');
     a.jailedDays = c.crime === 'cinayet' ? 25 : c.crime === 'isyan' ? 7 : c.crime === 'saldiri' ? 5 : 3; a.honesty = clamp(a.honesty + 5); a.mood = clamp(a.mood - 15);
     c.sentence = `${a.jailedDays} gün zindan, ${Math.round(fine)} Dinar ceza`;
     log(w, `Hâkim kararı: ${a.name} suçlu bulundu (${c.sentence}).`, a.id);
@@ -258,9 +267,9 @@ export function verdict(w: World, caseId: string, guilty: boolean, now: number):
 function endOfDay(w: World, now: number): void {
   // head tax
   for (const p of w.people) if (!isState(p) && p.prof !== 'kayzer' && p.prof !== 'naip' && p.jailedDays === 0 && p.money >= w.headTax) transfer(w, p.id, 'saray', w.headTax, 'baş vergisi');
-  settleMarket(w); marketDay(w);
+  settleMarket(w); marketDay(w); careerDay(w);
   expirePetitions(w, now);
-  w.headAwayDays = kayzerOnline(w, now) ? 0 : w.headAwayDays + 1;
+  w.headAwayDays = !kayzerPlayerId(w) || kayzerOnline(w, now) ? 0 : w.headAwayDays + 1; // v2.0.1: an AI-run throne (naip, no human Kayzer) is not 'away'
   for (const p of w.people) {
     feel(w, p);
     if (p.incomeToday <= 0 && !isState(p) && p.prof !== 'kayzer' && p.prof !== 'naip') p.unemployedDays += 1; else p.unemployedDays = 0;
@@ -275,7 +284,7 @@ function endOfDay(w: World, now: number): void {
   familyDay(w, fullAI, now);
   endOfDayLife(w); loansDay(w); goalsDay(w); housingDay(w);
   seasonDay(w); hayvanciDay(w); animalsDay(w); nobilityDay(w); intrigueDay(w); orgsDay(w);
-  settleFate(w);
+  settleFate(w); genelgeDay(w); // v2.0.1 genelge effects + expiry
   for (const p of w.people) if (p.exiledDays > 0) { p.exiledDays -= 1; if (p.exiledDays === 0) { p.home = 'ev1'; log(w, `${p.name} sürgünden döndü.`, p.id); } }
   election(w);
   inactivePlayers(w, now);
@@ -303,7 +312,7 @@ function election(w: World): void {
   const e = w.election;
   if (w.day < e.nextDay) return;
   meclisElection(w, e.candidates, e.votes, fullAI);
-  w.election = { ...e, nextDay: w.day + ELECTION_EVERY, candidates: [], votes: {}, posters: {} };
+  w.election = { ...e, nextDay: w.day + ELECTION_EVERY, candidates: [], votes: {}, posters: {}, ballots: [] };
 }
 
 export function declareRepublic(w: World): void {
@@ -356,7 +365,7 @@ function gazette(w: World, mood: number): void {
   const lines = [
     `Hazine ${Math.round(w.treasury)} Dinar (${delta >= 0 ? '+' : ''}${delta}). Gelir ${Math.round(w.dailyIncome)}, gider ${Math.round(w.dailyExpense)}.`,
     `Pazar fiyatları: ${(['ekmek', 'su', 'un', 'et', 'odun'] as Good[]).map((g) => { const s = shelf(w, g, 'carsi'); return `${GOOD_LABEL[g]} ${s.price === null ? 'tükendi' : `${s.price.toFixed(2)} D`}`; }).join(', ')}. Ücret endeksi ${(w.wageIdx ?? 1).toFixed(2)}.`,
-    ...w.todayEvents.filter((e) => /^📈|^📉|karaborsa|PAZAR GÜNÜ|terk etti/.test(e)).slice(0, 3),
+    ...w.todayEvents.filter((e) => /^📈|^📉|karaborsa|PANAYIR|terk etti/.test(e)).slice(0, 3),
     w.regime === 'cumhuriyet' ? `Cumhuriyet yönetimi. Başkan: ${findPerson(w, w.kayzerId)?.name ?? 'seçim bekleniyor'}; sonraki seçim ${w.election.baskanNextDay}. gün. Memnuniyet ${Math.round(mood)}.` : `Halkın memnuniyeti ${Math.round(mood)}, cumhuriyet isteği ${w.cumhuriyet}.`,
     `${ev.filter((e) => e.includes('dilekçe')).length} dilekçe, ${ev.filter((e) => e.includes('soyuldu')).length} hırsızlık, ${ev.filter((e) => e.includes('Hâkim kararı')).length} mahkeme kararı.`,
   ];

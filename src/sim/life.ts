@@ -1,3 +1,5 @@
+import { itibar } from './career';
+import { din, ate } from './piety';
 import { ek } from './tr';
 import { atHomeSafe } from './housing';
 import { interrogate } from './realm';
@@ -39,7 +41,8 @@ export { rel as relate };
 // ---------------- needs ----------------
 const FOOD_JOY: Partial<Record<Good, number>> = { ekmek: 0.6, balik: 2, et: 2.5 };
 /** Eat one meal: from home stock, else buy (fish/meat if affordable – more happiness – else bread). */
-export function eatMeal(w: World, p: Person): boolean {
+export function eatMeal(w: World, p: Person): boolean { const r = eatMeal0(w, p); if (r) ate(w, p); return r; }
+function eatMeal0(w: World, p: Person): boolean {
   if (p.prof === 'naip') { p.meals += 1; return true; }
   if (palace(w, p)) { if (transfer(w, 'saray', 'dis', 1, 'saray mutfağı')) { p.meals += 1; p.hunger = clamp(p.hunger - 35); p.mood = clamp(p.mood + 1); return true; } }
   if (p.jailedDays > 0) { p.meals += 1; p.hunger = clamp(p.hunger - 30); return true; } // zindan ekmeği
@@ -109,9 +112,10 @@ export function drinkAlcohol(w: World, p: Person): string {
   if (w.bans.includes('icki')) return 'İçki yasak; meyhane kapalı.';
   if (p.inv.icki <= 0) buy(w, p.id, 'icki', 1, Math.max(0, p.money * 0.5));
   if (p.inv.icki <= 0) return 'Meyhanede içki yok ya da paranız yetmiyor.';
-  p.inv.icki -= 1; p.mood = clamp(p.mood + 4); p.din = clamp(p.din - 3); p.lastAction = 'meyhanede içti';
+  p.inv.icki -= 1; const low = p.din < 30; p.mood = clamp(p.mood + (low ? 6 : 4)); din(w, p, -2, 'meyhanede içki'); p.lastAction = 'meyhanede içti';
+  if (low && p.playerId && !p.npc && (p.cs ??= {}).noted?.['icki'] !== w.day && w.people.some((x) => x.din >= 70 && (x.relations[p.id] ?? 0) > -100)) { (p.cs.noted ??= {})['icki'] = w.day; itibar(w, p, -1, 'dindar çevrede ayıplandı (meyhane)'); }
   if (chance(w, 0.08)) { p.health = clamp(p.health - 5); }
-  return 'Meyhanede bir kadeh içtiniz (mutluluk +4, dindarlık −3).';
+  return `Meyhanede bir kadeh içtiniz (mutluluk +${low ? 6 : 4}, dindarlık −2).`;
 }
 /** Friday sermon at the cami by the imam/hoca, or a player imam's chosen topic. */
 export function sermon(w: World, by: Person, topic: 'namaz' | 'icki' | 'sabir'): string {
@@ -329,16 +333,27 @@ function wealthTax(w: World): void {
 
 // ---------------- jobs ----------------
 const STAPLE_PROFS = ['ciftci', 'degirmenci', 'firinci', 'sucu', 'kasap', 'balikci'];
+const STAPLE_MIN: Partial<Record<Person['prof'], number>> = { ciftci: 4, degirmenci: 2, firinci: 3, sucu: 3 };
 function switchJobs(w: World): void {
   const count = (prof: string): number => w.people.filter((x) => x.prof === prof).length;
   for (const p of [...w.people].sort(() => rand(w) - 0.5)) {
     const idleHamal = p.prof === 'hamal' && p.money < 30;
     const own = PRODUCES[p.prof]?.good; const glut = !!own && w.listings.filter((l) => l.good === own).reduce((s, l) => s + l.qty, 0) > w.market.sold[own] * 1.5 + 10;
     if (!fullAI(p) || (!PRODUCES[p.prof] && !idleHamal) || (!idleHamal && (p.unemployedDays < 6 || p.money > 60 || (STAPLE_PROFS.includes(p.prof) && !glut)))) continue;
+    // v2.0.1: the food chain never empties – the last few farmers/millers/bakers stay, and an idle hand fills a missing link first
+    if (!idleHamal && count(p.prof) <= (STAPLE_MIN[p.prof] ?? 0)) continue;
+    const gap = (Object.keys(STAPLE_MIN) as Person['prof'][]).find((pr) => count(pr) < (STAPLE_MIN[pr] ?? 0));
+    if (gap && gap !== p.prof && (idleHamal || !STAPLE_PROFS.includes(p.prof) || count(p.prof) > (STAPLE_MIN[p.prof] ?? 0) + 1)) {
+      const old = PROF_LABEL[p.prof]; p.prof = gap; p.work = WORKPLACE[gap]; p.xp = 0; p.unemployedDays = 0;
+      log(w, `${p.name} ${old} işini bıraktı, ${PROF_LABEL[gap]} oldu (şehirde ${PROF_LABEL[gap]} kalmadı).`, p.id); return;
+    }
     const g = PRODUCES[p.prof]?.good;
     const best = (Object.entries(PRODUCES) as [Person['prof'], { good: Good }][])
       .filter(([prof]) => count(prof) < 14 && (!idleHamal || STAPLE_PROFS.includes(prof)))
       .map(([prof, r]) => ({ prof, need: w.market.unmet[r.good] * BASE_PRICE[r.good] * (STAPLE_PROFS.includes(prof) ? 3 : 1) })).sort((a, b) => b.need - a.need)[0];
+    // v2.0.1: chain-aware – bread is short because flour is short? the hands go to the mill; flour short because wheat is? to the fields
+    const UP: Partial<Record<Person['prof'], [Person['prof'], Good]>> = { firinci: ['degirmenci', 'un' as Good], degirmenci: ['ciftci', 'bugday'] };
+    for (let i = 0; best && i < 2; i++) { const u = UP[best.prof]; if (!u) break; const [up, ug] = u; if ((w.market.unmet[ug] ?? 0) > 0 || (w.prices[ug] ?? 0) > BASE_PRICE[ug] * 2) best.prof = up; else break; }
     if (best && best.prof !== p.prof && best.need > 20 && (!g || w.market.unmet[g] === 0)) {
       const old = PROF_LABEL[p.prof]; p.prof = best.prof; p.work = WORKPLACE[best.prof]; p.xp = 0; p.unemployedDays = 0;
       log(w, `${p.name} ${old} işini bıraktı, ${PROF_LABEL[best.prof]} oldu (orada talep var).`, p.id);
@@ -366,6 +381,7 @@ export function arrest(w: World, criminal: Person, crime: CrimeKind, victimId: s
   if (!c) return null;
   const a: Arrest = { id: nextId(w, 'A'), criminalId: criminal.id, catcherId: c.id, crime, victimId, amount, day: w.day, hour: w.hour, offer: 0, status: 'bekliyor', at: w.serverNow ?? w.lastTickAt, ...(proof ?? {}) };
   w.arrests.push(a); criminal.jailedDays = Math.max(criminal.jailedDays, 1);
+  if (c.playerId && !c.npc && (crime === 'hirsizlik' || crime === 'saldiri' || crime === 'cinayet')) { itibar(w, c, 4, `suçlu yakaladı (${criminal.name})`); (c.cs ??= {}).kills = (c.cs.kills ?? 0) + 1; }
   if (criminal.orderedBy && chance(w, 0.65)) revealOrder(w, criminal); // the hired hand talks
   interrogate(w, criminal);
   if (criminal.task) { criminal.task.status = 'basarisiz'; criminal.task.note = 'Yakalandım.'; criminal.task.doneAt = w.serverNow ?? w.lastTickAt; }

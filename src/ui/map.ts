@@ -145,12 +145,34 @@ function drawBuilding(g: CanvasRenderingContext2D, b: Building): void {
 export { nearestRoad, placePeople, type Placed } from '../sim/place';
 import { TALK_MS, type Placed } from '../sim/place';
 import type { Corpse } from '../sim/types';
+import { yearsOf } from '../sim/age';
+
+/** v2.0.1 D13: body height scale for under-16s. bebek/çocuk 0–6: 55→60 %, genç 7–16: 65→100 % (linear). */
+export function kidScale(years: number): number { if (years >= 16) return 1; if (years <= 6) return 0.55 + 0.05 * Math.max(0, years) / 6; return 0.65 + 0.35 * (years - 7) / 9; }
+/** Head rows keep more of their size than the body (kids have proportionally bigger heads). */
+export const headScale = (s: number): number => s + (1 - s) * 0.4;
+const HEAD_ROWS = 6; // rows 0..5 of the 16×16 frame = hair/head/hat; rows 6..15 = torso, legs (clothes/accessories travel with their slice)
+/** Draw a 16×16 frame scaled for a child: head slice and body slice scaled separately, feet on (sx, sy). Returns the drawn height. */
+export function drawKid(ctx: CanvasRenderingContext2D, img: CanvasImageSource, sx: number, sy: number, sz: number, s: number, flip: boolean): number {
+  if (s >= 1) { if (flip) { ctx.save(); ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); ctx.drawImage(img, Math.round(-sz / 2), Math.round(sy - sz), sz, sz); ctx.restore(); } else ctx.drawImage(img, Math.round(sx - sz / 2), Math.round(sy - sz), sz, sz); return sz; }
+  const hs = headScale(s); const bw = sz * s, bh = sz * s * (16 - HEAD_ROWS) / 16; const hw = sz * hs, hh = sz * hs * HEAD_ROWS / 16;
+  ctx.save(); if (flip) { ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); sx = 0; }
+  ctx.drawImage(img, 0, HEAD_ROWS, 16, 16 - HEAD_ROWS, Math.round(sx - bw / 2), Math.round(sy - bh), Math.round(bw), Math.round(bh));
+  ctx.drawImage(img, 0, 0, 16, HEAD_ROWS, Math.round(sx - hw / 2), Math.round(sy - bh - hh + 1), Math.round(hw), Math.round(hh));
+  ctx.restore(); return bh + hh;
+}
+/** Drawn height factor (of the adult sprite size) for a given body scale. */
+export const kidHeight = (s: number): number => (s >= 1 ? 1 : (s * (16 - HEAD_ROWS) + headScale(s) * HEAD_ROWS) / 16);
+export interface PlacedKid { id: string; name: string; years: number; sick: boolean; x: number; y: number; s: number }
+export let lastKids: PlacedKid[] = [];
 const findPersonLite = (w: World, id: string | undefined): Person | undefined => (id ? w.people.find((p) => p.id === id) : undefined);
 export const SPRITE_SCALE = 1.4;
 let lastAnimals: PlacedAnimal[] = [];
 /** Tap marker: an expanding ring where the player tapped. */
 export const tapFx = { x: 0, y: 0, t: 0 };
 /** The Meydan election notice board (tile coords). */
+/** v2.0.1 Şehir Göstergesi board, between the Mahkeme and the Saray (open with Etkileşim within ~1 m). */
+export const GOSTERGE = { x: 28.3, y: 10.4 };
 export const SIGN = { x: 27.4, y: 21.2 }; // v2.0.1: in the gap between the Gıda Pazarı and the Pazar (no overlap with either's roof/label)
 
 export interface Camera { x: number; y: number; z: number }
@@ -165,7 +187,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
     if (sw > 0 && sh > 0) ctx.drawImage(stat, sx0, sy0, sw, sh, Math.round((sx0 / T - cam.x) * z), Math.round((sy0 / T - cam.y) * z), Math.round(sw * cam.z), Math.round(sh * cam.z));
   }
   const sz = Math.round(T * cam.z * SPRITE_SCALE);
-  drawSign(ctx, w, cam, z, now);
+  drawSign(ctx, w, cam, z, now); drawGosterge(ctx, cam, z);
   // corpses: blood pool + body lying on the ground
   for (const co of w.corpses ?? []) drawCorpse(ctx, co, cam, z, sz, now);
   drawV2(ctx, w, cam, z, sz, now, placed); // v2.0: ruins/fire, caravan camels or ship, raiders, enemy fleet
@@ -194,21 +216,22 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
     if (ride) { const hs = Math.round(sz * 1.25); const hi = animalSprite('at', q.moving ? Math.floor(now / 160) % 2 : 0); if (q.dir < 0) { ctx.save(); ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); ctx.drawImage(hi, Math.round(-hs / 2), Math.round(sy - hs), hs, hs); ctx.restore(); } else ctx.drawImage(hi, Math.round(sx - hs / 2), Math.round(sy - hs), hs, hs); }
     const pf = ride ? 0 : f; // seated rider: no leg swing
     if (ride) { ctx.save(); ctx.beginPath(); ctx.rect(sx - sz, sy - sz - lift - 2, sz * 2, sz * 0.78); ctx.clip(); } // legs hidden behind the horse's flank
-    if (q.dir < 0) { ctx.save(); ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); ctx.drawImage(fr[pf]!, Math.round(-sz / 2), Math.round(sy - sz - lift), sz, sz); ctx.restore(); }
-    else ctx.drawImage(fr[pf]!, Math.round(sx - sz / 2), Math.round(sy - sz - lift), sz, sz);
+    { const ks = kidScale(yearsOf(w, q.p)); drawKid(ctx, fr[pf]!, sx, sy - lift, sz, ks, q.dir < 0); }
     if (ride) ctx.restore();
     if (q.p.id === myPersonId) { ctx.fillStyle = '#7fd0ff'; ctx.beginPath(); ctx.moveTo(sx - 5, sy - sz - 10); ctx.lineTo(sx + 5, sy - sz - 10); ctx.lineTo(sx, sy - sz - 3); ctx.fill(); }
   }
-  // children: small sprites near home during the day
+  // children: drawn by age (D13) near home / at school during the day; tappable (name + age label)
+  lastKids = [];
   if (w.hour >= 8 && w.hour < 20) {
-    const cs = Math.round(sz * 0.6);
     for (const c of w.children) {
       const b = w.buildings.find((x) => x.id === (c.inSchool && w.hour < 14 ? 'okul' : (findPersonLite(w, c.parents[0])?.home ?? 'ev1'))); if (!b) continue;
       const hh = hash(c.id); const x = b.door.x + ((hh % 100) / 100 - 0.5) * 2.4 + Math.sin(now / 700 + hh) * 0.4; const y = b.door.y + 0.6 + ((hh >> 8) % 100) / 300;
-      const sx = (x - cam.x) * z, sy = (y - cam.y) * z; if (sx < -cs || sy < -cs || sx > cw + cs || sy > ch + cs) continue;
+      const yrs = yearsOf(w, c); const ks = kidScale(yrs); lastKids.push({ id: c.id, name: c.name, years: yrs, sick: c.sick > 0, x, y, s: ks });
+      const sx = (x - cam.x) * z, sy = (y - cam.y) * z; if (sx < -sz || sy < -sz || sx > cw + sz || sy > ch + sz) continue;
       const pseudo = { id: c.id, prof: 'hamal', female: c.female, hairColor: c.hairColor, skin: c.skin, shirt: c.shirt } as unknown as Person;
-      ctx.drawImage(spriteFor(pseudo)[Math.floor(now / 260 + hh) % 2]!, Math.round(sx - cs / 2), Math.round(sy - cs), cs, cs);
-      if (c.sick > 0) drawIcon(ctx, 'doctor', sx, sy - cs - 6, cs * 0.55, '#ff7a6a');
+      if (c.id === selected) { ctx.fillStyle = 'rgba(255,230,80,0.55)'; ctx.beginPath(); ctx.ellipse(sx, sy, sz * 0.45 * ks, sz * 0.18 * ks, 0, 0, Math.PI * 2); ctx.fill(); }
+      const dh = drawKid(ctx, spriteFor(pseudo)[Math.floor(now / 260 + hh) % 2]!, sx, sy, sz, ks, Math.sin(now / 700 + hh) < 0);
+      if (c.sick > 0) drawIcon(ctx, 'doctor', sx, sy - dh - 6, sz * 0.35, '#ff7a6a');
     }
   }
   // isyan: occupied buildings
@@ -290,6 +313,13 @@ function drawCorpse(ctx: CanvasRenderingContext2D, co: Corpse, cam: Camera, z: n
   ctx.save(); ctx.translate(sx, sy - sz * 0.2); ctx.rotate(Math.PI / 2); ctx.drawImage(spriteFor(pseudo)[0]!, -sz / 2, -sz / 2, sz, sz); ctx.restore();
   ctx.font = `${Math.round(sz * 0.45)}px system-ui`; ctx.textAlign = 'center'; ctx.fillText(co.stage === 'yerde' ? '💀' : '🚨', sx, sy - sz * 0.75 + Math.sin(now / 250) * 2);
 }
+function drawGosterge(ctx: CanvasRenderingContext2D, cam: Camera, z: number): void {
+  const sx = (GOSTERGE.x - cam.x) * z, sy = (GOSTERGE.y - cam.y) * z; const s = z / 16;
+  ctx.fillStyle = '#5a3a1a'; ctx.fillRect(sx + 1 * s, sy, 3 * s, 14 * s); ctx.fillRect(sx + 18 * s, sy, 3 * s, 14 * s);
+  ctx.fillStyle = '#7a5530'; ctx.fillRect(sx - 2 * s, sy - 16 * s, 26 * s, 18 * s); ctx.fillStyle = '#efe4c8'; ctx.fillRect(sx, sy - 14 * s, 22 * s, 14 * s);
+  ctx.strokeStyle = '#2f6d3a'; ctx.lineWidth = 1.5 * s; ctx.beginPath(); ctx.moveTo(sx + 2 * s, sy - 4 * s); ctx.lineTo(sx + 7 * s, sy - 8 * s); ctx.lineTo(sx + 12 * s, sy - 6 * s); ctx.lineTo(sx + 20 * s, sy - 12 * s); ctx.stroke();
+  ctx.fillStyle = '#3a2a10'; ctx.font = `bold ${Math.max(6, 3.4 * s)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('ŞEHİR', sx + 11 * s, sy - 18.5 * s);
+}
 function drawSign(ctx: CanvasRenderingContext2D, w: World, cam: Camera, z: number, now: number): void {
   const sx = (SIGN.x - cam.x) * z, sy = (SIGN.y - cam.y) * z; const s = z / 16;
   ctx.fillStyle = '#5a3a1a'; ctx.fillRect(sx - 2 * s, sy, 4 * s, 18 * s); ctx.fillRect(sx + 26 * s, sy, 4 * s, 18 * s);
@@ -301,7 +331,7 @@ function drawSign(ctx: CanvasRenderingContext2D, w: World, cam: Camera, z: numbe
   if (ph !== 'bekleme') { ctx.fillStyle = 'rgba(255,220,80,0.9)'; ctx.beginPath(); ctx.arc(sx + 32 * s, sy - 20 * s, (3 + Math.sin(now / 200)) * s, 0, Math.PI * 2); ctx.fill(); }
 }
 
-export function hitTest(w: World, placed: Placed[], cam: Camera, sx: number, sy: number, myId: string | null = null): { person?: Person; building?: Building; corpse?: Corpse; sign?: boolean; animal?: PlacedAnimal } {
+export function hitTest(w: World, placed: Placed[], cam: Camera, sx: number, sy: number, myId: string | null = null): { person?: Person; kid?: PlacedKid; building?: Building; corpse?: Corpse; sign?: boolean; gosterge?: boolean; animal?: PlacedAnimal } {
   const z = cam.z * T; const sz = T * cam.z * SPRITE_SCALE;
   if (myId) { // v1.9.3: only YOUR animals react to a tap (others' are scenery)
     let ba: PlacedAnimal | undefined; let bd2 = Infinity;
@@ -309,15 +339,19 @@ export function hitTest(w: World, placed: Placed[], cam: Camera, sx: number, sy:
     if (ba) return { animal: ba };
   }
   for (const co of w.corpses ?? []) { const px = (co.x - cam.x) * z, py = (co.y - cam.y) * z - sz * 0.2; if (Math.hypot(px - sx, py - sy) < Math.max(22, sz * 0.6)) return { corpse: co }; }
+  { const px = (GOSTERGE.x - cam.x) * z, py = (GOSTERGE.y - cam.y) * z; const s = z / 16; if (sx >= px - 4 * s && sx <= px + 26 * s && sy >= py - 22 * s && sy <= py + 14 * s) return { gosterge: true }; }
   { const px = (SIGN.x - cam.x) * z, py = (SIGN.y - cam.y) * z; const s = z / 16; if (sx >= px - 6 * s && sx <= px + 34 * s && sy >= py - 20 * s && sy <= py + 18 * s) return { sign: true }; }
   const r = Math.max(22, sz * 0.7);
   let best: Placed | undefined; let bd = Infinity;
   for (const q of placed) {
     if (!q.visible) continue;
-    const px = (q.x - cam.x) * z, py = (q.y - cam.y) * z - sz / 2;
+    const kh = kidHeight(kidScale(yearsOf(w, q.p))); const px = (q.x - cam.x) * z, py = (q.y - cam.y) * z - sz * kh / 2;
     const d = Math.hypot(px - sx, py - sy);
-    if (d < r && d < bd) { bd = d; best = q; }
+    if (d < r * Math.max(0.75, kh) && d < bd) { bd = d; best = q; }
   }
+  let kidBest: PlacedKid | undefined;
+  for (const k of lastKids) { const kh = kidHeight(k.s); const px = (k.x - cam.x) * z, py = (k.y - cam.y) * z - sz * kh / 2; const d = Math.hypot(px - sx, py - sy); if (d < Math.max(16, sz * 0.7 * kh) && d < bd) { bd = d; kidBest = k; } }
+  if (kidBest) return { kid: kidBest };
   if (best) return { person: best.p };
   const tx = sx / z + cam.x, ty = sy / z + cam.y;
   const b = w.buildings.find((x) => tx >= x.x - 0.3 && tx <= x.x + x.w + 0.3 && ty >= x.y - 1 && ty <= x.y + x.h + 0.5);

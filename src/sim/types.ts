@@ -50,6 +50,8 @@ export interface Person {
   jailedDays: number;
   incomeToday: number;
   unemployedDays: number;
+  /** v2.0.1 esnaf kredisi still owed to the hazine */
+  kredi?: number;
   thought: string;
   lastAction: string;
   relations: Record<string, number>; // -100..100, sparse
@@ -61,6 +63,13 @@ export interface Person {
   sidedWith: string | null; // soldiers: who they back in a coup
   born: number; // game day of birth (adults start with a past birthday)
   poorDays?: number; cantAfford?: number; // v2.0.1: days in a row the person could not afford basics
+  vaatler?: import('./genelge').GKind[]; proposedG?: import('./genelge').GKind[]; voteRec?: { bill: string; v: VoteChoice; line?: VoteChoice; day: number }[]; promiseScore?: number; // v2.0.1 Meclis record
+  itibar?: number; // v2.0.1 itibar 0..100 (starts at 10), separate from money
+  yol?: MainRank; // v2.0.1 yükselme yolu (main path)
+  askerRank?: number; // v2.0.1 0 acemi er … 5 komutan (only while prof === 'asker')
+  ilimRank?: number; // v2.0.1 0 talebe, 1 hoca, 2 kadı
+  cs?: CareerStats; job?: Job; // v2.0.1 career counters and current job
+  notes?: { day: number; hour: number; kind: 'itibar' | 'din'; d: number; why: string }[]; // v2.0.1 'Neden değişti' (last 8)
   parents: string[]; // person/child ids
   soylu: boolean; // nobility (Kayzer's spouse, royal children)
   school: number; // days of schooling (children who grew up)
@@ -81,6 +90,20 @@ export interface Person {
   walk?: import('./move').Walk; // player characters: current walk (real-time path)
 }
 
+export type MainRank = 'dilenci' | 'isci' | 'cirak' | 'usta' | 'tuccar' | 'esraf' | 'soylu' | 'danisman';
+/** v2.0.1 career counters (days are game days). */
+export interface CareerStats {
+  jobDays?: number; jobStreak?: number; cirakDays?: number; ustaId?: string; ustaDays?: number; flawless?: number; trades?: number; tradeVal?: number;
+  notHungry?: number; talim?: number; talimDays?: number[]; talimAt?: number; service?: number; raids?: number; raidDay?: number; kills?: number; defenseWins?: number; campaignWins?: number;
+  literate?: boolean; read?: number; readDay?: number; readToday?: number; taught?: number; rec?: boolean; skill?: number; fled?: number;
+  namazDay?: number; cumaDay?: number; cumaWeek?: number; cumaMissNoted?: number; sadakaDay?: number; sadakaIt?: number; sadakaDin?: number; asevi?: number; sifaDay?: number;
+  ateDay?: number; ateHour?: number; orucDay?: number; goals?: Record<string, boolean>; missStreak?: number; offStreak?: number; dukkan?: boolean; depo?: boolean; hanRoom?: boolean;
+  quests?: number; honest?: number; taxWeek?: number; noted?: Record<string, number>; hardMode?: boolean;
+}
+export interface Job {
+  id: string; title: string; place: string; prof?: Profession; wage: number; from: number; to: number; employerId: string; // 'saray' | 'dis' | person id
+  kind: 'gundelik' | 'cirak' | 'usta' | 'devlet' | 'oyuncu' | 'kendi' | 'asker'; req?: { rank?: MainRank; itibar?: number; din?: number; literate?: boolean }; att?: number; attDay?: number; online?: boolean;
+}
 export interface Arrest { id: string; criminalId: string; catcherId: string; crime: CrimeKind; victimId: string | null; amount: number; day: number; hour: number; offer: number; status: 'bekliyor' | 'kabul' | 'ret'; at?: number; evidence?: number; eyewitnesses?: number; basis?: string; eyeIds?: string[]; complainantId?: string | null }
 export type CrimeKind = 'hirsizlik' | 'rusvet' | 'zimmet' | 'isyan' | 'saldiri' | 'cinayet' | 'kacakcilik';
 export interface Talk { a: string; b: string; text: string; day: number; hour: number; at?: number; lines?: string[]; ai?: boolean }
@@ -114,7 +137,7 @@ export interface Order { id: string; good: Good; qty: number; reward: number; by
 
 export interface LedgerEntry { day: number; from: string; to: string; amount: number; reason: string; }
 
-export type PetitionKind = 'yardim' | 'is' | 'vergi' | 'sikayet' | 'kanun' | 'gorev';
+export type PetitionKind = 'yardim' | 'is' | 'vergi' | 'sikayet' | 'kanun' | 'gorev' | 'unvan';
 export interface Petition {
   id: string; fromId: string; kind: PetitionKind; text: string; day: number; expires: number;
   status: 'bekliyor' | 'kabul' | 'ret' | 'zamanasimi'; amount: number; payload?: string; answeredBy?: string;
@@ -129,22 +152,31 @@ export interface CourtCase {
 
 export interface Law { id: string; name: string; desc: string; active: boolean; param?: number; paramLabel?: string; }
 
-export interface Project { id: string; name: string; site: string; kind?: string; plot?: string; cost: number; paid: number; progress: number; needed: number; done: boolean; }
+export interface Project { id: string; name: string; site: string; kind?: string; plot?: string; cost: number; paid: number; progress: number; needed: number; done: boolean; doneDay?: number; }
 
-export interface Election { last?: { day: number; results: { id: string; votes: number; won: boolean }[] }; posters?: Record<string, number>; nextDay: number; candidates: string[]; votes: Record<string, string>; seats: number; baskanNextDay: number; baskanCandidates: string[]; baskanVotes: Record<string, string>; }
+export interface Election {
+  ballots?: string[]; // v2.0.1 gizli oy: shuffled ballots without voter ids; votes[voter] = '✓' (voted) / '' (stayed home)
+  vaat?: Record<string, import('./genelge').GKind[]>; pledges?: Record<string, string>; symp?: Record<string, number>; smear?: Record<string, number>; withdrawn?: string[]; mitingDay?: Record<string, number>; canvassed?: Record<string, number>; partyPosters?: Record<string, number>; endorse?: Record<string, string[]>; nabiz?: string;
+  last?: { day: number; results: { id: string; votes: number; won: boolean; name?: string; party?: string | null }[]; voters?: number; electorate?: number; parties?: { id: string; votes: number; seats: number }[]; method?: string }; posters?: Record<string, number>; nextDay: number; candidates: string[]; votes: Record<string, string>; seats: number; baskanNextDay: number; baskanCandidates: string[]; baskanVotes: Record<string, string>; }
 
 export interface Gazette { day: number; headline: string; lines: string[]; meclis?: string[]; }
 
 export interface PlayerInfo {
+  live?: { n: number; t: string }[]; liveN?: number; // v2.0.1 live notices → client toasts
   playerId: string; personId: string; name: string; founder: boolean; banned: boolean;
   lastSeen: number; // ms
   lastSeenDay: number; dead?: { day: number; name: string; years: number; text: string; heirs: string[]; estate?: { houses: string[]; inv: Person['inv']; arms: NonNullable<Person['arms']> } }; awayLog: string[]; awayMoney: number; quest?: number; qf?: Record<string, boolean>; // v2.0.1 quest flags (what the player really did)
 }
 
 export type Ideology = 'saltanatci' | 'cumhuriyetci' | 'esnaf' | 'halkci';
-export interface Faction { id: string; name: string; ideology: Ideology; leaderId: string | null; color: string; }
-export interface Seat { id: string; label: string; kind: 'bolge' | 'meslek' | 'genel'; key: string; holder: string | null; }
-export type BillKind = 'ozel' | 'vergi' | 'fiyat' | 'maas' | 'butce' | 'kanun' | 'insaat' | 'af' | 'gensoru' | 'sorusturma' | 'dokunulmazlik' | 'azil' | 'genelge';
+export interface Faction { id: string; name: string; ideology: Ideology; leaderId: string | null; color: string;
+  // v2.0.1 party package
+  program?: import('./genelge').GKind[]; oppose?: import('./genelge').GKind[]; kasa?: number; standing?: Record<string, number>; strikes?: Record<string, number>;
+  axes?: [number, number, number]; // v2.0.1 ideology: yönetim (0 saltanat … 100 cumhuriyet), ekonomi (0 serbest pazar … 100 devlet/narh), din (0 dindar … 100 laik)
+  support?: Record<string, number>; ilBaskan?: Record<string, string>; lastPriority?: number; lastAudit?: number; leaderBid?: string[]; founded?: number;
+}
+export interface Seat { id: string; label: string; kind: 'bolge' | 'meslek' | 'genel' | 'atama'; key: string; holder: string | null; }
+export type BillKind = 'ozel' | 'vergi' | 'fiyat' | 'maas' | 'butce' | 'kanun' | 'insaat' | 'af' | 'gensoru' | 'sorusturma' | 'dokunulmazlik' | 'azil' | 'genelge' | 'cumhuriyet' | 'kaldir';
 export type VoteChoice = 'evet' | 'hayir' | 'cekimser';
 export interface Bill {
   id: string; kind: BillKind; title: string; proposerId: string; value: number; target: string;
@@ -152,8 +184,17 @@ export interface Bill {
   status: 'tartisma' | 'oylama' | 'onay' | 'kabul' | 'ret' | 'veto' | 'zamanasimi';
   law?: import('./laws').LawSpec;
   votes: Record<string, VoteChoice>; speeches: { personId: string; text: string; day: number; ai?: boolean }[]; result?: string; fromKayzer?: boolean;
+  lean?: Record<string, VoteChoice>; lines?: Record<string, VoteChoice>; priority?: boolean; defectors?: string[]; cost?: number;
+  komisyon?: { members: string[]; votes: Record<string, boolean>; ok: boolean; text: string; day: number }; borc?: boolean; dilekce?: string; onayDay?: number; notified?: boolean;
 }
+export interface Dilekce { id: string; kind: BillKind; value: number; target: string; title: string; by: string; day: number; signers: string[]; status: 'acik' | 'gundem' | 'dustu'; billId?: string }
 export interface MeclisState {
+  komisyon?: string[]; // v2.0.1 Bütçe Komisyonu (3 MPs: 2 majority bloc + 1 opposition)
+  dilekceler?: Dilekce[]; // v2.0.1 halk dilekçeleri (20 imza → gündem)
+  borc?: number; // v2.0.1 hazine borcu (dış borç, taksitle ödenir)
+  anayasaCooldown?: number; // v2.0.1 day until which no new Cumhuriyet İlanı may be proposed
+  govt?: string[]; // v2.0.1 hükümet: ruling party (+ coalition partners), first = lead party
+  baskanId?: string | null; // v2.0.1 Meclis başkanı
   seats: Seat[]; factions: Faction[]; bills: Bill[]; log: { day: number; text: string }[];
   bribes: { from: string; to: string; amount: number; day: number; exposed: boolean }[]; salary: number;
 }
@@ -170,9 +211,17 @@ export interface World {
   wageIdx?: number; // v2.0.1 wages follow sustained bread prices and fall with unemployment (1 = normal)
   orders?: Order[]; // v2.0.1 sipariş ilanları
   imports?: boolean; // v2.0.1 Kayzer: ithalat izni (Liman toptancısı + kervanlar); default true
-  pazarGunu?: number; // v2.0.1 day of the current Pazar Günü
+  panayir?: number; // v2.0.1 day of the current Panayır
   cityHist?: number[][]; // v2.0.1 Şehir Göstergesi: [day, hour, pop, unemployed, bread*100, mood, treasury] hourly, 5 days
   karaborsaToday?: number;
+  jobs?: Job[]; // v2.0.1 İş İlanı Tahtası
+  usage?: Record<string, number>; // v2.0.1 solo audit: how often NPCs used each feature
+  genelgeler?: { kind: import('./genelge').GKind; from: number; until: number; before: number; billId?: string; by?: string | null; result?: number }[]; // v2.0.1 active genelgeler
+  gnews?: { day: number; text: string }[]; // v2.0.1 genelge/party news for the gazete
+  advisors?: string[]; // v2.0.1 Kayzer'e danışmanlar
+  seferberlik?: number; // v2.0.1 day the Kayzer declared mobilisation (0 = none)
+  asevi?: { day: number; left: number }; // v2.0.1 cami aşevi soup left today
+  careerV?: number;
   cruelOrders?: number; missions?: Mission[];
   orgs?: import('./realm').Org[]; spies?: import('./realm').Spy[]; plots?: import('./realm').Plot[]; warrants?: string[]; history?: import('./realm').Chronicle[]; informantPay?: number;
   version: number;
@@ -266,6 +315,9 @@ export type Action =
   | { t: 'buy'; good: Good; qty: number; market?: string }
   | { t: 'sell'; good: Good; qty: number; price: number; market?: string }
   | { t: 'fulfillOrder'; orderId: string } | { t: 'imports'; on: boolean }
+  | { t: 'jobApply'; jobId: string } | { t: 'jobQuit' } | { t: 'jobPost'; title: string; wage: number; from: number; to: number } | { t: 'askJob'; personId: string }
+  | { t: 'kisla'; op: 'kayit' | 'terhis' | 'talim' | 'nobet'; shift?: 'gunduz' | 'aksam' | 'gece' } | { t: 'seferberlik'; on: boolean } | { t: 'recommend'; personId: string }
+  | { t: 'sadaka'; amount: number } | { t: 'asevi' } | { t: 'sifa' } | { t: 'talebe' } | { t: 'oku' } | { t: 'dersVer' }
   | { t: 'eat' }
   | { t: 'askida'; qty: number }
   | { t: 'petition'; kind: PetitionKind; text: string; amount?: number; payload?: string }
@@ -285,8 +337,11 @@ export type Action =
   | { t: 'give'; personId: string; amount: number }
   | { t: 'runForMeclis' }
   | { t: 'vote'; candidateId: string }
+  | { t: 'dilekceAc'; kind: BillKind; value?: number; target?: string; title?: string }
+  | { t: 'dilekceImza'; id: string }
+  | { t: 'dilekceIste'; id: string; personId: string }
   | { t: 'runForBaskan' }
-  | { t: 'propose'; kind: BillKind; value?: number; target?: string; title?: string; law?: import('./laws').LawSpec }
+  | { t: 'propose'; kind: BillKind; value?: number; target?: string; title?: string; law?: import('./laws').LawSpec; borc?: boolean }
   | { t: 'enactLaw'; law: import('./laws').LawSpec } | { t: 'repealLaw'; lawId: string } | { t: 'inspect'; personId: string }
   | { t: 'castVote'; billId: string; choice: VoteChoice }
   | { t: 'speak'; billId: string; text: string }

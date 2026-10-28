@@ -1,3 +1,4 @@
+import { use } from './usage';
 import { ek } from './tr';
 import { startFire } from './events3';
 import { rehouse } from './housing';
@@ -339,13 +340,13 @@ export function orgsDay(w: World): void {
   const orgs = (w.orgs ??= []);
   // NPCs found and join
   const fits = (p: Person, k: OrgKind): boolean => k === 'hirsiz' ? p.honesty < 30 : k === 'cumhuriyet' ? p.republic > 65 : p.din > 78;
-  for (const k of ['hirsiz', 'cumhuriyet', 'tarikat'] as OrgKind[]) if (!orgs.some((o) => o.kind === k)) { const f = w.people.find((p) => !p.playerId && fits(p, k) && !orgOf(w, p.id) && p.ambition > 55 && p.jailedDays === 0); if (f && chance(w, 0.15)) orgFound(w, f, k, { hirsiz: 'Gölgeler', cumhuriyet: 'Hürriyet Ocağı', tarikat: 'Nur Halkası' }[k]); }
+  for (const k of ['hirsiz', 'cumhuriyet', 'tarikat'] as OrgKind[]) if (!orgs.some((o) => o.kind === k)) { const f = w.people.find((p) => !p.playerId && fits(p, k) && !orgOf(w, p.id) && p.ambition > 55 && p.jailedDays === 0); if (f && chance(w, 0.15) && (use(w, 'cemiyet_kur', f), true)) orgFound(w, f, k, { hirsiz: 'Gölgeler', cumhuriyet: 'Hürriyet Ocağı', tarikat: 'Nur Halkası' }[k]); }
   // NPC members recruit friends (one try per org per day, harder as the org grows)
   for (const o of orgs) {
     const rec = findPerson(w, pick(w, o.members) ?? ''); if (!rec || rec.playerId || !chance(w, 0.35 / (1 + o.members.length / 5))) continue;
     const cand = w.people.filter((p) => !p.playerId && !orgOf(w, p.id) && p.jailedDays === 0 && p.id !== w.kayzerId && !STATE.includes(p.prof) && (rec.relations[p.id] ?? 0) > 5);
     const t = [...cand].sort((a, b) => joinScore(w, b, o, rec) - joinScore(w, a, o, rec))[0];
-    if (t && joinScore(w, t, o, rec) >= 55) { orgJoin(w, t, o.id); const lp = findPerson(w, o.leaderId)?.playerId; if (lp) personal(w, lp, `🕯 ${rec.name}, ${ek(t.name, 'ı')} “${o.name}” cemiyetine kazandı.`); }
+    if (t && joinScore(w, t, o, rec) >= 55) { orgJoin(w, t, o.id); use(w, 'cemiyet_uye', t); const lp = findPerson(w, o.leaderId)?.playerId; if (lp) personal(w, lp, `🕯 ${rec.name}, ${ek(t.name, 'ı')} “${o.name}” cemiyetine kazandı.`); }
   }
   for (const o of orgs) {
     o.members = o.members.filter((id) => findPerson(w, id)); if (!findPerson(w, o.leaderId)) o.leaderId = o.members[0] ?? '';

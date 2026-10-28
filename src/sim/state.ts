@@ -1,3 +1,4 @@
+import { approve } from './career';
 import type { Petition, Person, World } from './types';
 import { lawOn, transfer } from './economy';
 import { clamp } from './rng';
@@ -12,6 +13,7 @@ export type Decider = 'kayzer' | 'naip';
 export function answerPetition(w: World, pet: Petition, accept: boolean, by: Decider, now?: number): boolean {
   const p = findPerson(w, pet.fromId);
   if (!p || pet.status !== 'bekliyor') return false;
+  if (by === 'naip' && pet.kind === 'unvan') return false; // titles and appointments need the Kayzer himself
   if (by === 'naip' && accept && (pet.kind === 'vergi' || pet.kind === 'kanun' || pet.kind === 'gorev')) return false;
   if (accept) {
     switch (pet.kind) {
@@ -22,6 +24,7 @@ export function answerPetition(w: World, pet: Petition, accept: boolean, by: Dec
         break;
       }
       case 'is': giveJob(w, p); break;
+      case 'unvan': if (!approve(w, p, String(pet.payload ?? ''))) return false; break;
       case 'vergi': w.taxRate = Math.max(0, w.taxRate - 2); log(w, `Ferman: vergi %${w.taxRate}'e indirildi.`); break;
       case 'sikayet': w.prices.ekmek = Math.round(w.prices.ekmek * 0.9 * 100) / 100; break;
       case 'kanun': { const law = w.laws.find((l) => l.id === pet.payload); if (law) { law.active = !law.active; log(w, `Ferman: ${law.name} ${law.active ? 'yürürlüğe girdi' : 'kaldırıldı'}.`); } break; }

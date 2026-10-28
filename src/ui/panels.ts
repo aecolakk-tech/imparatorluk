@@ -1,10 +1,14 @@
+import { shelf, isPanayir } from '../sim/market2';
+import { groupOf } from '../sim/economy';
+import { openModal } from './modal';
+import { askConfirm } from './modal';
 import { electionPhase } from '../sim/tick';
 import type { Action, Building, Good, Person, PetitionKind, Profession, World } from '../sim/types';
 import { GOODS } from '../sim/types';
 import { GOOD_LABEL, PLAYER_PROFS, PROF_LABEL, STATE_PROFS } from '../sim/constants';
 import { coupStatus, officeOf } from '../sim/actions';
 import { CRIME_LABEL } from '../sim/ai';
-import { BILL_LABEL, tally, budgetLeft, MP_ALLOWANCE } from '../sim/meclis';
+import { BILL_LABEL, tally, budgetLeft, MP_ALLOWANCE, ANAYASA_YES } from '../sim/meclis';
 import type { Bill, BillKind, VoteChoice } from '../sim/types';
 import { findPerson } from '../sim/world';
 import { bar, fmt, h, select } from './dom';
@@ -18,6 +22,7 @@ import { lawBuilder } from './ruler';
 import { myPos } from '../sim/v16';
 import { distToBuilding, REACH } from '../sim/move';
 import { eatLabel, drinkLabel } from './life';
+import { careerBen, jobBoard, kislaWindow } from './career';
 import { buildingExtras, caseRoles, electionBlock, personActions, personExtras, sarayExtras } from './life';
 
 export interface Ctx {
@@ -66,6 +71,7 @@ export function personCard(c: Ctx, p: Person): HTMLElement {
     ),
     personExtras(c, p),
   );
+  if (mine) box.append(careerBen(c, p));
   void friends; void foes;
   if (!c.me || mine) {
     if (mine) box.append(h('div', { class: 'row' }, h('button', { onclick: () => c.act({ t: 'eat' }) }, eatLabel(c.w, p)), h('button', { onclick: () => c.act({ t: 'drinkWater' }) }, drinkLabel(c.w, p)), h('button', { onclick: () => c.act({ t: 'doctor' }) }, '🩺 Hekim')));
@@ -81,7 +87,7 @@ export function personCard(c: Ctx, p: Person): HTMLElement {
   );
   box.append(h('h3', {}, 'Ne yapacaksınız?'), actions, personActions(c, p));
   const risky = h('div', { class: 'row' });
-  if (!isK(c)) risky.append(h('button', { class: 'danger', onclick: () => { if (confirm('Çalmak suçtur; bekçi yakalayabilir. Emin misiniz?')) c.act({ t: 'steal', personId: p.id }); } }, '🦹 Kesesini çal'));
+  if (!isK(c)) risky.append(h('button', { class: 'danger', onclick: () => { void askConfirm('Çalmak suçtur; bekçi yakalayabilir. Emin misiniz?').then((yes) => { if (yes) c.act({ t: 'steal', personId: p.id }); }); } }, '🦹 Kesesini çal'));
   if (c.me.prof === 'bekci') risky.append(h('button', { onclick: () => c.act({ t: 'arrest', personId: p.id }) }, '⛓ Tutukla'));
   if (isK(c)) {
     const s = select([...STATE_PROFS, ...PLAYER_PROFS].map((x): [string, string] => [x, PROF_LABEL[x]]), p.prof);
@@ -91,27 +97,45 @@ export function personCard(c: Ctx, p: Person): HTMLElement {
   return box;
 }
 
+const STAPLE_ROWS: Good[] = ['ekmek', 'su', 'un', 'bugday', 'et', 'balik', 'odun', 'alet', 'kumas', 'elbise'];
+/** v2.0.1 buy confirmation: quantity stepper, unit price, total, 'Satın al'. */
+function buyDialog(c: Ctx, g: Good, unit: number, stock: number, market: string): void {
+  const max = Math.max(1, Math.min(20, stock, c.me ? Math.floor(c.me.money / Math.max(0.01, unit)) : 0)); let q = 1;
+  const qb = h('b', {}, '1'); const tot = h('div', { class: 'msg' });
+  const upd = (): void => { qb.textContent = String(q); tot.textContent = `${q} × ${unit.toFixed(2)} D = ${(q * unit).toFixed(2)} D (keseniz: ${(c.me?.money ?? 0).toFixed(2)} D)`; };
+  const step = (d: number): void => { q = Math.max(1, Math.min(max, q + d)); upd(); };
+  upd();
+  openModal(`🛒 ${GOOD_LABEL[g]} al`, [h('div', { class: 'muted' }, `Tezgâhta ${stock} adet · en ucuzu ${unit.toFixed(2)} D${market === 'liman' ? ' (Liman toptan)' : ''}`),
+    h('div', { class: 'buy-step' }, h('button', { onclick: () => step(-5) }, '−5'), h('button', { onclick: () => step(-1) }, '−'), qb, h('button', { onclick: () => step(1) }, '+'), h('button', { onclick: () => step(5) }, '+5')), tot],
+  [{ label: 'Vazgeç', onClick: (close) => close() }, { label: 'Satın al', cls: 'primary', onClick: (close) => { close(); c.act({ t: 'buy', good: g, qty: q, market }); } }]);
+}
 function marketPanel(c: Ctx, b: Building): HTMLElement {
   const w = c.w; const box = h('div', {});
-  const here = w.listings.filter((l) => l.market === b.id || b.id === 'pazar');
-  const goods = GOODS.filter((g) => here.some((l) => l.good === g && l.qty > 0));
-  let qty = 1;
-  const qsel = h('div', { class: 'row' }, 'Kaç tane:', ...[1, 3, 5].map((n) => h('button', { class: n === 1 ? 'primary qty' : 'qty', onclick: (e: Event) => { qty = n; (e.target as HTMLElement).parentElement!.querySelectorAll('.qty').forEach((x) => x.classList.remove('primary')); (e.target as HTMLElement).classList.add('primary'); } }, String(n))));
-  if (c.me) box.append(qsel);
-  const t = h('table', {}, h('tr', {}, h('th', {}, 'Mal'), h('th', {}, 'Fiyat'), h('th', {}, 'Elinizde'), h('th', {}, '')));
+  const grp = groupOf(b.id); const liman = grp === 'liman';
+  if (liman) box.append(h('div', { class: 'muted' }, '⚓ Liman toptancısı malı Çarşı’dan ucuza satar. Burada alıp Pazar’da satabilir ya da Pazar’daki siparişleri teslim edebilirsiniz.'));
+  if (isPanayir(w)) box.append(h('div', { class: 'card' }, '🎪 Bugün PANAYIR var: kervanlar geldi, nadir mallar (elbise, mobilya, alet) ucuz.'));
+  const goods = GOODS.filter((g) => STAPLE_ROWS.includes(g) || w.listings.some((l) => l.good === g && groupOf(l.market) === grp && (!l.wholesale || liman)));
+  const t = h('table', { class: 'mk-table' }, h('tr', {}, h('th', {}, 'Mal'), h('th', {}, 'Fiyat'), h('th', {}, 'Stok'), h('th', {}, 'Elinizde'), h('th', {}, '')));
   for (const g of goods) {
-    const ls = here.filter((l) => l.good === g).sort((a, x) => a.price - x.price);
-    const stock = ls.reduce((s2, l) => s2 + l.qty, 0);
-    t.append(h('tr', {}, h('td', {}, GOOD_LABEL[g]), h('td', {}, `${ls[0]!.price.toFixed(2)} D`), h('td', {}, c.me ? String(c.me.inv[g]) : ''),
-      h('td', {}, h('button', { class: 'primary', disabled: !c.me || !stock, onclick: () => c.act({ t: 'buy', good: g, qty: Math.min(qty, stock) }) }, '🛒 Al'))));
+    const sh = shelf(w, g, grp, liman); const out = sh.price === null;
+    const tag = liman && w.listings.some((l) => l.good === g && l.wholesale && l.qty > 0) ? h('span', { class: 'mk-tag' }, 'toptan') : '';
+    t.append(h('tr', { class: out ? 'out' : '' }, h('td', {}, GOOD_LABEL[g], tag), h('td', {}, out ? h('span', { class: 'mk-out' }, 'Tükendi') : `${sh.price!.toFixed(2)} D`), h('td', {}, String(sh.qty)), h('td', {}, c.me ? String(c.me.inv[g]) : ''),
+      h('td', {}, h('button', { class: 'primary', disabled: !c.me || out, onclick: () => buyDialog(c, g, sh.price!, sh.qty, b.id) }, out ? '—' : '🛒 Al'))));
   }
-  box.append(goods.length ? t : h('div', { class: 'muted' }, 'Tezgâhlar boş. Sabah 8’de esnaf yeni mal koyar.'));
+  box.append(t);
+  if (!liman && b.id === 'pazar' && (w.orders ?? []).length) {
+    box.append(h('h3', {}, '📜 Sipariş ilanları'));
+    for (const o of w.orders ?? []) { const by = findPerson(w, o.byId); const can = !!c.me && c.me.inv[o.good] >= o.qty && o.byId !== c.me.id;
+      box.append(h('div', { class: 'card row' }, h('div', { style: 'flex:1;min-width:0' }, `“${o.qty} ${GOOD_LABEL[o.good]} getirene ${o.reward} D” – ${by?.name ?? 'Saray'} (son gün ${o.until})`),
+        h('button', { class: can ? 'primary' : '', disabled: !can, onclick: () => c.act({ t: 'fulfillOrder', orderId: o.id }) }, can ? 'Teslim et' : `${c.me?.inv[o.good] ?? 0}/${o.qty}`))); }
+  }
   if (c.me) {
     const g = select(GOODS.filter((x) => c.me!.inv[x] > 0).map((x): [string, string] => [x, `${GOOD_LABEL[x]} (elde ${c.me!.inv[x]})`]));
-    const q = numIn(1, 1, 500); const pr = numIn(Math.round(w.prices[(g.value || 'ekmek') as Good] * 100) / 100, 0.1, 1000, 0.1);
-    g.addEventListener('change', () => { pr.value = String(w.prices[g.value as Good]); });
+    const ref = (x: Good): number => shelf(w, x, 'carsi').price ?? w.prices[x];
+    const q = numIn(1, 1, 500); const pr = numIn(Math.round(ref((g.value || 'ekmek') as Good) * 100) / 100, 0.1, 1000, 0.1);
+    g.addEventListener('change', () => { pr.value = String(ref(g.value as Good)); });
     const mine = w.listings.filter((l) => l.sellerId === c.me!.id);
-    box.append(more('💰 Mal sat', g.options.length ? h('div', { class: 'row' }, g, 'adet', q, 'fiyat', pr, h('button', { onclick: () => c.act({ t: 'sell', good: g.value as Good, qty: Number(q.value), price: Number(pr.value) }) }, 'Tezgâha koy')) : h('div', { class: 'muted' }, 'Satacak malınız yok.'),
+    box.append(more(`💰 Mal sat (${liman ? 'Liman' : 'Çarşı'})`, g.options.length ? h('div', { class: 'row' }, g, 'adet', q, 'fiyat', pr, h('button', { onclick: () => c.act({ t: 'sell', good: g.value as Good, qty: Number(q.value), price: Number(pr.value), market: liman ? 'liman' : 'pazar' }) }, 'Tezgâha koy')) : h('div', { class: 'muted' }, 'Satacak malınız yok.'),
       mine.length ? h('div', { class: 'muted' }, 'Tezgâhınız: ' + mine.map((l) => `${GOOD_LABEL[l.good]} ${l.qty}×${l.price.toFixed(2)}`).join(', ')) : ''));
   }
   if (b.id === 'kahve') box.append(more('☕ Kahvehane dedikodusu', ...w.events.slice(-8).reverse().map((e) => h('div', { class: 'msg' }, `Gün ${e.day} ${String(e.hour).padStart(2, '0')}:00 — ${e.text}`))));
@@ -162,7 +186,7 @@ function sarayPanel(c: Ctx): HTMLElement {
       rest.append(h('h3', {}, '👑 Veraset'),
         h('div', { class: 'muted' }, `Varis: ${heir ? nameOf(w, heir.id) + (heir.adult ? '' : ' (reşit olana dek eşiniz naip)') : findPerson(w, k.spouse) ? `eşiniz ${findPerson(w, k.spouse)!.name}` : 'yok'}.`),
         h('div', { class: 'row' }, 'Veliaht:', sel, h('button', { onclick: () => c.act({ t: 'veliaht', childId: sel.value || null }) }, 'Belirle')),
-        h('button', { class: 'danger', onclick: () => { if (confirm('Tahttan feragat edilsin mi? Hanedan hakkınız sürer.')) c.act({ t: 'abdicate' }); } }, '🏳 Tahttan feragat et'));
+        h('button', { class: 'danger', onclick: () => { void askConfirm('Tahttan feragat edilsin mi? Hanedan hakkınız sürer.').then((yes) => { if (yes) c.act({ t: 'abdicate' }); }); } }, '🏳 Tahttan feragat et'));
     }
     rest.append(sarayExtras(c));
     const fest = numIn(150, 50, 5000);
@@ -201,7 +225,7 @@ function courtPanel(c: Ctx): HTMLElement {
 }
 
 function kislaPanel(c: Ctx): HTMLElement {
-  const w = c.w; const box = h('div', {});
+  const w = c.w; const box = h('div', {}, kislaWindow(c));
   const soldiers = w.people.filter((p) => p.prof === 'asker');
   const avgL = soldiers.reduce((s, p) => s + p.loyalty, 0) / Math.max(1, soldiers.length);
   box.append(h('div', { class: 'muted' }, `${soldiers.length} asker · ortalama sadakat ${Math.round(avgL)}`));
@@ -211,7 +235,7 @@ function kislaPanel(c: Ctx): HTMLElement {
     if (w.coup?.leaderId === c.me.id) {
       const st = coupStatus(w, c.me.id); const f = numIn(100, 1);
       box.append(h('div', { class: 'card' }, `${w.coup.kind === 'coup' ? 'Darbe' : 'Devrim'} hazırlığı: asker ${st.soldiers}/${st.need} · fon ${fmt(st.fund)}/${st.fundNeed} · halk desteği ${st.support ? 'VAR' : 'YOK'}`),
-        h('div', { class: 'row' }, f, h('button', { onclick: () => c.act({ t: 'fundPlot', amount: Number(f.value) }) }, 'Fona koy'), h('button', { class: 'danger', onclick: () => { if (confirm(st.ok ? 'Şartlar tamam. Sarayı basıyoruz?' : 'Şartlar TAMAM DEĞİL. Başarısız olursanız tutuklanırsınız. Yine de?')) c.act({ t: 'seize' }); } }, '⚔️ Sarayı bas'), h('button', { onclick: () => c.act({ t: 'plot', kind: 'none' }) }, 'Vazgeç')),
+        h('div', { class: 'row' }, f, h('button', { onclick: () => c.act({ t: 'fundPlot', amount: Number(f.value) }) }, 'Fona koy'), h('button', { class: 'danger', onclick: () => { void askConfirm(st.ok ? 'Şartlar tamam. Sarayı basıyoruz?' : 'Şartlar TAMAM DEĞİL. Başarısız olursanız tutuklanırsınız. Yine de?').then((yes) => { if (yes) c.act({ t: 'seize' }); }); } }, '⚔️ Sarayı bas'), h('button', { onclick: () => c.act({ t: 'plot', kind: 'none' }) }, 'Vazgeç')),
         h('div', { class: 'muted' }, 'Askerleri kazanmak için kartlarına dokunup en az 40 Dinar rüşvet verin.'));
     } else if (w.coup) box.append(h('div', { class: 'muted' }, 'Kışlada başka biri fısıldaşıyor…'));
     else box.append(h('div', { class: 'row' }, h('button', { onclick: () => c.act({ t: 'plot', kind: 'coup' }) }, 'Darbe hazırla'), h('button', { onclick: () => c.act({ t: 'plot', kind: 'revolution' }) }, 'Devrim hazırla')), h('div', { class: 'muted' }, 'Kurallar 📖 sayfasında yazılıdır.'));
@@ -225,6 +249,7 @@ function billCard(c: Ctx, b: Bill, open: boolean): HTMLElement {
   const w = c.w; const t = tally(b); const prop = findPerson(w, b.proposerId);
   const status: Record<Bill['status'], string> = { tartisma: `görüşmede (oylama ${b.debateUntil + 1}. gün)`, oylama: `OYLAMADA (sonuç ${b.voteUntil}. gün sonu)`, onay: 'Kayzer onayı bekliyor', kabul: 'KABUL – yürürlükte', ret: 'RET', veto: 'VETO (kesin)', zamanasimi: 'düştü' };
   const card = h('div', { class: 'card' }, h('b', {}, `${BILL_LABEL[b.kind]}: ${b.title}`), h('div', { class: 'muted' }, `Teklif: ${prop?.name ?? '?'} · ${status[b.status]} · ${t.evet}✅ ${t.hayir}❌ ${t.cekimser}➖`));
+  if (b.kind === 'cumhuriyet') card.append(h('div', { class: 'muted' }, `🏛 Anayasa oylaması: ${ANAYASA_YES}/16 evet gerekir · parti disiplini yok (vicdan oyu) · Kayzer veto edemez${b.defectors?.length ? ` · çizgiden ayrılan: ${b.defectors.map((id) => findPerson(w, id)?.name ?? '?').join(', ')}` : ''}.`));
   if (open || b.speeches.length) for (const sp of b.speeches.slice(-4)) card.append(h('div', { class: 'msg' }, h('b', {}, findPerson(w, sp.personId)?.name ?? '?'), ': ', sp.text));
   if (!open) {
     const rows = Object.entries(b.votes).map(([id, v]) => `${VOTE_ICON[v]} ${findPerson(w, id)?.name ?? '?'}`);
@@ -236,7 +261,7 @@ function billCard(c: Ctx, b: Bill, open: boolean): HTMLElement {
     const sp = h('input', { placeholder: 'Kürsüden konuşun…', maxlength: '200', style: 'flex:1' });
     card.append(h('div', { class: 'row' }, sp, h('button', { onclick: () => c.act({ t: 'speak', billId: b.id, text: sp.value }) }, '🎤 Konuş')));
   }
-  if (b.status === 'onay' && isK(c)) card.append(h('div', { class: 'row' }, h('button', { class: 'primary', onclick: () => c.act({ t: 'sanction', billId: b.id, approve: true }) }, '✔ Onayla'), h('button', { class: 'danger', onclick: () => { if (confirm('Veto kesindir ve halkın gönlünü biraz kırar (+0,7 cumhuriyet isteği, −1,5 sadakat). Emin misiniz?')) c.act({ t: 'sanction', billId: b.id, approve: false }); } }, '✖ Veto')));
+  if (b.status === 'onay' && isK(c)) card.append(h('div', { class: 'row' }, h('button', { class: 'primary', onclick: () => c.act({ t: 'sanction', billId: b.id, approve: true }) }, '✔ Onayla'), h('button', { class: 'danger', onclick: () => { void askConfirm('Veto kesindir ve halkın gönlünü biraz kırar (+0,7 cumhuriyet isteği, −1,5 sadakat). Emin misiniz?').then((yes) => { if (yes) c.act({ t: 'sanction', billId: b.id, approve: false }); }); } }, '✖ Veto')));
   return card;
 }
 
@@ -289,7 +314,7 @@ function meclisPanel(c: Ctx): HTMLElement {
     const val = numIn(10, 0, 50000); const title = h('input', { placeholder: 'Başlık (genelge için metin)', maxlength: '60' });
     const target = select([['', '— hedef —'], ...w.laws.map((l): [string, string] => [l.id, `Kanun: ${l.name}`]), ...GOODS.map((g): [string, string] => [g, `Mal: ${GOOD_LABEL[g]}`]), ['meclis', 'Maaş: Meclis üyesi'], ...STATE_PROFS.map((p): [string, string] => [p, `Maaş: ${PROF_LABEL[p]}`]), ...w.people.filter((p) => STATE_PROFS.includes(p.prof) || p.rank || p.meclis).map((p): [string, string] => [p.id, `Kişi: ${p.rank ? p.rank + ' ' : ''}${p.name}`])]);
     box.append(h('h3', {}, 'Teklif ver (genelge, vergi, bütçe, gensoru…)'), h('div', { class: 'row' }, kind, val, target, title, h('button', { class: 'primary', onclick: () => c.act({ t: 'propose', kind: kind.value as BillKind, value: Number(val.value), target: target.value, title: title.value || undefined } as never) }, 'Teklif et')),
-      h('div', { class: 'muted' }, 'Genelge: bağlayıcı olmayan Meclis bildirisi. Gensoru: bir memuru ya da vezir/paşayı görevden alır. Bütçe: Saray’ın harcama sınırı. Kabul edilen kararlar Kayzer’in onayına gider; veto kesindir.'),
+      h('div', { class: 'muted' }, 'Genelge: bağlayıcı olmayan Meclis bildirisi. Gensoru: bir memuru ya da vezir/paşayı görevden alır. Bütçe: Saray’ın harcama sınırı. Kabul edilen kararlar Kayzer’in onayına gider; veto kesindir. Cumhuriyet İlanı (anayasa): 2 gün görüşülür, 14/16 evet ister, parti disiplini uygulanmaz, Kayzer veto edemez; reddedilirse teklif sahibi Kayzer’in gözünden düşer ve 10 gün yeniden verilemez.'),
       h('h3', {}, 'Kanun teklifi (kanun yazıcı)'), lawBuilder(w, 'Meclise sun', (law) => c.act({ t: 'propose', kind: 'ozel', value: law.value, target: law.good ?? '', law })));
   } else box.append(h('div', { class: 'card muted' }, h('b', {}, 'Meclis bölümü kilitli. '), 'Teklif vermek, kürsüde konuşmak, oy kullanmak ve parti kurmak için milletvekili seçilmelisiniz.'));
   // history
@@ -345,7 +370,7 @@ export function buildingPanel(c: Ctx, b: Building): HTMLElement {
   let where = '';
   if (c.me) { const pos = myPos(w, c.me, Date.now()); const d = distToBuilding(b, pos); where = d <= REACH ? '📍 Buradasınız.' : `🚶 ${Math.round(d)} adım uzakta – bir şey seçerseniz karakteriniz önce buraya yürür.`; }
   const box = h('div', {}, h('h2', {}, b.name), where ? h('div', { class: 'where' }, where) : '');
-  if (b.market) { const ex = buildingExtras(c, b); if (ex) box.append(ex); box.append(marketPanel(c, b)); }
+  if (b.market || b.id === 'liman') { if (b.id === 'liman' && INFO[b.id]) box.append(h('div', { class: 'muted' }, INFO[b.id]!)); const ex = buildingExtras(c, b); if (ex) box.append(ex); box.append(marketPanel(c, b)); if (b.id === 'pazar') box.append(jobBoard(c, b)); }
   else if (b.id === 'saray') box.append(sarayPanel(c));
   else if (b.id === 'mahkeme') box.append(courtPanel(c));
   else if (b.id === 'kisla') box.append(kislaPanel(c));
@@ -396,7 +421,7 @@ export function familyPanel(c: Ctx): HTMLElement {
     box.append(h('div', { class: 'card' }, `💍 Eşiniz: `, h('b', {}, sp.name), ` · hane birikimi ${fmt(me.money + sp.money)} Dinar`,
       preg ? h('div', {}, `🤰 Bebek ${preg.due}. gün doğacak.`) : '',
       h('div', { class: 'row' }, h('button', { class: 'primary', disabled: !!err || !!preg, onclick: () => c.act({ t: 'haveChild' }) }, '👶 Çocuk yap'),
-        h('button', { class: 'danger', onclick: () => { if (confirm('Boşanılsın mı? Mallar ikiye bölünür.')) c.act({ t: 'divorce' }); } }, '💔 Boşan')),
+        h('button', { class: 'danger', onclick: () => { void askConfirm('Boşanılsın mı? Mallar ikiye bölünür.').then((yes) => { if (yes) c.act({ t: 'divorce' }); }); } }, '💔 Boşan')),
       err ? h('div', { class: 'muted' }, `Şimdilik olmaz: ${err}`) : h('div', { class: 'muted' }, `Her çocuk günde ${CHILD_UPKEEP} Dinar bakım ister (okul +1).`)));
   } else box.append(h('div', { class: 'muted' }, 'Bekârsınız. Bir vatandaşın kartını açıp “💍 Evlenme teklif et” diyebilirsiniz. Kayzer’in eşi soylu olur ve saraya taşınır.'));
   const kids = childrenOf(w, me.id);
@@ -427,7 +452,7 @@ export function isyanBar(c: Ctx): HTMLElement | null {
   const box = h('div', { class: 'isyan' }, h('b', {}, `🔥 İSYAN · ${nameOf(w, i.leaderId)}`), ` asi ${s.rebels} `, meter, ` ${s.loyal} sadık · işgal: ${i.occupied.length}/${TARGETS.length}`);
   if (me && (isK(c) || me.prof === 'asker')) {
     box.append(h('button', { onclick: () => c.act({ t: 'isyanCmd', cmd: 'dagit' }) }, '🤝 Dağıt/pazarlık'), h('button', { onclick: () => c.act({ t: 'isyanCmd', cmd: 'tutukla' }) }, '⛓ Elebaşları tutukla'),
-      h('button', { class: 'danger', onclick: () => { if (confirm('Askerlere saldırı emri verilsin mi? Kan dökülecek.')) c.act({ t: 'isyanCmd', cmd: 'saldir' }); } }, '⚔️ Saldır'));
+      h('button', { class: 'danger', onclick: () => { void askConfirm('Askerlere saldırı emri verilsin mi? Kan dökülecek.').then((yes) => { if (yes) c.act({ t: 'isyanCmd', cmd: 'saldir' }); }); } }, '⚔️ Saldır'));
   } else if (me && !i.rebels.includes(me.id) && me.id !== w.kayzerId && !me.soylu) box.append(h('button', { onclick: () => c.act({ t: 'joinRebels' }) }, '✊ Asilere katıl'));
   else if (me && i.rebels.includes(me.id)) box.append(' · siz asilerlesiniz ✊');
   box.append(h('div', { class: 'muted', style: 'font-size:12px' }, i.log.slice(-2).join(' · ')));

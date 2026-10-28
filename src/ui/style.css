@@ -249,3 +249,26 @@ body.has-sheet .controls .hotbar { display:none; }
 .cm-bar { display:flex; gap:4px; } .cm-slot { width:34px; height:34px; border:2px solid #8a7a4a; border-radius:6px; background:rgba(0,0,0,.35); position:relative; display:flex; align-items:center; justify-content:center; font-size:16px; }
 .cm-slot small { position:absolute; left:2px; top:0; font-size:9px; opacity:.7; }
 .create-id h3 { margin:8px 0 4px; font-size:15px; } .choice { flex-wrap:wrap; gap:6px; } .row.wrap { flex-wrap:wrap; }
+/* v2.0.1 in-game dialogs (replace native alert/confirm/prompt) */
+.app-dialog { position:fixed; z-index:200; align-items:center; }
+.app-dialog .box { max-width:min(420px, 92vw); }
+.app-dialog .dialog-buttons { justify-content:flex-end; margin-top:10px; gap:8px; }
+.app-dialog input { width:100%; box-sizing:border-box; margin-top:8px; }
+/* v2.0.1 Pazar */
+.mk-table td, .mk-table th { padding:4px 6px; }
+.mk-table tr.out td { opacity:.55; }
+.mk-out { color:#ff9a7a; font-weight:600; }
+.mk-tag { font-size:11px; padding:1px 5px; border-radius:6px; background:#3a2a18; color:#f3d27a; margin-left:4px; }
+.buy-step { display:flex; align-items:center; gap:8px; justify-content:center; margin:10px 0; }
+.buy-step button { min-width:40px; font-size:18px; }
+.buy-step b { min-width:36px; text-align:center; font-size:20px; }
+.sheet.leave { pointer-events:none; }
+.gosterge-modal .box { max-width:min(460px, 94vw); max-height:88vh; overflow:auto; }
+.gs-card { margin:6px 0; } .gs-spark { width:100%; height:54px; display:block; background:#00000022; border-radius:6px; margin:4px 0; }
+
+/* v2.0.1 stacked toasts */
+.toast-stack { position:absolute; top:calc(56px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); z-index:30; display:flex; flex-direction:column; align-items:center; gap:6px; width:min(92vw, 560px); pointer-events:none; }
+.toast-stack .toast { position:static; transform:none; max-width:100%; text-align:center; overflow-wrap:anywhere; }
+.goal-row { margin:4px 0; } .goal-row .bar { width:100%; display:block; } .card.done { opacity:.6; } .small { font-size:12px; }
+.row.wrap { flex-wrap:wrap; }
+.person-label .trait { font-size:11px; color:#e8c14a; }

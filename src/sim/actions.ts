@@ -21,11 +21,12 @@ import { verdict, kayzerOnline } from './tick';
 import { chance, clamp } from './rng';
 import { findPerson, makePerson, WORKPLACE } from './world';
 import { headTitle, log } from './log';
-import { propose, sanction, spend, budgetLeft } from './meclis';
+import { propose, sanction, spend, budgetLeft, openDilekce, signDilekce, askSign, turnout, castBallot, DILEKCE_IMZA, DILEKCE_DAYS } from './meclis';
+import { yearsOf } from './age';
 import { answerProposal, canRule, childrenOf, cureChild, divorce, findChild, isHanedan, proposeMarriage, requestChild, stage, succeed } from './family';
 import { command, voteFate } from './isyan';
 import { fullAI } from './ai';
-import { eatMeal, assault, bribeAcceptChance, decideBribe, directive, drinkAlcohol, drinkWater, granaryBuy, granaryRelease, murder, payTribute, pray, relate, seeDoctor, sermon } from './life';
+import { eatMeal, assault, bribeAcceptChance, decideBribe, directive, drinkAlcohol, drinkWater, granaryBuy, granaryRelease, murder, payTribute, relate, seeDoctor, sermon } from './life';
 import { opinion } from './chat';
 import { borrow, repay } from './extras';
 import { enactLaw, repealLaw, validateLaw } from './laws';
@@ -37,6 +38,8 @@ import { produce } from './economy';
 import { nearestOwnAnimal, ANIMAL_REACH } from './herdpos';
 import { actionNeed, distToBuilding, PERSON_REACH, REACH, rules } from './move';
 import { placeOf } from './place';
+import { askJob, becomeTalebe, discharge, enlist, hire, hoursText, itibar, postJob, quitJob, readLesson, seferberlik, setShift, talim, teach } from './career';
+import { asevi, ate, din, namaz, sadaka, sifa } from './piety';
 import { addDefense, finishTrial, myPos, reportCorpse, startWalk } from './v16';
 import { MAP_H, MAP_W } from './constants';
 
@@ -152,7 +155,25 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       const grp = a.market ? groupOf(a.market) : undefined; /* v2.0.1: buy in the market you stand in; the Liman toptancısı sells wholesale there */
       const got = buy(w, me.id, a.good, Math.floor(q), Infinity, { group: grp, wholesale: grp === 'liman' }); if (got) { me.bought = me.bought ?? {}; me.bought[a.good] = (me.bought[a.good] ?? 0) + got; } return got ? ok(`${got} ${GOOD_LABEL[a.good]} aldınız.`) : no(shelf(w, a.good, grp, grp === 'liman').price === null ? `${GOOD_LABEL[a.good]} tükendi.` : 'Paranız yetmiyor.');
     }
-    case 'fulfillOrder': { const e = fulfillOrder(w, me, a.orderId); return e ? no(e) : ok('Sipariş teslim edildi, ödülü aldınız.'); }
+    case 'fulfillOrder': { const e = fulfillOrder(w, me, a.orderId); if (e) return no(e); const c = (me.cs ??= {}); c.quests = (c.quests ?? 0) + 1; itibar(w, me, 2, 'sipariş teslim etti'); return ok('Sipariş teslim edildi, ödülü aldınız.'); }
+    case 'jobApply': { const j = (w.jobs ?? []).find((x) => x.id === a.jobId); if (!j) return no('Bu ilan artık yok.'); if (me.job && me.job.title === j.title) return no('Zaten bu işte çalışıyorsunuz.'); const e = hire(w, me, j); return e ? no(e) : ok(`İşe alındınız: ${j.title}. Çalışma saati ${hoursText(j)}; ${j.place === 'liman' ? 'Liman' : (w.buildings.find((b) => b.id === j.place)?.name ?? j.place)}’da olun.`); }
+    case 'jobQuit': return ok(quitJob(w, me));
+    case 'jobPost': { const wg = num(a.wage, 1, 50), f = num(a.from, 0, 23), t2 = num(a.to, 0, 23); if (wg === null || f === null || t2 === null || f === t2) return no('Geçersiz ilan.'); const e = postJob(w, me, filterProfanity(String(a.title ?? 'Yardımcı')), wg, Math.floor(f), Math.floor(t2)); return e ? no(e) : ok('İlanınız İş İlanı Tahtası’na asıldı.'); }
+    case 'askJob': { const t = findPerson(w, a.personId); if (!t || t.id === me.id) return no('Kişi yok.'); return askJob(w, me, t); }
+    case 'kisla': {
+      if (a.op === 'kayit') { const e = enlist(w, me); return e ? no(e) : ok('Kayıt subayı sizi yazdı: Acemi er. 2 gün talim (06–14) yapın.'); }
+      if (a.op === 'terhis') { const e = discharge(w, me); return e ? no(e) : ok('Terhis oldunuz; ana yola döndünüz.'); }
+      if (a.op === 'talim') { const e = talim(w, me); return e ? no(e) : ok(`Talim yaptınız (1 saat): savaş becerisi +%${me.cs?.skill ?? 0}, enerji −12. Talim günleri: ${(me.cs?.talimDays ?? []).length}/2.`); }
+      const e = setShift(w, me, a.shift ?? 'gunduz'); return e ? no(e) : ok(`Nöbet saatiniz: ${hoursText(me.job!)}. Gelmezseniz rütbeniz düşer.`);
+    }
+    case 'seferberlik': { if (!isKayzer(w, me)) return no('Seferberliği Kayzer ilan eder.'); return ok(seferberlik(w, a.on)); }
+    case 'recommend': { if (me.prof !== 'asker' || (me.askerRank ?? 0) < 5) return no('Tavsiyeyi komutan yazar.'); const t = findPerson(w, a.personId); if (!t || t.prof !== 'asker') return no('Asker değil.'); (t.cs ??= {}).rec = true; return ok(`${t.name} için tavsiye yazdınız.`); }
+    case 'sadaka': { const v = num(a.amount, 1, 1000); if (v === null) return no('1–1000 D.'); const r = sadaka(w, me, v); return { ok: !r.startsWith('Kesenizde'), msg: r }; }
+    case 'asevi': { const e = asevi(w, me); return e ? no(e) : ok('Aşevinden sıcak bir çorba içtiniz (tokluk +30, ücretsiz).'); }
+    case 'sifa': { const e = sifa(w, me); return e ? no(e) : ok(`Şifa duası okundu; biraz iyileştiniz (sağlık ${Math.round(me.health)}).`); }
+    case 'talebe': { const e = becomeTalebe(w, me); return e ? no(e) : ok('Artık talebesiniz: okulda ücretsiz ders, Cuma’ya katılım ve dindarlık sizi hocalığa taşır.'); }
+    case 'oku': { const e = readLesson(w, me); return e ? no(e) : ok(`Ders aldınız (${me.cs?.read ?? 0}. ders${me.cs?.literate ? ', okuma-yazma biliyorsunuz' : ''}).`); }
+    case 'dersVer': { const e = teach(w, me); return e ? no(e) : ok(`Ders verdiniz (toplam ${me.cs?.taught ?? 0}).`); }
     case 'imports': {
       if (!isKayzer(w, me)) return no('İthalatı devlet yönetir.'); w.imports = !!a.on;
       if (!a.on) { w.listings = w.listings.filter((l) => !(l.wholesale && l.sellerId === 'dis')); for (const p of w.people) if (['ciftci', 'degirmenci', 'dokumaci', 'demirci', 'marangoz'].includes(p.prof)) p.mood = clamp(p.mood + 3); }
@@ -168,7 +189,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'eat': {
       if (me.hunger < 15) return no('Karnınız tok (Tokluk çubuğu dolu).');
       { const bag = (['ekmek', 'et', 'balik', 'yumurta', 'sut'] as const).find((g) => (me.inv[g] ?? 0) > 0); // v2.0.1: the Çanta first, free
-        if (bag) { me.inv[bag] -= 1; me.meals += 1; me.hunger = clamp(me.hunger - 35); me.mood = clamp(me.mood + 0.5); me.thought = ''; return ok(`Çantadan ${GOOD_LABEL[bag]} yediniz (ücretsiz). Tokluk ${Math.round(100 - me.hunger)}/100.`); } }
+        if (bag) { me.inv[bag] -= 1; me.meals += 1; ate(w, me); me.hunger = clamp(me.hunger - 35); me.mood = clamp(me.mood + 0.5); me.thought = ''; return ok(`Çantadan ${GOOD_LABEL[bag]} yediniz (ücretsiz). Tokluk ${Math.round(100 - me.hunger)}/100.`); } }
       { const m0 = me.money; if (!eatMeal(w, me)) return no('Çantanızda yiyecek yok; satın alacak paranız ya da pazarda yemek yok.'); me.thought = ''; const paid = Math.round((m0 - me.money) * 100) / 100;
         return ok(`Yemek yediniz${paid > 0 ? ` – ödenen: ${paid} D` : ''}. Tokluk ${Math.round(100 - me.hunger)}/100.`); }
     }
@@ -184,6 +205,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       const text = filterProfanity(String(a.text ?? '')).slice(0, 200);
       if (text.length < 4) return no('Dilekçe çok kısa.');
       const pet = openPetition(w, me, a.kind, text, Math.min(num(a.amount, 0, 500) ?? 0, 500), a.payload);
+      if (pet && (me.cs ??= {}).noted?.['dilekce'] !== w.day) { (me.cs.noted ??= {})['dilekce'] = w.day; itibar(w, me, 1, 'Meclis/saray dilekçesi'); }
       return pet ? ok('Dilekçeniz saraya ulaştı.') : no('Zaten bekleyen bir dilekçeniz var.');
     }
     case 'answer': {
@@ -249,7 +271,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'steal': {
       const t = findPerson(w, a.personId); if (!t || t.id === me.id || t.prof === 'naip' || t.id === w.kayzerId) return no('Geçersiz.');
       if (atHomeSafe(w, t, now)) return no(`${t.name} evinde; kapı kilitli.`);
-      me.honesty = clamp(me.honesty - 10); const got = steal(w, me, t); return got ? ok(`${got} Dinar çaldınız…`) : no('Kesesi boş çıktı.');
+      me.honesty = clamp(me.honesty - 10); din(w, me, -10, 'hırsızlık'); const got = steal(w, me, t); return got ? ok(`${got} Dinar çaldınız…`) : no('Kesesi boş çıktı.');
     }
     case 'bribe': {
       const t = findPerson(w, a.personId); const amt = num(a.amount, 1, 10000); if (!t || amt === null || t.id === me.id) return no('Geçersiz.');
@@ -271,8 +293,8 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     }
     case 'propose': {
       const law = a.law ? { ...a.law, name: a.law.name ? filterProfanity(String(a.law.name)).slice(0, 50) : undefined } : undefined;
-      const r = propose(w, me, a.kind, num(a.value, 0, 50000) ?? 0, String(a.target ?? ''), a.title ? filterProfanity(a.title) : undefined, law);
-      return typeof r === 'string' ? no(r) : ok('Teklifiniz Meclis gündeminde. 1 gün görüşme, 1 gün oylama.');
+      const r = propose(w, me, a.kind, num(a.value, 0, 50000) ?? 0, String(a.target ?? ''), a.title ? filterProfanity(a.title) : undefined, law, false, { borc: !!a.borc });
+      return typeof r === 'string' ? no(r) : ok(a.kind === 'cumhuriyet' ? 'Cumhuriyet İlanı gündemde: 2 gün görüşme, 1 gün oylama; 14 evet gerekir.' : 'Teklifiniz Meclis gündeminde. 1 gün görüşme, 1 gün oylama.');
     }
     case 'enactLaw': {
       if (!isKayzer(w, me)) return no('Kanunu sadece hükümdar ferman ile çıkarır; siz Meclis’e teklif verin.');
@@ -316,7 +338,16 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     }
     case 'voteBaskan': { if (w.regime !== 'cumhuriyet' || !findPerson(w, a.candidateId)) return no('Geçersiz.'); w.election.baskanVotes[me.id] = a.candidateId; return ok('Oyunuz sandıkta.'); }
     case 'runForMeclis': { if (me.id === w.kayzerId && w.regime === 'imparatorluk') return no('Kayzer aday olamaz.'); if (me.prof === 'asker' || me.prof === 'bekci') return no('Askerler ve bekçiler Meclis’e aday olamaz.'); if (electionPhase(w).phase !== 'aday') return no(`Adaylık dönemi değil. ${electionPhase(w).label}.`); if (!w.election.candidates.includes(me.id)) w.election.candidates.push(me.id); return ok(`Adaysınız. Seçim ${w.election.nextDay}. gün.`); }
-    case 'vote': { if (!w.election.candidates.includes(a.candidateId)) return no('Bu kişi aday değil.'); if (electionPhase(w).phase === 'bekleme' || electionPhase(w).phase === 'aday') return no(`Oy verme zamanı değil. ${electionPhase(w).label}.`); w.election.votes[me.id] = a.candidateId; return ok('Oyunuz sandıkta.'); }
+    case 'vote': { // v2.0.1 gerçek sandık: only on election day, at the Meclis; secret ballot
+      if (!w.election.candidates.includes(a.candidateId)) return no('Bu kişi aday değil.');
+      if (electionPhase(w).phase !== 'oylama') return no(`Sandık seçim günü açılır. ${electionPhase(w).label}.`);
+      if (yearsOf(w, me) < 16 || me.jailedDays > 0) return no('Oy vermek için 16 yaşında olmalı ve zindanda olmamalısınız.');
+      if (w.election.votes[me.id]) return no('Oyunuzu zaten kullandınız (gizli oy, değiştirilemez).');
+      castBallot(w, me.id, a.candidateId); const t = turnout(w);
+      return ok(`🗳 Oyunuz kaydedildi (gizli oy). Şu ana kadar katılım: ${t.voted}/${t.electorate} (%${t.pct}).`); }
+    case 'dilekceAc': { const r = openDilekce(w, me, a.kind, num(a.value, 0, 50000) ?? 0, String(a.target ?? ''), a.title ? filterProfanity(a.title) : ''); return typeof r === 'string' ? no(r) : ok(`Dilekçe açıldı: “${r.title}”. ${DILEKCE_IMZA} imza toplanınca Meclis gündemine girer (${DILEKCE_DAYS} gün).`); }
+    case 'dilekceImza': { const e = signDilekce(w, me, a.id); if (e) return no(e); const d = (w.meclis.dilekceler ?? []).find((x) => x.id === a.id); return ok(`İmzaladınız (${d?.signers.length ?? '?'}/${DILEKCE_IMZA}).`); }
+    case 'dilekceIste': { const t = findPerson(w, a.personId); if (!t) return no('Kimse yok.'); if (t.playerId && !t.npc) return no('Oyunculardan imzayı kendileri atar (Meclis’teki dilekçe masası).'); const r = askSign(w, me, t, a.id); return r.ok ? ok(r.msg) : no(r.msg); }
     case 'plot': {
       if (me.id === w.kayzerId) return no(`Zaten ${headTitle(w)}siniz.`);
       if (a.kind === 'none') { me.plotting = 'none'; return ok('Komplodan vazgeçtiniz.'); }
@@ -406,7 +437,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       return got ? ok(`${got} ${GOOD_LABEL[g]} çantaya kondu – ödenen: ${Math.round((m0 - me.money) * 100) / 100} D.`) : no('Satın alınamadı (para ya da stok yok).'); }
     case 'holdNpc': { const t = findPerson(w, a.personId); if (!t || t.id === me.id) return no(''); if (!a.on) { if (t.hold?.by === me.id) t.hold = undefined; return ok(''); }
       const q = placeOf(w, t.id, now); if (!q) return no(''); t.hold = { by: me.id, x: q.x, y: q.y, until: now + 90_000 }; return ok(''); }
-    case 'pray': return ok(pray(w, me));
+    case 'pray': return ok(namaz(w, me, now));
     case 'drink': { const r = drinkAlcohol(w, me); return { ok: r.startsWith('Meyhanede bir'), msg: r }; }
     case 'doctor': { const r = seeDoctor(w, me, false); return { ok: r.includes('iyileştirdi'), msg: r }; }
     case 'work': {
@@ -428,7 +459,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'restCase': { const c = w.cases.find((x) => x.id === a.caseId && x.accusedId === me.id && x.trial && !x.trial.done); if (!c) return no('Görülen davanız yok.'); finishTrial(w, c, now); return ok(c.trial!.verdictText ?? 'Karar verildi.'); }
     case 'insult': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); relate(t, me, -25, 'bana hakaret etti'); me.rep = clamp(me.rep - 2, -100, 100); return ok(`${t.name} size küstü.`); }
     case 'assault': { const t = findPerson(w, a.personId); if (!t || t.id === me.id || t.prof === 'naip') return no('Geçersiz.'); me.honesty = clamp(me.honesty - 15); return ok(assault(w, me, t)); }
-    case 'kill': { const t = findPerson(w, a.personId); if (!t || t.id === me.id || t.prof === 'naip' || t.id === w.kayzerId) return no('Geçersiz.'); me.honesty = clamp(me.honesty - 40); return ok(murder(w, me, t)); }
+    case 'kill': { const t = findPerson(w, a.personId); if (!t || t.id === me.id || t.prof === 'naip' || t.id === w.kayzerId) return no('Geçersiz.'); me.honesty = clamp(me.honesty - 40); din(w, me, -10, 'cinayet'); return ok(murder(w, me, t)); }
     case 'offerBribe': {
       const ar = w.arrests.find((x) => x.id === a.arrestId && x.criminalId === me.id && x.status === 'bekliyor'); const amt = num(a.amount, 1, 1000);
       if (!ar || amt === null) return no('Bekleyen bir tutuklamanız yok.'); if (me.money < amt) return no('Paranız yetmiyor.');

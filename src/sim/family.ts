@@ -189,7 +189,7 @@ export function familyDay(w: World, npcDecides: (p: Person) => boolean, now: num
   const singles = w.people.filter((p) => npcDecides(p) && adultFree(w, p) && p.jailedDays === 0 && p.home !== 'kisla' && p.id !== w.kayzerId);
   // v2.0.1 demography: generations turn over (1 year = 5 days), so newcomers arrive with the caravans when the city shrinks
   w.popTarget ??= Math.max(100, w.people.length);
-  { const dear = w.prices.ekmek > BASE_PRICE.ekmek * 1.6; /* nobody moves to a city with dear bread */ const deficit = dear ? 0 : w.popTarget - w.people.length; const n = deficit > 0 ? Math.min(2, Math.ceil(deficit / 15)) : 0;
+  { const r = w.prices.ekmek / BASE_PRICE.ekmek; /* dear bread slows the caravans; only famine stops them */ const deficit = r > 3 ? 0 : w.popTarget - w.people.length; const n = deficit > 0 ? Math.min(r > 1.6 ? 1 : 2, Math.ceil(deficit / 15)) : 0;
     for (let i = 0; i < n; i++) if (chance(w, 0.6)) { const home = emptiestHouse(w); const p = makeNewcomer(w, 18 + rand(w) * 17, home); w.people.push(p); if (w.treasury > 500) transfer(w, 'saray', p.id, 10, 'göçmen yardımı'); log(w, `🧳 ${p.name} kervanla şehre göç etti (${PROF_LABEL[p.prof]}).`, p.id); } }
   for (const p of singles) if (!p.spouse && chance(w, 0.03)) {
     const o = singles.find((x) => x !== p && !x.spouse && x.female !== p.female && (x.relations[p.id] ?? 0) > -10);

@@ -8,6 +8,7 @@ import { walkPos, type Pt, type Walk } from './move';
 export interface Foe { id: string; kind: 'eskiya' | 'macar'; hp: number; max: number; bow: boolean; walk: Walk; pathAt?: number; robbed?: string[] }
 export interface Hit { at: number; x: number; y: number; dmg: number; to: string; toName: string; by: string; w: string; k: 'hit' | 'kill' | 'block' | 'miss' | 'rob' | 'down' }
 export interface Combat {
+  fought?: Record<string, number>; // v2.0.1 person id → kills in this fight (players who attacked)
   kind: 'raid' | 'war'; startAt: number; at: number; spawnAt: number; foes: Foe[]; hits: Hit[];
   assign: Record<string, { foe: string; at: number; fx: number; fy: number }>; spawned?: boolean;
 }

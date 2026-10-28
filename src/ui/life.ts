@@ -1,9 +1,13 @@
+import { askConfirm } from './modal';
 import type { Building, Good, Person, World } from '../sim/types';
 import { GOODS } from '../sim/types';
 import { BASE_PRICE, GOOD_LABEL, PROF_LABEL } from '../sim/constants';
 import { findPerson } from '../sim/world';
 import { electionDates, electionPhase } from '../sim/tick';
 import { rankOf, marketPrice } from '../sim/economy';
+import { camiWindow, okulWindow } from './career';
+import { rankLabel, itibarOf } from '../sim/career';
+import { trait } from '../sim/piety';
 import { QUESTS, armyPower } from '../sim/life';
 import { lawPreview } from '../sim/extras';
 import { CRIME_LABEL } from '../sim/ai';
@@ -121,7 +125,7 @@ export function personExtras(c: Ctx, p: Person): HTMLElement {
   const rels = Object.entries(p.relations).filter(([, v]) => Math.abs(v) >= 20).sort((a, b) => b[1] - a[1]);
   const line = ([id, v]: [string, number]): HTMLElement => h('div', { class: 'msg', style: 'cursor:pointer', onclick: () => c.openPerson(id) }, `${v > 0 ? '💚' : '💢'} ${findPerson(w, id)?.name ?? '?'} (${Math.round(v)})${p.relNote?.[id] ? ` — ${p.relNote[id]}` : ''}`);
   return h('div', {},
-    h('div', { class: 'muted' }, `${p.female ? '♀ Kadın' : '♂ Erkek'} · ${r.label} ${PROF_LABEL[p.prof]} · itibar ${Math.round(p.rep ?? 0)} · dindarlık ${Math.round(p.din ?? 50)}${p.wounded ? ' · 🩸 yaralı' : ''}${p.titles?.length ? ` · 🎖 ${p.titles.join(', ')}` : ''}`),
+    h('div', { class: 'muted' }, `${p.female ? '♀ Kadın' : '♂ Erkek'} · ${rankLabel(w, p)} · ${r.label} ${PROF_LABEL[p.prof]} · itibar ${Math.round(itibarOf(p))} · dindarlık ${Math.round(p.din ?? 50)}${trait(p) ? ` · ${trait(p)}` : ''}${p.wounded ? ' · 🩸 yaralı' : ''}${p.titles?.length ? ` · 🎖 ${p.titles.join(', ')}` : ''}`),
     h('div', { class: 'muted' }, `Bugün: 🍞 ${p.meals}/3 öğün · 💧 ${p.drinks}/3 kez su (günlük gereken)`),
     rels.length ? h('details', {}, h('summary', {}, `Dostlar ve düşmanlar (${rels.length}) — nedenleriyle`), ...rels.slice(0, 6).map(line), ...rels.slice(-4).filter((x) => x[1] < 0 && !rels.slice(0, 6).includes(x)).map(line)) : h('div', { class: 'muted' }, 'Henüz güçlü bir dostluğu ya da düşmanlığı yok. Sohbet, yardım ve alışveriş dostluk; hakaret ve suç düşmanlık getirir.'),
   );
@@ -131,8 +135,8 @@ export function personActions(c: Ctx, p: Person): HTMLElement {
     h('button', { class: 'primary', title: 'Ona yazın; kendi aklıyla cevap verir.', onclick: () => c.dm(p.id) }, '💬 Konuş'),
     c.me && ['bekci', 'asker'].includes(c.me.prof) && c.me.id !== p.id ? h('button', { title: 'İstifçilik araması: fazla stok varsa el konur (günde 1).', onclick: () => c.act({ t: 'inspect', personId: p.id }) }, '🔍 Ara') : '',
     h('button', { title: 'Düşmanlık −25, itibarınız düşer.', onclick: () => c.act({ t: 'insult', personId: p.id }) }, '😤 Hakaret et'),
-    h('button', { class: 'danger', title: 'Suç: yaralar; yakalanırsanız 5 gün zindan.', onclick: () => { if (confirm('Saldırı suçtur. Emin misiniz?')) c.act({ t: 'assault', personId: p.id }); } }, '👊 Saldır'),
-    h('button', { class: 'danger', title: 'Ağır suç: 25 gün zindan.', onclick: () => { if (confirm('Cinayet! Gerçekten mi?')) c.act({ t: 'kill', personId: p.id }); } }, '🗡 Öldür'),
+    h('button', { class: 'danger', title: 'Suç: yaralar; yakalanırsanız 5 gün zindan.', onclick: () => { void askConfirm('Saldırı suçtur. Emin misiniz?').then((yes) => { if (yes) c.act({ t: 'assault', personId: p.id }); }); } }, '👊 Saldır'),
+    h('button', { class: 'danger', title: 'Ağır suç: 25 gün zindan.', onclick: () => { void askConfirm('Cinayet! Gerçekten mi?').then((yes) => { if (yes) c.act({ t: 'kill', personId: p.id }); }); } }, '🗡 Öldür'),
   );
   return row;
 }
@@ -147,13 +151,16 @@ export function sarayExtras(c: Ctx): HTMLElement {
     h('div', { class: 'row' }, h('button', { onclick: () => c.act({ t: 'tribute', pay: true }) }, 'Haracı öde'), h('button', { class: 'danger', onclick: () => c.act({ t: 'tribute', pay: false }) }, 'Reddet, savaş'))));
   // granary
   const gq = num(50, 1, 500);
-  box.append(h('h3', {}, `🌾 Tahıl Ambarı (${Math.round(w.granary)} buğday)`), h('div', { class: 'row' }, gq, h('button', { onclick: () => c.act({ t: 'granary', op: 'buy', qty: Number(gq.value) }) }, 'Ucuz buğday al'), h('button', { onclick: () => c.act({ t: 'granary', op: 'release', qty: Number(gq.value) }) }, 'Sabit fiyatla sat')),
-    h('div', { class: 'muted' }, 'Ambar bollukta ucuza alır, kuraklıkta kendiliğinden satar.'));
+  box.append(h('h3', {}, `🌾 Tahıl Ambarı (${Math.round(w.granary)} buğday)`), h('div', { class: 'row' }, gq, h('button', { onclick: () => c.act({ t: 'granary', op: 'buy', qty: Number(gq.value) }) }, 'Ucuz buğday al'), h('button', { onclick: () => c.act({ t: 'granary', op: 'release', qty: Number(gq.value) }) }, 'Sabit fiyatla sat'), h('button', { onclick: () => c.act({ t: 'granary', op: 'dagit', qty: Number(gq.value) }) }, 'Değirmenlere dağıt (bedava)')),
+    h('div', { class: 'muted' }, 'Ambar bollukta ucuza alır, kuraklıkta kendiliğinden satar. Dağıtım un ve ekmeği ucuzlatır ama ambarı boşaltır.'));
+  box.append(h('h3', {}, '📯 Seferberlik'), h('div', { class: 'row' }, h('span', {}, w.seferberlik ? `İlan edildi (gün ${w.seferberlik})` : 'Barış'), h('button', { class: w.seferberlik ? '' : 'danger', onclick: () => c.act({ t: 'seferberlik', on: !w.seferberlik }) }, w.seferberlik ? 'Seferberliği kaldır' : 'Seferberlik ilan et')), h('div', { class: 'muted small' }, 'Boştaki hamallar askere alınır; oyuncular Kışla’da gönüllü yazılabilir. Halk huzursuzlanır.'));
+  box.append(h('h3', {}, '⚓ İthalat'), h('div', { class: 'row' }, h('span', {}, w.imports === false ? '⛔ İthalat yasak' : '✅ İthalat serbest (Liman toptancısı + kervanlar)'), h('button', { onclick: () => c.act({ t: 'imports', on: w.imports === false }) }, w.imports === false ? 'İthalata izin ver' : 'İthalatı yasakla')),
+    h('div', { class: 'muted' }, `Yasak yerli üreticiyi sevindirir ama fiyatları artırır. Ücret endeksi: ${(w.wageIdx ?? 1).toFixed(2)} (maaşlar ekmek fiyatını izler, işsizlikle düşer).`));
   // price caps
   const g = select(GOODS.map((x): [string, string] => [x, `${GOOD_LABEL[x]} (şimdi ${w.prices[x]} D${w.priceCaps[x] ? `, narh ${w.priceCaps[x]}` : ''})`]), 'ekmek');
   const pv = num(BASE_PRICE.ekmek * 1.5, 0.1, 500, 0.1); g.addEventListener('change', () => { pv.value = String(Math.round(BASE_PRICE[g.value as Good] * 150) / 100); });
   box.append(h('h3', {}, '🏷 Narh (tavan fiyat)'), h('div', { class: 'row' }, g, pv, h('button', { onclick: () => c.act({ t: 'priceCap', good: g.value as Good, price: Number(pv.value) }) }, 'Narh koy'), h('button', { onclick: () => c.act({ t: 'priceCap', good: g.value as Good, price: null }) }, 'Kaldır')),
-    h('div', { class: 'muted' }, 'Çok düşük narh üretimi kaçırır, karaborsa doğar.'));
+    h('div', { class: 'muted' }, 'Piyasanın çok altındaki narh üretimi düşürür, mal tezgâh altına kaçar (karaborsa) ve yoksulun rafı boşalır.'));
   // directives & festival
   box.append(h('h3', {}, '📿 Din yönlendirmesi'), h('div', { class: 'row' }, ...([['namaz', 'Namaza teşvik'], ['icki', 'İçkiye karşı'], ['laik', 'Laik tutum']] as const).map(([t, l]) => h('button', { onclick: () => c.act({ t: 'directive', topic: t }) }, l))));
   const fc = num(300, 100, 5000);
@@ -176,8 +183,8 @@ export function buildingExtras(c: Ctx, b: Building): HTMLElement | null {
   const w = c.w; const me = c.me;
   const act = (label: string, a: Parameters<Ctx['act']>[0], tip = ''): HTMLElement => h('button', { class: 'primary', title: tip, disabled: !me, onclick: () => c.act(a) }, label);
   switch (b.kind) {
-    case 'cami': return h('div', {}, h('div', { class: 'muted' }, 'Namaz dindarlığı artırır. Cuma (her 7. günün 5’i) vaaz verilir.'), act('🕌 Namaz kıl', { t: 'pray' }),
-      me && (me.prof === 'imam' || me.prof === 'hoca') ? h('div', { class: 'row' }, ...(['namaz', 'icki', 'sabir'] as const).map((t) => h('button', { onclick: () => c.act({ t: 'sermon', topic: t }) }, `Vaaz: ${t}`))) : '');
+    case 'cami': return camiWindow(c);
+    case 'okul': return okulWindow(c);
     case 'bar': return h('div', {}, h('div', { class: 'muted' }, w.bans.includes('icki') ? 'İçki Yasağı yürürlükte: meyhane kapalı.' : 'Barcı buğdaydan içki yapar. İçmek mutluluk verir, dindarlığı düşürür.'), act('🍺 Bir kadeh iç', { t: 'drink' }));
     case 'hekimhane': return h('div', {}, h('div', { class: 'muted' }, 'Sağlık 30’un altındaysa ya da yaralıysanız ancak hekim iyileştirir. Ücret hekimin rütbesine göre.'), act('🩺 Muayene ol', { t: 'doctor' }));
     case 'kuyu': return h('div', {}, h('div', { class: 'muted' }, 'Günde 3 kez su gerekir.'), act('💧 Su iç', { t: 'drinkWater' }));

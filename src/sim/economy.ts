@@ -1,3 +1,4 @@
+import { itibar, itibarPriceMul } from './career';
 import type { Good, Listing, Person, World } from './types';
 import { GOODS } from './types';
 import { rand } from './rng';
@@ -29,6 +30,7 @@ export function balance(w: World, acc: string): number {
   if (acc === 'fon') return w.coup?.fund ?? 0;
   if (acc === 'dis') return Infinity;
   if (acc.startsWith('proje:')) return w.projects.find((p) => `proje:${p.id}` === acc)?.paid ?? 0;
+  if (acc.startsWith('parti:')) return w.meclis.factions.find((f) => `parti:${f.id}` === acc)?.kasa ?? 0;
   return findPerson(w, acc)?.money ?? 0;
 }
 
@@ -38,11 +40,12 @@ function adjust(w: World, acc: string, d: number): void {
   if (acc === 'fon') { if (w.coup) w.coup.fund = r(w.coup.fund + d); return; }
   if (acc === 'dis') { w.outsideNet = r((w.outsideNet ?? 0) + d); return; }
   if (acc.startsWith('proje:')) { const p = w.projects.find((x) => `proje:${x.id}` === acc); if (p) p.paid = r(p.paid + d); return; }
+  if (acc.startsWith('parti:')) { const f = w.meclis.factions.find((x) => `parti:${x.id}` === acc); if (f) f.kasa = r((f.kasa ?? 0) + d); return; }
   const p = findPerson(w, acc); if (p) p.money = r(p.money + d);
 }
 
 export function totalMoney(w: World): number {
-  return Math.round((w.people.reduce((s, p) => s + p.money, 0) + w.treasury + w.projects.reduce((s, p) => s + p.paid, 0) + (w.coup?.fund ?? 0) + (w.outsideNet ?? 0)) * 100) / 100;
+  return Math.round((w.people.reduce((s, p) => s + p.money, 0) + w.treasury + w.projects.reduce((s, p) => s + p.paid, 0) + w.meclis.factions.reduce((s, f) => s + (f.kasa ?? 0), 0) + (w.coup?.fund ?? 0) + (w.outsideNet ?? 0)) * 100) / 100;
 }
 
 export function lawOn(w: World, id: string): boolean { return w.laws.some((l) => l.id === id && l.active); }
@@ -67,6 +70,10 @@ export function addListing(w: World, seller: Person, good: Good, qty: number, pr
   w.listings.push({ id: nextId(w, 'L'), sellerId: seller.id, good, qty, price: Math.round(price * 100) / 100, market });
 }
 
+/** v2.0.1: each sale to a buyer is one successful trade for a player seller; every 10 honest trades give +2 itibar. */
+function countTrades(w: World, sellers: Set<string>): void {
+  for (const id of sellers) { const s = findPerson(w, id); if (!s?.playerId || s.npc) continue; const c = (s.cs ??= {}); c.trades = (c.trades ?? 0) + 1; c.honest = (c.honest ?? 0) + 1; if (c.honest >= 10) { c.honest = 0; itibar(w, s, 2, '10 dürüst ticaret'); } }
+}
 /** Buy up to qty of good, cheapest first. Seller pays sales tax. Returns qty bought. */
 export function buy(w: World, buyerAcc: string, good: Good, qty: number, maxPrice = Infinity, opt: { group?: string; wholesale?: boolean } = {}): number {
   let got = 0;
@@ -74,9 +81,10 @@ export function buy(w: World, buyerAcc: string, good: Good, qty: number, maxPric
   const offers = w.listings.filter((l) => l.good === good && l.qty > 0 && l.sellerId !== buyerAcc && !(w.bans.includes(good) && l.sellerId !== 'dis')
     && (!l.wholesale || opt.wholesale) && (!opt.group || groupOf(l.market) === opt.group)).sort((a, b) => a.price - b.price);
   const fixedWater = good === 'su' && lawOn(w, 'devletsuyu');
+  const bp = findPerson(w, buyerAcc); const imul = bp?.playerId && !bp.npc ? itibarPriceMul(bp) : 1; const traded = new Set<string>(); // v2.0.1 itibar discount; trade count
   for (const l of offers) {
     while (got < qty && l.qty > 0) {
-      const pay = Math.round((fixedWater ? Math.min(l.price, lawParam(w, 'devletsuyu', 2)) : l.price) * 100) / 100;
+      const pay = Math.round((fixedWater ? Math.min(l.price, lawParam(w, 'devletsuyu', 2)) : l.price) * imul * 100) / 100;
       if (pay > maxPrice || balance(w, buyerAcc) < pay) return finishPoor();
       transfer(w, buyerAcc, l.sellerId, pay, `${good} alımı`);
       // state water: treasury tops up the difference to the seller
@@ -85,11 +93,12 @@ export function buy(w: World, buyerAcc: string, good: Good, qty: number, maxPric
       const tax = pay * (w.taxRate + goodTaxPct(w, good)) / 100; paySubsidy(w, l.sellerId, good);
       const s = findPerson(w, l.sellerId); if (s) { s.taxDue += s.smuggle ? tax * 0.2 : tax; s.incomeToday += pay - tax; }
       else if (l.sellerId === 'dis') { transfer(w, 'dis', 'saray', Math.max(tax, pay * 0.1), 'gümrük'); if (w.caravan) w.caravan.earned = (w.caravan.earned ?? 0) + pay; }
-      l.qty -= 1; got += 1;
+      l.qty -= 1; got += 1; traded.add(l.sellerId);
       w.market.sold[good] += 1;
     }
     if (got >= qty) break;
   }
+  countTrades(w, traded);
   return finish();
   // could not afford: poverty, not a shortage – do not push the price up
   function finishPoor(): number { const b = findPerson(w, buyerAcc); if (b) { b.inv[good] += got; if (got < qty && ESSENTIAL.includes(good)) b.cantAfford = w.day; } return got; }
@@ -139,6 +148,13 @@ export function produce(w: World, p: Person): void {
   // v2.0.1 narh: a ceiling far below the market price makes production a loss → less output (shortage)
   const cap = w.priceCaps[spec.good]; if (cap && cap < w.prices[spec.good] * 0.9) frac *= Math.max(0.3, (cap / w.prices[spec.good]) ** 2);
   if (frac === 0) { p.lastAction = 'tezgâh dolu, satış bekliyor'; return; }
+  // v2.0.1 esnaf kredisi: a broke miller/baker can't buy wheat/flour and the bread chain dies (poverty trap). The hazine advances a small
+  // working capital (money moves saray → esnaf, conserved) and takes it back in instalments once the shop earns again.
+  if (spec.inputs && ['degirmenci', 'firinci'].includes(p.prof)) {
+    if ((p.kredi ?? 0) > 0 && p.money > 60) { const pay = Math.min(p.kredi!, Math.round((p.money - 60) * 0.3 * 100) / 100); if (pay > 0 && transfer(w, p.id, 'saray', pay, 'esnaf kredisi taksiti')) p.kredi = Math.round((p.kredi! - pay) * 100) / 100; }
+    const inCost = Object.entries(spec.inputs).reduce((s2, [ig, n]) => s2 + w.prices[ig as Good] * (n as number), 0) * frac;
+    if (p.money < inCost * 0.5 && (p.kredi ?? 0) < 150 && w.treasury > 1500) { const amt = Math.min(60, Math.ceil(inCost * 0.6)); if (transfer(w, 'saray', p.id, amt, 'esnaf kredisi')) p.kredi = (p.kredi ?? 0) + amt; }
+  }
   for (const [g, need] of Object.entries(spec.inputs ?? {}) as [Good, number][]) {
     if (p.inv[g] < need * frac) buy(w, p.id, g, Math.ceil(need * frac - p.inv[g]), Math.max(0.1, Math.min(p.money * 0.7, (spec.qty * w.prices[spec.good] * 0.8) / need / Object.keys(spec.inputs ?? {}).length)), { wholesale: true });
     frac = Math.min(frac, p.inv[g] / need);

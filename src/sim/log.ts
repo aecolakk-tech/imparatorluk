@@ -19,6 +19,8 @@ export function log(w: World, text: string, personId?: string, now?: number): vo
 }
 export function personal(w: World, playerId: string, text: string, now?: number): void {
   const pl = w.players[playerId]; if (!pl) return;
+  // v2.0.1: every personal notice also reaches an online player as an in-game toast (client shows entries newer than the last one it saw)
+  pl.liveN = (pl.liveN ?? 0) + 1; (pl.live ??= []).push({ n: pl.liveN, t: text }); if (pl.live.length > 12) pl.live.splice(0, pl.live.length - 12);
   if (now === undefined || now - pl.lastSeen > 60_000) { pl.awayLog.push(`Gün ${w.day}: ${text}`); if (pl.awayLog.length > 40) pl.awayLog.shift(); }
 }
 export const headTitle = (w: World): string => (w.regime === 'cumhuriyet' ? 'Başkan' : 'Kayzer');

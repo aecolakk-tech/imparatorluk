@@ -1,3 +1,4 @@
+import { skillMul } from './career';
 /**
  * v2.0.1 real-time combat for the eşkıya night and the foreign landing.
  * Foes are real entities with positions (walk paths), hit points and targets. The server advances the fight in
@@ -76,6 +77,7 @@ function hurt(w: World, c: Combat, p: Person, dmg: number, by: string, wl: strin
 function foeKilled(w: World, c: Combat, _f: Foe, by: Person | null): void {
   if (w.raid && c.kind === 'raid') w.raid.killed = (w.raid.killed ?? 0) + 1;
   if (w.foreign && c.kind === 'war') { w.foreign.killed = (w.foreign.killed ?? 0) + 1; w.foreign.alive = liveFoes(w).length; }
+  if (by) { (c.fought ??= {})[by.id] = (c.fought[by.id] ?? 0) + 1; }
   if (by) { by.xp += 3; by.rep = clamp(by.rep + 2, -100, 100); if (by.playerId && !by.npc && transfer(w, 'saray', by.id, 5, c.kind === 'raid' ? 'eşkıya ödülü' : 'düşman askeri ödülü')) personal(w, by.playerId, `⚔ ${c.kind === 'raid' ? 'Bir eşkıyayı' : 'Bir düşman askerini'} yere serdiniz! Ödül: 5 D (hazineden).`); }
 }
 
@@ -89,11 +91,11 @@ export function attackFoe(w: World, me: Person, foeId: string, now: number): { o
   const q = placePeople(w, now).find((x) => x.p.id === me.id); const fp = foePos(f, now);
   const d = q ? Math.hypot(q.x - fp.x, q.y - fp.y) : 0; const range = wp === 'yay' ? BOW_RANGE : MELEE;
   if (rules.reach && d > range + 0.3) return { ok: false, msg: wp === 'yay' ? `Menzil dışında (${d.toFixed(1)} kare; yay ${BOW_RANGE}).` : 'Çok uzak – yanına gidin (kılıç/hançer yakın dövüş).' };
-  me.atkAt = now;
+  me.atkAt = now; (c.fought ??= {})[me.id] ??= 0;
   if (wp === 'yay') { const a = arms(me); a.ok = Math.max(0, (a.ok ?? 0) - 1); }
   const kind = f.kind === 'eskiya' ? 'eşkıya' : 'düşman askeri';
   if (rand(w) > (wp === 'yay' ? 0.7 : 0.85)) { hit(c, { at: now, x: fp.x, y: fp.y, dmg: 0, to: f.id, toName: kind, by: me.name, w: ARM_LABEL[wp], k: 'miss' }); return { ok: true, msg: 'Iska!' }; }
-  const dmg = Math.round(ARM_DMG[wp] * fightMul(me, w) * (0.85 + rand(w) * 0.3)); f.hp = Math.max(0, f.hp - dmg);
+  const dmg = Math.round(ARM_DMG[wp] * fightMul(me, w) * skillMul(me) * (0.85 + rand(w) * 0.3)); f.hp = Math.max(0, f.hp - dmg);
   hit(c, { at: now, x: fp.x, y: fp.y, dmg, to: f.id, toName: kind, by: me.name, w: ARM_LABEL[wp], k: f.hp <= 0 ? 'kill' : 'hit' });
   if (f.hp <= 0) { foeKilled(w, c, f, me); return { ok: true, msg: `${kind[0]!.toUpperCase()}${kind.slice(1)} öldü!` }; }
   return { ok: true, msg: `${ARM_LABEL[wp]} ile vurdunuz (−${dmg}).` };

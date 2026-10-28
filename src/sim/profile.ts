@@ -1,3 +1,4 @@
+import { ownJob } from './career';
 /**
  * v2.0.1 character profile, chosen ONCE at creation (existing players: once at next login, without harmful changes):
  * Soyadı, Yaş grubu, Köken (starting meslek + money + skill), Mizaç. Every option trades something for something.
@@ -10,7 +11,7 @@ import { bornForYears, oldFight, oldStamina } from './age';
 export type AgeGroup = 'genc' | 'olgun' | 'yasli';
 export type Origin = 'koylu' | 'zanaatkar' | 'tuccar' | 'yoksul';
 export type Temper = 'durust' | 'hirsli' | 'kurnaz' | 'dindar' | 'cesur';
-export interface ProfileChoice { surname: string; age: number; origin: Origin; temper: Temper }
+export interface ProfileChoice { surname: string; age: number; origin: Origin; temper: Temper; hard?: boolean } // hard = 'Dilenci olarak başla'
 /** v2.0.1: the age picker (16–60) keeps the old trade-offs: 16–22 genç, 23–45 olgun, 46–60 yaşlı. */
 export const ageGroupOf = (years: number): AgeGroup => (years <= 22 ? 'genc' : years <= 45 ? 'olgun' : 'yasli');
 export const MIN_START_AGE = 16, MAX_START_AGE = 60;
@@ -72,6 +73,9 @@ export function applyProfile(w: World, p: Person, c: ProfileChoice, fresh: boole
     p.prof = o.prof; p.work = WORKPLACE[o.prof]; p.money = Math.max(5, o.money + a.money);
     if (c.origin === 'koylu') p.inv.ekmek += 2; if (c.origin === 'zanaatkar') p.inv.alet += 1;
     if (c.origin === 'yoksul') p.protectedUntil = (p.protectedUntil ?? w.day) + 3;
-  }
+    // v2.0.1 yükselme yolu: everyone starts as İşçi in his köken's job; 'Dilenci olarak başla' = hard mode (no job, 2 D)
+    p.itibar = 10; p.yol = c.hard ? 'dilenci' : 'isci'; p.cs = { ...(p.cs ?? {}), hardMode: !!c.hard };
+    if (c.hard) { p.prof = 'hamal'; p.work = 'cami'; p.money = 2; p.job = undefined; } else p.job = ownJob(w, p);
+  } else if (!p.job) p.job = ownJob(w, p);
   return null;
 }

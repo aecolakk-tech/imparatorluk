@@ -150,3 +150,115 @@ describe('v2.0.1 character creation: gender, profile, names, marriage', () => {
     expect(TEMPER.durust.bribe).toBeLessThan(1); expect(TEMPER.kurnaz.rel).toBeLessThan(0); expect(TEMPER.cesur.fight).toBeGreaterThan(1);
   });
 });
+
+import { meclisElection, meclisDay, members, propose, ANAYASA_YES } from '../src/sim/meclis';
+import { fullAI } from '../src/sim/index';
+import type { Bill } from '../src/sim/types';
+describe('v2.0.1 Cumhuriyet İlanı (anayasa değişikliği)', () => {
+  function meclisWith(salt: number): World {
+    const w = setup(); meclisElection(w, [], {}, fullAI);
+    const ms = members(w);
+    // exactly `salt` Saltanat MPs, the rest spread over other parties
+    ms.forEach((p, i) => { p.faction = i < salt ? 'saltanat' : (['cumhuriyet', 'esnaf', 'halk'][i % 3]!); });
+    return w;
+  }
+  const run = (w: World, b: Bill): void => { for (let i = 0; i < 6 && ['tartisma', 'oylama'].includes(b.status); i += 1) { w.day += 1; meclisDay(w, () => false, true); } };
+  it('needs 14 yes, is free of party discipline, Saltanat defectors are logged, and passes peacefully under low mood + high republic', () => {
+    const w = meclisWith(4); const ms = members(w); const kid = w.kayzerId!;
+    for (const p of w.people) { p.republic = 85; p.mood = 25; p.loyalty = 25; }
+    const b = propose(w, ms.find((p) => p.faction === 'cumhuriyet')!, 'cumhuriyet', 0, '') as Bill;
+    expect(typeof b).toBe('object'); expect(b.debateUntil).toBe(w.day + 2);
+    run(w, b);
+    const yes = Object.values(b.votes).filter((v) => v === 'evet').length;
+    expect(yes).toBeGreaterThanOrEqual(ANAYASA_YES);
+    expect(b.lines?.saltanat).toBe('hayir');
+    const saltYes = ms.filter((p) => p.faction === 'saltanat' && b.votes[p.id] === 'evet');
+    expect(saltYes.length).toBeGreaterThanOrEqual(3); // Saltanat holds 4 seats, 3+ vote for the republic
+    expect(b.defectors?.length).toBeGreaterThanOrEqual(3);
+    expect(w.meclis.log.some((l) => l.text.includes('vicdan oyu'))).toBe(true);
+    for (const p of saltYes) expect(p.faction).toBe('saltanat'); // not expelled for a vicdan oyu
+    expect(b.status).toBe('kabul'); // no Kayzer veto possible
+    expect(w.regime).toBe('cumhuriyet'); expect(w.kayzerId).toBeNull();
+    const old = findPerson(w, kid)!; expect(old.prof).not.toBe('kayzer'); expect(old.soylu).toBe(false);
+    expect(w.election.baskanNextDay).toBe(w.day + 1);
+  });
+  it('fails below 14 under a loyal, content city: proposer loses favour and a cooldown starts', () => {
+    const w = meclisWith(5); const ms = members(w);
+    for (const p of w.people) { p.republic = 40; p.mood = 70; p.loyalty = 70; }
+    const pr = ms.find((p) => p.faction !== 'saltanat')!;
+    const before = pr.relations[w.kayzerId!] ?? 0;
+    const b = propose(w, pr, 'cumhuriyet', 0, '') as Bill; run(w, b);
+    expect(b.status).toBe('ret'); expect(w.regime).toBe('imparatorluk');
+    expect(pr.relations[w.kayzerId!]).toBeLessThan(before);
+    expect(typeof propose(w, ms.find((p) => p.id !== pr.id)!, 'cumhuriyet', 0, '')).toBe('string');
+  });
+});
+
+import { komisyonMembers, openDilekce, signDilekce, DILEKCE_IMZA, repealables, hoursToCount, turnout, aiApprove, HAZINE_FLOOR } from '../src/sim/meclis';
+import { electionPhase } from '../src/sim/tick';
+describe('v2.0.1 Meclis acil ekleri', () => {
+  const mk = (): World => { const w = setup(); meclisElection(w, [], {}, fullAI); return w; };
+  it('Bütçe Komisyonu: 3 MPs (2 bloc + 1 opposition) report on spending ≥200 D; the report is on the bill', () => {
+    const w = mk(); w.treasury = 6000; const k = komisyonMembers(w); expect(k.length).toBe(3);
+    const govt = new Set(w.meclis.govt ?? []); expect(k.filter((id) => govt.has(findPerson(w, id)!.faction ?? '')).length).toBeGreaterThanOrEqual(1);
+    const b = propose(w, members(w)[0]!, 'genelge', 0, 'yol') as Bill; expect(typeof b).toBe('object');
+    expect(b.komisyon?.text).toMatch(/Bütçe Komisyonu raporu/); expect(b.komisyon?.ok).toBe(true); expect(b.debateUntil).toBe(w.day + 2);
+  });
+  it('hazine kilidi: unaffordable spending needs the BORÇLANMA label; it borrows and repays', () => {
+    const w = mk(); w.treasury = 400; const m = members(w)[0]!;
+    expect(typeof propose(w, m, 'genelge', 0, 'senlik')).toBe('string');
+    const b = propose(w, m, 'genelge', 0, 'yol', undefined, undefined, false, { borc: true }) as Bill;
+    // gBlock refuses genelge that the hazine can't pay; insaat shows the label path
+    if (typeof b === 'string') { const plot = w.buildings.find((x) => x.kind === 'arsa')!; for (const x of w.projects) x.done = true; const c = propose(w, m, 'insaat', 0, `cesme@${plot.id}`, undefined, undefined, false, { borc: true }) as Bill; expect(c.title).toMatch(/BORÇLANMA/); expect(c.komisyon?.ok).toBe(false); }
+    else expect(b.title).toMatch(/BORÇLANMA/);
+    expect(HAZINE_FLOOR).toBe(300);
+  });
+  it('halk dilekçesi: 20 signatures put it on the agenda (players and NPCs sign)', () => {
+    const w = mk(); const me = findPerson(w, w.players.u2!.personId)!; me.born = -400 * 365;
+    const d = openDilekce(w, me, 'af', 0, ''); expect(typeof d).toBe('object'); if (typeof d === 'string') return;
+    const signers = w.people.filter((p) => p.id !== me.id && !p.playerId && p.prof !== 'naip' && p.jailedDays === 0).slice(0, DILEKCE_IMZA + 3);
+    for (const p of signers) { p.born = -400 * 365; if (d.status === 'acik') signDilekce(w, p, d.id); }
+    expect(d.status).toBe('gundem'); const b = w.meclis.bills.find((x) => x.id === d.billId)!; expect(b.title).toMatch(/Halk dilekçesi/); expect(b.dilekce).toBe(d.id);
+  });
+  it('gerçek sandık: only on election day at the Meclis; secret ballot; turnout; yeter sayı', () => {
+    const w = mk(); rules.reach = false; const me = findPerson(w, w.players.u2!.personId)!; me.born = -400 * 365;
+    const c = w.people.find((p) => !p.playerId && p.prof !== 'naip')!; w.election.candidates = [c.id];
+    expect(applyAction(w, 'u2', { t: 'vote', candidateId: c.id }, T0).ok).toBe(false); // not election day
+    w.day = w.election.nextDay; expect(electionPhase(w).phase).toBe('oylama');
+    const r = applyAction(w, 'u2', { t: 'vote', candidateId: c.id }, T0); expect(r.ok).toBe(true); expect(r.msg).toMatch(/Oyunuz kaydedildi/);
+    expect(w.election.votes[me.id]).toBe('✓'); expect(w.election.ballots).toContain(c.id); // the ballot carries no voter id
+    expect(turnout(w).voted).toBe(1); expect(applyAction(w, 'u2', { t: 'vote', candidateId: c.id }, T0).ok).toBe(false);
+  });
+  it('yeter sayı: fewer than 9 votes → invalid; “Oylama başladı” notice with hours left', () => {
+    const w = mk(); const ms = members(w); const pm = ms[0]!; pm.playerId = 'pm'; pm.npc = false;
+    w.players.pm = { playerId: 'pm', personId: pm.id, name: pm.name, founder: false, banned: false, lastSeen: T0, lastSeenDay: 1, awayLog: [], awayMoney: 0 };
+    const b = propose(w, ms[1]!, 'af', 0, '') as Bill; w.day += 1; w.hour = 11; meclisDay(w, (p) => p.id !== pm.id && ms.indexOf(p) < 9, true);
+    expect((w.players.pm!.live ?? []).some((n) => /Oylama başladı/.test(n.t))).toBe(true);
+    expect(hoursToCount(w, b)).toBeGreaterThan(0);
+    w.day += 1; meclisDay(w, (p) => ms.indexOf(p) < 9, true); // 9 'players' who never vote → only 7 NPC votes
+    expect(b.status).toBe('ret'); expect(b.result).toMatch(/Yeter sayı/);
+  });
+  it('kaldır: active genelge listed with its end day, repealed by the Meclis', () => {
+    const w = mk(); w.treasury = 9000; const b = propose(w, members(w)[0]!, 'genelge', 0, 'okul') as Bill; for (const m of members(w)) b.votes[m.id] = 'evet';
+    for (let i = 0; i < 4 && b.status !== 'kabul'; i++) { w.day += 1; meclisDay(w, () => true, false); }
+    expect(b.status, b.result).toBe('kabul'); const r = repealables(w).find((x) => x.target === 'g:okul')!; expect(r.until).toBeGreaterThan(w.day);
+    w.day += 1; const k = propose(w, members(w)[2]!, 'kaldir', 0, 'g:okul') as Bill; for (const m of members(w)) k.votes[m.id] = 'evet';
+    for (let i = 0; i < 4 && k.status !== 'kabul'; i++) { w.day += 1; meclisDay(w, () => true, false); }
+    expect(k.status, k.result).toBe('kabul'); expect((w.genelgeler ?? []).some((g) => g.kind === 'okul' && g.until >= w.day)).toBe(false);
+  });
+  it('AI naip answers a pending bill by the next session using the hazine', () => {
+    const w = mk(); w.treasury = 600; const b = { kind: 'genelge', cost: 500, votes: {}, proposerId: members(w)[0]!.id } as unknown as Bill;
+    expect(aiApprove(w, b)).toBe(false); w.treasury = 20000; expect(aiApprove(w, { ...b, cost: 200 } as Bill)).toBe(true);
+  });
+  it('ara seçim: an empty seat is filled at the next Meclis session', () => {
+    const w = mk(); const ms = members(w); const gone = ms[3]!; w.people = w.people.filter((p) => p.id !== gone.id);
+    expect(members(w).length).toBe(15); w.day += 1; meclisDay(w, () => true, false);
+    expect(members(w).length).toBe(16); expect(JSON.stringify(w.meclis.log ?? w.events)).toMatch(/Ara seçim/);
+  });
+  it('Cumhuriyet İlanı: 13 yes is not enough', () => {
+    const w = mk(); const ms = members(w); const b = propose(w, ms[0]!, 'cumhuriyet', 0, '') as Bill;
+    ms.forEach((m, i) => { b.votes[m.id] = i < 13 ? 'evet' : 'hayir'; });
+    for (let i = 0; i < 5 && ['tartisma', 'oylama'].includes(b.status); i++) { w.day += 1; meclisDay(w, () => true, true); }
+    expect(b.status).toBe('ret'); expect(w.regime).toBe('imparatorluk'); expect(b.result).toMatch(/14/);
+  });
+});

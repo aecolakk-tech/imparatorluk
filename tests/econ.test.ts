@@ -3,7 +3,7 @@ import { createWorld, joinWorld, advanceWorld, touchPlayer, totalMoney, hourMs, 
 import type { World, Good } from '../src/sim/index';
 import { rules } from '../src/sim/move';
 import { BASE_PRICE } from '../src/sim/constants';
-import { shelf, quoted, limanRestock, pazarGunu, postOrders, capKaraborsa, wageIndex, migrateEcon, WHOLESALE_MUL } from '../src/sim/market2';
+import { shelf, quoted, limanRestock, panayir, postOrders, capKaraborsa, wageIndex, migrateEcon, WHOLESALE_MUL } from '../src/sim/market2';
 import { supplyMult } from '../src/sim/economy';
 
 const T0 = 1_700_000_000_000;
@@ -55,7 +55,7 @@ describe('v2.0.1 production chain', () => {
   });
 });
 
-describe('v2.0.1 trade: Liman toptan, Pazar Günü, siparişler', () => {
+describe('v2.0.1 trade: Liman toptan, Panayır, siparişler', () => {
   it('Liman toptancısı sells below the normal price, only at the Liman; a player can buy there and deliver an order for profit', () => {
     const w = setup(); migrateEcon(w); limanRestock(w);
     const lim = shelf(w, 'odun', 'liman', true).price!; expect(lim).toBeCloseTo(BASE_PRICE.odun * WHOLESALE_MUL, 2);
@@ -72,10 +72,10 @@ describe('v2.0.1 trade: Liman toptan, Pazar Günü, siparişler', () => {
   it('import ban: no Liman toptan', () => {
     const w = setup(); w.imports = false; limanRestock(w); expect(w.listings.some((l) => l.wholesale)).toBe(false);
   });
-  it('Pazar Günü brings caravans with rare goods and cools prices', () => {
-    const w = setup(); w.day = 5; const p0 = w.prices.elbise; pazarGunu(w);
+  it('Panayır brings caravans with rare goods and cools prices', () => {
+    const w = setup(); w.day = 5; const p0 = w.prices.elbise; panayir(w);
     expect(w.listings.some((l) => l.sellerId === 'dis' && l.good === 'mobilya')).toBe(true); expect(w.prices.elbise).toBeLessThan(p0);
-    expect(w.events.some((e) => /PAZAR GÜNÜ/.test(e.text))).toBe(true);
+    expect(w.events.some((e) => /PANAYIR/.test(e.text))).toBe(true);
   });
 });
 
@@ -100,11 +100,12 @@ describe('v2.0.1 Kayzer tools and their costs', () => {
 
 describe('v2.0.1 poverty effects', () => {
   it('NPCs who cannot afford bread complain, lose mood, petition and finally leave', () => {
-    const w = setup(); migrateEcon(w); const p = w.people.find((x) => x.prof === 'hamal' && !x.playerId && !x.spouse)!;
+    const w = setup(); migrateEcon(w); const p = w.people.find((x) => x.prof === 'hamal' && !x.playerId && !x.spouse && !x.meclis)!; p.ambition = 0; // not a candidate: an MP has a salary and can't emigrate
     p.money = 0; for (const c of w.people) if (c.parents.includes(p.id)) c.parents = [];
     const mood0 = p.mood; let gone = false;
-    for (let d = 0; d < 30 && !gone; d++) { p.cantAfford = w.day; run(w, 1); gone = !findPerson(w, p.id); if (!gone) p.money = 0; }
-    expect(gone || p.mood < mood0).toBe(true);
+    let now = w.lastTickAt; // v2.0.1: charity (zekât, party hayır sofrası) now reaches the poorest – keep him penniless every hour to test the poverty path itself
+    for (let h = 0; h < 30 * 24 && !gone; h++) { p.cantAfford = w.day; now += hourMs(w); touchPlayer(w, 'f', now); advanceWorld(w, now); gone = !findPerson(w, p.id); if (!gone) { p.money = 0; p.prof = 'hamal'; p.work = 'pazar'; p.job = undefined; } } // stays a poor hamal (no trade switch)
+    expect(gone || p.mood < mood0, `gone=${gone} mood ${p.mood} vs ${mood0}`).toBe(true);
     expect(w.events.some((e) => /terk etti|dilekçe|“/.test(e.text))).toBe(true);
   }, 60_000);
 });
