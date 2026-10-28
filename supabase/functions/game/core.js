@@ -39,6 +39,14 @@ function ek(name, base) {
   }
   return `${n2}\u2019${s}`;
 }
+function tidy(t) {
+  let s = String(t ?? "");
+  s = s.replace(/(?<!\p{L})(\p{Lu}\p{L}+) \1(?!\p{L})/gu, "$1");
+  s = s.replace(/^([^:]{2,40}): \1:\s*/u, "$1: ");
+  s = s.replace(/([!?])\.(?=\s|$)/g, "$1").replace(/\.{2}(?=\s|$)/g, ".");
+  s = s.replace(/^(Muhbir|Bekçi|Asker)\s*:/u, "$1 (ad\u0131 bilinmiyor):");
+  return s.replace(/ {2,}/g, " ").trim();
+}
 
 // src/sim/usage.ts
 function use(w, key, p) {
@@ -227,7 +235,9 @@ function isOnline(w, playerId, now, windowMs = 6e4) {
   const pl = w.players[playerId];
   return !!pl && !pl.banned && now - pl.lastSeen < windowMs;
 }
-function log(w, text, personId, now) {
+function log(w, text0, personId, now) {
+  const text = tidy(text0);
+  if (w.events.slice(-4).some((e) => e.day === w.day && e.text === text)) return;
   const p = findPerson(w, personId);
   const b2 = p ? w.buildings.find((x) => x.id === (w.hour >= 8 && w.hour < 18 ? p.work : p.home)) : void 0;
   w.events.push({ day: w.day, hour: w.hour, text, personId, x: b2?.door.x, y: b2?.door.y });
@@ -237,7 +247,8 @@ function log(w, text, personId, now) {
   if (p?.playerId) personal(w, p.playerId, text, now);
   maybeChronicle(w, text);
 }
-function personal(w, playerId, text, now) {
+function personal(w, playerId, text0, now) {
+  const text = tidy(text0);
   const pl = w.players[playerId];
   if (!pl) return;
   pl.liveN = (pl.liveN ?? 0) + 1;
@@ -406,6 +417,11 @@ function actionNeed(w, me, a) {
       return B(MARKET_IDS(w), "Pazar\u2019a (\u0130\u015F \u0130lan\u0131 Tahtas\u0131)");
     case "askJob":
       return { kind: "person", id: a.personId };
+    case "canvass":
+    case "ikram":
+      return { kind: "person", id: a.personId };
+    case "ocak":
+      return B(["pazar"], "Pazar\u2019daki parti oca\u011F\u0131na");
     case "kisla":
       return B(["kisla"], "K\u0131\u015Fla\u2019ya");
     case "sadaka":
@@ -989,19 +1005,23 @@ function isPoor(w, p, avgMoney) {
 function feel(w, p) {
   if (p.prof === "naip" || p.id === w.kayzerId) return;
   const hungry = p.hunger > 70 || p.thirst > 70;
+  const crisis = w.nature?.kind === "salgin" || w.disaster?.kind === "kitlik" && w.day - w.disaster.day < 5;
+  const sabr = crisis ? 1 - Math.max(0, p.din - 50) / 100 : 1;
   if (hungry) {
-    p.mood -= 3;
+    p.mood -= 3 * sabr;
     p.republic += 1.2;
     p.loyalty -= 1;
   } else {
     p.mood += 0.6;
   }
+  if (crisis) p.mood -= 1.5 * sabr;
   if (p.din > 70 && w.regime === "imparatorluk") {
     p.loyalty += 0.2;
     p.republic -= 0.2;
   }
   if (p.din < 25) p.republic += 0.15;
   if (w.bans.includes("icki") && p.din < 35) p.loyalty -= 0.4;
+  if (w.bans.includes("icki") && p.din > 65) p.loyalty += 0.3;
   const avgMoney = w.people.reduce((s, x) => s + x.money, 0) / w.people.length;
   const poor = isPoor(w, p, avgMoney);
   if (poor) {
@@ -1429,6 +1449,7 @@ function axisFit(f, k) {
   return Math.max(-1, Math.min(1, s));
 }
 var DUES = 1;
+var JOIN_FEE = 5;
 var FOUND_FEE = 100;
 var MAJORITY = 9;
 var acc = (f) => `parti:${f.id}`;
@@ -1436,6 +1457,7 @@ var facOf = (w, id) => id ? w.meclis.factions.find((f) => f.id === id) : void 0;
 var partyName = (w, id) => facOf(w, id)?.name ?? "Ba\u011F\u0131ms\u0131z";
 var membersOf = (w, f) => w.people.filter((p) => p.faction === f.id);
 var mpsOf = (w, f) => w.people.filter((p) => p.faction === f.id && p.meclis);
+var isPlayer2 = (p) => !!p.playerId && !p.npc;
 var tell2 = (w, p, m) => {
   if (p.playerId) personal(w, p.playerId, m);
 };
@@ -1581,6 +1603,32 @@ function expel(w, p, f, why) {
   w.meclis.log.push({ day: w.day, text: `\u{1F6AA} ${p.name} ${f.name}\u2019nden ihra\xE7 edildi (${why}); art\u0131k ba\u011F\u0131ms\u0131z.` });
   tell2(w, p, `\u{1F6AA} ${f.name} sizi ihra\xE7 etti: ${why}.`);
 }
+function joinParty(w, p, id) {
+  const f = facOf(w, id);
+  if (!f) return "B\xF6yle bir parti yok.";
+  if (p.faction === id) return "Zaten \xFCyesiniz.";
+  if (p.prof === "asker" || p.prof === "bekci") return "Askerler ve bek\xE7iler partiye \xFCye olamaz.";
+  if (!transfer(w, p.id, acc(f), JOIN_FEE, `${f.name} \xFCyelik \xFCcreti`)) return `\xDCyelik \xFCcreti ${JOIN_FEE} D.`;
+  const old = facOf(w, p.faction);
+  if (old) {
+    delete old.standing[p.id];
+    if (old.leaderId === p.id) old.leaderId = null;
+  }
+  p.faction = id;
+  f.standing[p.id] = 50;
+  f.strikes[p.id] = 0;
+  if (isPlayer2(p)) itibar(w, p, 1, `${f.name}\u2019ne \xFCye oldu`);
+  return null;
+}
+function resignParty(w, p) {
+  const f = facOf(w, p.faction);
+  if (!f) return "Bir partiye \xFCye de\u011Filsiniz.";
+  p.faction = null;
+  delete f.standing[p.id];
+  if (f.leaderId === p.id) f.leaderId = null;
+  w.meclis.log.push({ day: w.day, text: `${p.name} ${f.name}\u2019nden istifa etti.` });
+  return null;
+}
 function foundParty(w, p, name, ideology, axes) {
   const n2 = name.trim().slice(0, 30);
   if (n2.length < 3) return "Parti ad\u0131 en az 3 harf.";
@@ -1602,6 +1650,16 @@ function donate(w, p, amount) {
   if (!f) return "\xD6nce bir partiye \xFCye olun.";
   if (!transfer(w, p.id, acc(f), amount, `${f.name} ba\u011F\u0131\u015F\u0131`)) return "Kesenizde o kadar yok.";
   f.standing[p.id] = clamp((f.standing[p.id] ?? 50) + Math.min(10, amount / 5), 0, 100);
+  return null;
+}
+function meeting(w, p) {
+  const f = facOf(w, p.faction);
+  if (!f) return "\xD6nce bir partiye \xFCye olun.";
+  const c = p.cs ??= {};
+  if (c.noted?.["ocak"] === w.day) return "Bug\xFCn toplant\u0131ya kat\u0131ld\u0131n\u0131z.";
+  (c.noted ??= {})["ocak"] = w.day;
+  f.standing[p.id] = clamp((f.standing[p.id] ?? 50) + 3, 0, 100);
+  if (isPlayer2(p)) itibar(w, p, 1, `${f.name} Ocak toplant\u0131s\u0131`);
   return null;
 }
 function partyDay(w, propose2) {
@@ -1699,7 +1757,7 @@ function audit(w) {
   const out = Object.entries(tot).filter(([k]) => k.startsWith("-")).reduce((a2, [, v]) => a2 + v, 0);
   const top = Object.entries(tot).filter(([k]) => k.startsWith("-")).sort((a2, b2) => b2[1] - a2[1]).slice(0, 2).map(([k, v]) => `${k.slice(1)} ${Math.round(v)} D`).join(", ");
   const net = Math.round((inc - out) / Math.max(1, book.length));
-  const q = `Soru \xF6nergesi (${opp.name}): Hazine son ${book.length} g\xFCnde g\xFCnde ${net >= 0 ? "+" : ""}${net} D. Para nereye gidiyor?`;
+  const q = `Soru \xF6nergesi (${opp.name}): Hazine son ${book.length} g\xFCnde g\xFCnl\xFCk ortalama ${net >= 0 ? "+" : ""}${net} D. Para nereye gidiyor?`;
   const a = `Saray\u2019\u0131n cevab\u0131: En b\xFCy\xFCk giderler ${top || "\u2014"}. Hazinede ${Math.round(w.treasury)} D var${net < 0 ? "; harcamalar g\xF6zden ge\xE7irilecek" : ""}.`;
   (w.gnews ??= []).push({ day: w.day, text: `${q} ${a}` });
   w.meclis.log.push({ day: w.day, text: `\u2753 ${q} \u2014 ${a}` });
@@ -1894,7 +1952,8 @@ function endG(w, g) {
   const good = d.better === "down" ? after < g.before : after > g.before;
   const same = Math.abs(after - g.before) < 5e-3;
   const verb = same ? "de\u011Fi\u015Fmedi" : after < g.before ? "indi" : "\xE7\u0131kt\u0131";
-  const text = same ? `Genelge \u201C${d.label}\u201D bitti: ${d.what} ${fmtN(after)} ${d.unit} ile de\u011Fi\u015Fmedi.` : `Genelge \u201C${d.label}\u201D bitti: ${good ? "genelge sayesinde" : "genelgeye ra\u011Fmen"} ${d.what} ${fmtN(g.before)} ${d.unit}\u2019den ${fmtN(after)} ${d.unit}\u2019ye ${verb}.`;
+  const q = (n2) => d.unit === "%" ? `%${fmtN(n2)}` : `${fmtN(n2)} ${d.unit}`;
+  const text = same ? `Genelge \u201C${d.label}\u201D bitti: ${d.what} ${q(after)}, de\u011Fi\u015Fmedi.` : `Genelge \u201C${d.label}\u201D bitti: ${d.what} ${q(g.before)} \u2192 ${q(after)} (${verb}; ${good ? "genelge i\u015Fe yarad\u0131" : "genelgeye ra\u011Fmen"}).`;
   log(w, `\u{1F4DC} ${text}`);
   (w.gnews ??= []).push({ day: w.day, text });
   g.result = same ? 0 : good ? 1 : -1;
@@ -1927,7 +1986,7 @@ var MITING_COST = 5;
 var PARTY_POSTER = 10;
 var SMEAR_EXPOSE = 0.3;
 var E = (w) => w.election;
-var isPlayer2 = (p) => !!p.playerId && !p.npc;
+var isPlayer3 = (p) => !!p.playerId && !p.npc;
 var symp = (w, cand, voter, d) => {
   const s = E(w).symp ??= {};
   const k = `${cand}|${voter}`;
@@ -1938,6 +1997,13 @@ var campaigning = (w) => {
   return ph === "aday" || ph === "propaganda";
 };
 var isCand = (w, p) => E(w).candidates.includes(p.id);
+function setVaat(w, p, kinds) {
+  if (!isCand(w, p)) return "\xD6nce aday olun.";
+  const ks = [...new Set(kinds)].filter(isGKind).slice(0, 3);
+  if (!ks.length) return "1\u20133 vaat se\xE7in.";
+  (E(w).vaat ??= {})[p.id] = ks;
+  return null;
+}
 function npcVaat(w, p) {
   const f = facOf(w, p.faction);
   const pool = f?.program?.length ? [...f.program] : ["ambar", "asevi", "vergiIndirim", "saglik", "yol"];
@@ -2059,11 +2125,11 @@ function campaignDay(w, now) {
   for (const id of e.candidates) {
     const c = findPerson(w, id);
     if (!c) continue;
-    if (!e.vaat?.[id] && !isPlayer2(c)) npcVaat(w, c);
+    if (!e.vaat?.[id] && !isPlayer3(c)) npcVaat(w, c);
   }
   if (ph === "propaganda") for (const id of e.candidates) {
     const c = findPerson(w, id);
-    if (!c || isPlayer2(c) || !chance(w, 0.35)) continue;
+    if (!c || isPlayer3(c) || !chance(w, 0.35)) continue;
     miting(w, c, now);
   }
   for (const f of w.meclis.factions) if (ph === "propaganda" && (f.kasa ?? 0) > 40 && chance(w, 0.5)) {
@@ -3777,12 +3843,14 @@ function borrow(w, p, amount) {
   const s = sarraf(w);
   if (!s) return "Sarraf yok.";
   if (w.loans.some((l) => l.debtor === p.id)) return "\xD6nce eski borcunuzu \xF6deyin.";
-  const max = Math.min(150, Math.max(20, s.money * 0.3));
+  const trust = s.din >= 60 && p.din >= 60 ? 1.3 : s.din >= 60 && p.din < 30 ? 0.7 : 1;
+  const rate = trust > 1 ? 0.08 : LOAN_RATE;
+  const max = Math.min(150 * trust, Math.max(20, s.money * 0.3 * trust));
   if (amount > max) return `Sarraf ${s.name} size en fazla ${Math.round(max)} Dinar verir.`;
   if (!transfer(w, s.id, p.id, amount, "sarraf borcu")) return "Sarraf\u0131n kasas\u0131 bo\u015F.";
-  const owed = Math.round(amount * (1 + LOAN_RATE) * 100) / 100;
+  const owed = Math.round(amount * (1 + rate) * 100) / 100;
   w.loans.push({ id: nextId(w, "K"), debtor: p.id, lender: s.id, amount: owed, due: w.day + LOAN_DAYS, day: w.day });
-  return `${s.name} ${amount} Dinar verdi. ${w.day + LOAN_DAYS}. g\xFCne kadar ${owed} Dinar \xF6demelisiniz (%${LOAN_RATE * 100} faiz).`;
+  return `${s.name} ${amount} Dinar verdi. ${w.day + LOAN_DAYS}. g\xFCne kadar ${owed} Dinar \xF6demelisiniz (%${Math.round(rate * 100)} faiz${trust > 1 ? ", dindar oldu\u011Funuz i\xE7in d\xFC\u015F\xFCk faiz" : ""}).`;
 }
 function repay(w, p, id) {
   const l = w.loans.find((x) => x.id === id && x.debtor === p.id);
@@ -4120,6 +4188,13 @@ function projects(w, kOnline) {
         p.mood = clamp(p.mood + 6);
         p.loyalty = clamp(p.loyalty + 3);
       }
+      if (/cami|mescit/i.test(pr.name)) {
+        for (const p of w.people) if (p.din >= 60) {
+          p.loyalty = clamp(p.loyalty + 4);
+          p.din = clamp(p.din + 1);
+        }
+        log(w, "\u{1F54C} Yeni cami a\xE7\u0131ld\u0131; dindar halk devlete minnettar.");
+      }
       const rest = pr.paid;
       if (rest > 0) transfer(w, `proje:${pr.id}`, "saray", rest, "proje artan\u0131");
     }
@@ -4147,7 +4222,21 @@ function campaign(w, now) {
   const ph = electionPhase(w).phase;
   const e = w.election;
   if (ph === "aday") {
-    for (const p of w.people) if (fullAI(p) && p.ambition > 60 && p.jailedDays === 0 && p.prof !== "naip" && p.prof !== "asker" && p.prof !== "bekci" && p.id !== w.kayzerId && !e.candidates.includes(p.id) && chance(w, 0.25) && e.candidates.length < 14) {
+    const wd = new Set(e.withdrawn ?? []);
+    for (const s of w.meclis.seats) {
+      const p = findPerson(w, s.holder);
+      if (p && canRun(w, p) && !wd.has(p.id) && !e.candidates.includes(p.id)) e.candidates.push(p.id);
+    }
+    if (w.day === electionDates(w).adayTo) for (const p of [...w.people].sort((a, b2) => b2.ambition - a.ambition)) {
+      if (e.candidates.length >= SEAT_COUNT + 4) break;
+      if (fullAI(p) && canRun(w, p) && !wd.has(p.id) && !e.candidates.includes(p.id) && yearsOf(w, p) >= CAND_AGE) {
+        e.candidates.push(p.id);
+        log(w, `${p.name} Meclis'e aday oldu.`, p.id);
+      }
+    }
+  }
+  if (ph === "aday") {
+    for (const p of w.people) if (fullAI(p) && p.ambition > 60 && p.jailedDays === 0 && p.prof !== "naip" && p.prof !== "asker" && p.prof !== "bekci" && p.id !== w.kayzerId && !e.candidates.includes(p.id) && chance(w, 0.25) && e.candidates.length < SEAT_COUNT + 8 && !(e.withdrawn ?? []).includes(p.id)) {
       e.candidates.push(p.id);
       log(w, `${p.name} Meclis'e aday oldu.`, p.id);
     }
@@ -4411,6 +4500,18 @@ startIsyanHook.fn = startIsyan;
 // src/sim/combatpos.ts
 var SAIL_MS = 45e3;
 var LIMAN_DOCK = { x: 36, y: 47.2 };
+var M_PER_TILE = 1.2;
+var BODY_R_M = 0.25;
+var MELEE_GAP_M = 0.5;
+var MELEE_TILES = (MELEE_GAP_M + 2 * BODY_R_M) / M_PER_TILE;
+var REACH_SLACK = 0.1;
+var LIMAN_X = 36;
+var WAVE_MS = 5e3;
+var WAVE_SIZE = 3;
+var shipCount = (troops) => Math.max(3, Math.ceil(troops / 6));
+function berth(i, ships) {
+  return { x: LIMAN_X - 7 + i * (14 / Math.max(1, ships - 1)), y: 49.6 + i % 2 * 1.3 };
+}
 function foePos(f, now) {
   return walkPos(f.walk, now).pt;
 }
@@ -4425,9 +4526,9 @@ function engagedPos(w, id, now) {
   if (!f) return null;
   const fp = foePos(f, now);
   const k = id.charCodeAt(id.length - 1) % 5 - 2;
-  const tx = fp.x + 0.9 * (k >= 0 ? 1 : -1), ty = fp.y + k * 0.2;
+  const tx = fp.x + 0.7 * (k >= 0 ? 1 : -1), ty = fp.y + k * 0.08;
   const d = Math.hypot(tx - a.fx, ty - a.fy);
-  const dur = Math.max(300, d / 2.8 * 1e3);
+  const dur = Math.max(300, d / 2.2 * 1e3);
   const t = Math.min(1, Math.max(0, (now - a.at) / dur));
   return { x: a.fx + (tx - a.fx) * t, y: a.fy + (ty - a.fy) * t, moving: t < 1 };
 }
@@ -5818,8 +5919,10 @@ var RAID_MAX_MS = 6 * 6e4;
 var WAR_MAX_MS = 9 * 6e4;
 var FOE_HP = { eskiya: 100, macar: 100 };
 var FOE_SPEED = { eskiya: 2.3, macar: 1.7 };
-var MELEE = 1.6;
+var MELEE = MELEE_TILES;
 var BOW_RANGE = 7;
+var BOW_MAX = 9;
+var AIM_R = 1.3;
 var ENTRY = [[{ x: -4, y: 13.5 }, { x: 1.5, y: 13.5 }], [{ x: 104, y: 20.5 }, { x: 98, y: 20.5 }], [{ x: -4, y: 29.5 }, { x: 1.5, y: 29.5 }], [{ x: 104, y: 35.5 }, { x: 98, y: 35.5 }], [{ x: 6.5, y: -4 }, { x: 6.5, y: 1.5 }], [{ x: 92.5, y: -4 }, { x: 92.5, y: 1.5 }], [{ x: -4, y: 20.5 }, { x: 1.5, y: 20.5 }], [{ x: 104, y: 13.5 }, { x: 98, y: 13.5 }]];
 var MEYDAN2 = { x: 36, y: 30 };
 var fighter = (p) => isUniformed(p) && p.jailedDays === 0 && p.exiledDays === 0 && !p.captive && !(p.wounded && p.health <= 20) && p.health > 20;
@@ -5890,7 +5993,7 @@ function assignFighters(w, c, placed, t) {
     if (!p || !fighter(p)) delete c.assign[id];
   }
 }
-function hurt(w, c, p, dmg, by, wl, at, t) {
+function hurt(w, c, p, dmg, by, wl, at, t, src) {
   const shield = (arms(p).kalkan ?? 0) > 0;
   const d = Math.max(3, Math.round(dmg - (shield ? SHIELD_BLOCK * 0.6 : 0)));
   p.health = clamp(p.health - d);
@@ -5899,7 +6002,7 @@ function hurt(w, c, p, dmg, by, wl, at, t) {
     if (p.health < 5) p.health = 5;
     if (p.health <= 30) p.wounded = true;
   }
-  hit(c, { at: t, x: at.x, y: at.y, dmg: d, to: p.id, toName: p.name, by, w: wl, k: shield ? "block" : "hit" });
+  hit(c, { at: t, x: at.x, y: at.y, dmg: d, to: p.id, toName: p.name, by, w: wl, k: shield ? "block" : "hit", ...src ? { from: src.id, fx: src.x, fy: src.y, arrow: src.arrow } : {} });
   if (!player && p.health <= 20) {
     p.wounded = true;
     delete c.assign[p.id];
@@ -5925,20 +6028,58 @@ function foeKilled(w, c, _f, by) {
     if (by.playerId && !by.npc && transfer(w, "saray", by.id, 5, c.kind === "raid" ? "e\u015Fk\u0131ya \xF6d\xFCl\xFC" : "d\xFC\u015Fman askeri \xF6d\xFCl\xFC")) personal(w, by.playerId, `\u2694 ${c.kind === "raid" ? "Bir e\u015Fk\u0131yay\u0131" : "Bir d\xFC\u015Fman askerini"} yere serdiniz! \xD6d\xFCl: 5 D (hazineden).`);
   }
 }
-function attackFoe(w, me, foeId, now) {
+function attackFoe(w, me, foeId, now, aim) {
   const c = w.combat;
-  const f = c?.foes.find((x) => x.id === foeId && x.hp > 0);
-  if (!c || !f) return { ok: false, msg: "Hedef yok (\xF6lm\xFC\u015F ya da gitmi\u015F)." };
+  if (!c) return { ok: false, msg: "Hedef yok (\xF6lm\xFC\u015F ya da gitmi\u015F)." };
   if (me.jailedDays > 0) return { ok: false, msg: "Zindandas\u0131n\u0131z." };
   if (me.health <= 10) return { ok: false, msg: "\xC7ok a\u011F\u0131r yaral\u0131s\u0131n\u0131z; sava\u015Famazs\u0131n\u0131z. Hekime gidin." };
   const wp = weaponInHand(me);
   if (!wp) return { ok: false, msg: bestWeapon(me) ? "\xD6nce silah\u0131n\u0131z\u0131 se\xE7in (alttaki h\u0131zl\u0131 \xE7ubuk) \u2013 k\u0131n\u0131nda silahla vurulmaz." : "Silah\u0131n\u0131z yok. Demirci\u2019den (Zanaat At\xF6lyesi) k\u0131l\u0131\xE7, han\xE7er ya da yay al\u0131n." };
   if (now - (me.atkAt ?? 0) < 1100) return { ok: false, msg: "" };
   const q = placePeople(w, now).find((x) => x.p.id === me.id);
+  const from = q ? { x: q.x, y: q.y } : null;
+  const ashore = (x) => x.hp > 0 && now >= x.walk.t0;
+  if (wp === "yay" && aim && from) {
+    const a = arms(me);
+    if ((a.ok ?? 0) <= 0) return { ok: false, msg: "Okunuz kalmad\u0131 \u2013 Demirci\u2019den ok al\u0131n." };
+    let ax = aim.x, ay = aim.y;
+    const dist2 = Math.hypot(ax - from.x, ay - from.y);
+    if (dist2 > BOW_MAX) {
+      ax = from.x + (ax - from.x) * BOW_MAX / dist2;
+      ay = from.y + (ay - from.y) * BOW_MAX / dist2;
+    }
+    me.atkAt = now;
+    (c.fought ??= {})[me.id] ??= 0;
+    a.ok = Math.max(0, (a.ok ?? 0) - 1);
+    const cand = c.foes.filter(ashore).map((x) => ({ f: x, d: Math.hypot(foePos(x, now).x - ax, foePos(x, now).y - ay) })).filter((x) => x.d <= AIM_R).sort((x, y) => x.d - y.d)[0];
+    const arrow = { from: me.id, fx: from.x, fy: from.y, arrow: true };
+    if (!cand || rand(w) > 0.9 - 0.3 * (cand.d / AIM_R)) {
+      hit(c, { at: now, x: ax, y: ay, dmg: 0, to: cand?.f.id ?? "-", toName: "bo\u015Fluk", by: me.name, w: ARM_LABEL[wp], k: "miss", ...arrow });
+      return { ok: true, msg: cand ? "Ok \u0131skalad\u0131!" : "Ok bo\u015Fa d\xFC\u015Ft\xFC \u2013 hedefin \xFCst\xFCne ni\u015Fan al\u0131n." };
+    }
+    const f2 = cand.f;
+    const fp2 = foePos(f2, now);
+    const kind2 = f2.kind === "eskiya" ? "e\u015Fk\u0131ya" : "d\xFC\u015Fman askeri";
+    const dmg2 = Math.round(ARM_DMG[wp] * fightMul(me, w) * skillMul(me) * (0.85 + rand(w) * 0.3));
+    f2.hp = Math.max(0, f2.hp - dmg2);
+    hit(c, { at: now, x: fp2.x, y: fp2.y, dmg: dmg2, to: f2.id, toName: kind2, by: me.name, w: ARM_LABEL[wp], k: f2.hp <= 0 ? "kill" : "hit", ...arrow });
+    if (f2.hp <= 0) {
+      foeKilled(w, c, f2, me);
+      return { ok: true, msg: `${kind2[0].toUpperCase()}${kind2.slice(1)} \xF6ld\xFC!` };
+    }
+    return { ok: true, msg: `\u{1F3F9} Ok isabet etti (\u2212${dmg2}).` };
+  }
+  const f = c.foes.find((x) => x.id === foeId && ashore(x));
+  if (!f) return { ok: false, msg: "Hedef yok (\xF6lm\xFC\u015F ya da gitmi\u015F)." };
   const fp = foePos(f, now);
-  const d = q ? Math.hypot(q.x - fp.x, q.y - fp.y) : 0;
+  const d = from ? Math.hypot(from.x - fp.x, from.y - fp.y) : 0;
   const range = wp === "yay" ? BOW_RANGE : MELEE;
-  if (rules.reach && d > range + 0.3) return { ok: false, msg: wp === "yay" ? `Menzil d\u0131\u015F\u0131nda (${d.toFixed(1)} kare; yay ${BOW_RANGE}).` : "\xC7ok uzak \u2013 yan\u0131na gidin (k\u0131l\u0131\xE7/han\xE7er yak\u0131n d\xF6v\xFC\u015F)." };
+  if (rules.reach && wp === "yay" && d > range + 0.3) return { ok: false, msg: `Menzil d\u0131\u015F\u0131nda (${d.toFixed(1)} kare; yay ${BOW_RANGE}).` };
+  if (rules.reach && wp !== "yay" && d > MELEE_TILES + REACH_SLACK) {
+    me.atkAt = now;
+    hit(c, { at: now, x: fp.x, y: fp.y, dmg: 0, to: f.id, toName: "bo\u015Fluk", by: me.name, w: ARM_LABEL[wp], k: "miss", from: me.id, ...from ? { fx: from.x, fy: from.y } : {} });
+    return { ok: true, msg: "" };
+  }
   me.atkAt = now;
   (c.fought ??= {})[me.id] ??= 0;
   if (wp === "yay") {
@@ -5946,13 +6087,14 @@ function attackFoe(w, me, foeId, now) {
     a.ok = Math.max(0, (a.ok ?? 0) - 1);
   }
   const kind = f.kind === "eskiya" ? "e\u015Fk\u0131ya" : "d\xFC\u015Fman askeri";
+  const src = from ? { from: me.id, fx: from.x, fy: from.y, arrow: wp === "yay" } : { from: me.id };
   if (rand(w) > (wp === "yay" ? 0.7 : 0.85)) {
-    hit(c, { at: now, x: fp.x, y: fp.y, dmg: 0, to: f.id, toName: kind, by: me.name, w: ARM_LABEL[wp], k: "miss" });
+    hit(c, { at: now, x: fp.x, y: fp.y, dmg: 0, to: f.id, toName: kind, by: me.name, w: ARM_LABEL[wp], k: "miss", ...src });
     return { ok: true, msg: "Iska!" };
   }
   const dmg = Math.round(ARM_DMG[wp] * fightMul(me, w) * skillMul(me) * (0.85 + rand(w) * 0.3));
   f.hp = Math.max(0, f.hp - dmg);
-  hit(c, { at: now, x: fp.x, y: fp.y, dmg, to: f.id, toName: kind, by: me.name, w: ARM_LABEL[wp], k: f.hp <= 0 ? "kill" : "hit" });
+  hit(c, { at: now, x: fp.x, y: fp.y, dmg, to: f.id, toName: kind, by: me.name, w: ARM_LABEL[wp], k: f.hp <= 0 ? "kill" : "hit", ...src });
   if (f.hp <= 0) {
     foeKilled(w, c, f, me);
     return { ok: true, msg: `${kind[0].toUpperCase()}${kind.slice(1)} \xF6ld\xFC!` };
@@ -5969,7 +6111,13 @@ function step(w, c, t, end) {
   if (c.kind === "war" && !c.spawned && t >= c.spawnAt) {
     c.spawned = true;
     const n2 = c.troops ?? w.foreign?.troops ?? 12;
-    for (let i = 0; i < n2; i++) c.foes.push({ id: `M${t % 1e5}-${i}`, kind: "macar", hp: FOE_HP.macar, max: FOE_HP.macar, bow: i % 3 === 0, walk: stand({ x: LIMAN_DOCK.x - 5 + i % 10 * 1.1, y: LIMAN_DOCK.y - 0.4 - Math.floor(i / 10) * 0.8 }, t) });
+    const ships = shipCount(n2);
+    for (let i = 0; i < n2; i++) {
+      const b2 = berth(i % ships, ships);
+      const t0 = t + Math.floor(i / WAVE_SIZE) * WAVE_MS + i % WAVE_SIZE * 700;
+      const shore = { x: Math.max(LIMAN_DOCK.x - 6, Math.min(LIMAN_DOCK.x + 6, b2.x + (i % 3 - 1) * 0.5)), y: LIMAN_DOCK.y - 0.4 - i % 2 * 0.5 };
+      c.foes.push({ id: `M${t % 1e5}-${i}`, kind: "macar", hp: FOE_HP.macar, max: FOE_HP.macar, bow: i % 3 === 0, walk: { path: [{ x: b2.x, y: b2.y - 0.5 }, shore], t0, speed: 1.3 }, pathAt: t0 + 2500 });
+    }
     if (w.foreign) w.foreign.alive = n2;
   }
   if (!c.spawned) return;
@@ -5983,12 +6131,12 @@ function step(w, c, t, end) {
     const q = placed.get(id);
     if (!p || !f || !q || f.hp <= 0) continue;
     const fp = foePos(f, t);
-    if (Math.hypot(q.x - fp.x, q.y - fp.y) > MELEE + 0.2) continue;
+    if (Math.hypot(q.x - fp.x, q.y - fp.y) > MELEE + REACH_SLACK) continue;
     if (rand(w) > (c.kind === "raid" ? 0.028 : 0.045)) continue;
     const wp = bestWeapon(p) ?? "kilic";
     const dmg = Math.round(ARM_DMG[wp] * 0.5 * (0.8 + rand(w) * 0.4));
     f.hp = Math.max(0, f.hp - dmg);
-    hit(c, { at: t, x: fp.x, y: fp.y, dmg, to: f.id, toName: f.kind === "eskiya" ? "e\u015Fk\u0131ya" : "d\xFC\u015Fman", by: p.name, w: ARM_LABEL[wp], k: f.hp <= 0 ? "kill" : "hit" });
+    hit(c, { at: t, x: fp.x, y: fp.y, dmg, to: f.id, toName: f.kind === "eskiya" ? "e\u015Fk\u0131ya" : "d\xFC\u015Fman", by: p.name, w: ARM_LABEL[wp], k: f.hp <= 0 ? "kill" : "hit", from: p.id, fx: q.x, fy: q.y, arrow: wp === "yay" });
     if (f.hp <= 0) foeKilled(w, c, f, p);
   }
   for (const f of c.foes) {
@@ -6004,7 +6152,7 @@ function step(w, c, t, end) {
       if (rand(w) < (f.bow ? 0.08 : 0.1)) {
         const base = f.kind === "eskiya" ? 13 : 14;
         const dmg = Math.round(base * (0.7 + rand(w) * 0.6));
-        hurt(w, c, tg.p, dmg, f.kind === "eskiya" ? "E\u015Fk\u0131ya" : `${w.foreign?.name ?? "D\xFC\u015Fman"} askeri`, f.bow ? "ok" : "k\u0131l\u0131\xE7", { x: tg.x, y: tg.y }, t);
+        hurt(w, c, tg.p, dmg, f.kind === "eskiya" ? "E\u015Fk\u0131ya" : `${w.foreign?.name ?? "D\xFC\u015Fman"} askeri`, f.bow ? "ok" : "k\u0131l\u0131\xE7", { x: tg.x, y: tg.y }, t, { id: f.id, x: pos.x, y: pos.y, arrow: f.bow });
         if (f.kind === "eskiya" && tg.p.playerId && !tg.p.npc && tg.p.health <= 25 && !(f.robbed ?? []).includes(tg.p.id)) {
           f.robbed = [...f.robbed ?? [], tg.p.id];
           const take = Math.round(tg.p.money * robShare(tg.p) * 100) / 100;
@@ -6715,7 +6863,7 @@ var ASKER_LABEL = ["Acemi er", "Er", "Onba\u015F\u0131", "\xC7avu\u015F", "Y\xFC
 var ASKER_WAGE = [0.5, 1, 1.3, 1.6, 2.5, 3];
 var ITIBAR_START = 10;
 var STATE = ["memur", "tahsildar", "bekci", "savci", "hakim", "asker", "hoca", "imam"];
-var isPlayer3 = (p) => !!p.playerId && !p.npc;
+var isPlayer4 = (p) => !!p.playerId && !p.npc;
 var tell3 = (w, p, msg) => {
   if (p.playerId) personal(w, p.playerId, msg);
 };
@@ -6737,7 +6885,7 @@ function itibar(w, p, d, why) {
   }
   p.itibar = Math.round(clamp(v, 0, 100) * 10) / 10;
   note(w, p, "itibar", p.itibar - before, why);
-  if (isPlayer3(p) && Math.abs(d) >= 1) tell3(w, p, `${d > 0 ? "\u2B50" : "\u26A0\uFE0F"} \u0130tibar ${d > 0 ? "+" : ""}${Math.round(d)}: ${why} (\u015Fimdi ${Math.round(p.itibar)})`);
+  if (isPlayer4(p) && Math.abs(d) >= 1) tell3(w, p, `${d > 0 ? "\u2B50" : "\u26A0\uFE0F"} \u0130tibar ${d > 0 ? "+" : ""}${Math.round(d)}: ${why} (\u015Fimdi ${Math.round(p.itibar)})`);
 }
 function itibarPriceMul(p) {
   if (!p || p.npc !== false && !p.playerId) return 1;
@@ -6750,8 +6898,8 @@ function rankOf(p) {
 function setRank(w, p, r, why) {
   const up = idx2(r) > idx2(rankOf(p));
   p.yol = r;
-  if (isPlayer3(p) || idx2(r) >= idx2("usta")) log(w, `${up ? "\u2B06\uFE0F" : "\u2B07\uFE0F"} ${p.name} art\u0131k ${MAIN_LABEL[r]} (${why}).`, p.id);
-  if (isPlayer3(p)) tell3(w, p, `${up ? "\u{1F389} Y\xFCkseldiniz" : "\u2B07\uFE0F D\xFC\u015Ft\xFCn\xFCz"}: ${MAIN_LABEL[r]}. ${why}.`);
+  if (isPlayer4(p) || idx2(r) >= idx2("usta")) log(w, `${up ? "\u2B06\uFE0F" : "\u2B07\uFE0F"} ${p.name} art\u0131k ${MAIN_LABEL[r]} (${why}).`, p.id);
+  if (isPlayer4(p)) tell3(w, p, `${up ? "\u{1F389} Y\xFCkseldiniz" : "\u2B07\uFE0F D\xFC\u015Ft\xFCn\xFCz"}: ${MAIN_LABEL[r]}. ${why}.`);
 }
 function demote(w, p, n2, why) {
   if (p.id === w.kayzerId) return;
@@ -6762,7 +6910,7 @@ function demote(w, p, n2, why) {
       return;
     }
     p.askerRank = r2;
-    if (isPlayer3(p)) tell3(w, p, `\u2B07\uFE0F R\xFCtbeniz d\xFC\u015Ft\xFC: ${ASKER_LABEL[r2]} (${why}).`);
+    if (isPlayer4(p)) tell3(w, p, `\u2B07\uFE0F R\xFCtbeniz d\xFC\u015Ft\xFC: ${ASKER_LABEL[r2]} (${why}).`);
     log(w, `${p.name} ${ASKER_LABEL[r2]} r\xFCtbesine d\xFC\u015F\xFCr\xFCld\xFC (${why}).`, p.id);
     return;
   }
@@ -6819,7 +6967,7 @@ function nextReqs(w, p) {
   }
 }
 function komutanPlayer(w, me) {
-  return w.people.find((x) => x !== me && x.prof === "asker" && (x.askerRank ?? 0) >= 5 && isPlayer3(x));
+  return w.people.find((x) => x !== me && x.prof === "asker" && (x.askerRank ?? 0) >= 5 && isPlayer4(x));
 }
 var CGOALS = {
   dilenci: [{ id: "d-tok", text: "3 g\xFCn a\xE7 kalma", have: (_w, p) => cs2(p).notHungry ?? 0, need: 3, money: 3, it: 2 }, { id: "d-para", text: "10 Dinar biriktir", have: (_w, p) => p.money, need: 10, money: 2, it: 1 }],
@@ -6842,13 +6990,13 @@ function payGoals(w, p) {
     g[x.id] = true;
     if (x.money > 0 && w.treasury > 500) transfer(w, "saray", p.id, x.money, `hedef \xF6d\xFCl\xFC (${x.text})`);
     if (x.it) itibar(w, p, x.it, `hedef: ${x.text}`);
-    if (isPlayer3(p)) tell3(w, p, `\u{1F3AF} Hedef tamam: ${x.text} (+${x.money} D, +${x.it} itibar)`);
+    if (isPlayer4(p)) tell3(w, p, `\u{1F3AF} Hedef tamam: ${x.text} (+${x.money} D, +${x.it} itibar)`);
   }
 }
 function careerDay(w) {
   migrateCareer(w);
   for (const p of w.people) {
-    if (!isPlayer3(p)) continue;
+    if (!isPlayer4(p)) continue;
     const c = cs2(p);
     c.notHungry = p.hunger < 85 && p.meals > 0 ? (c.notHungry ?? 0) + 1 : 0;
     if (p.prof === "asker") c.service = (c.service ?? 0) + (p.job?.attDay === w.day ? 1 : 0);
@@ -6868,7 +7016,7 @@ function promote(w, p) {
     }
     p.askerRank = r2;
     log(w, `\u{1F396} ${p.name} terfi etti: ${ASKER_LABEL[r2]}.`, p.id);
-    if (isPlayer3(p)) tell3(w, p, `\u{1F396} Terfi! Art\u0131k ${ASKER_LABEL[r2]}s\u0131n\u0131z. Maa\u015F ${ASKER_WAGE[r2]}\xD7.`);
+    if (isPlayer4(p)) tell3(w, p, `\u{1F396} Terfi! Art\u0131k ${ASKER_LABEL[r2]}s\u0131n\u0131z. Maa\u015F ${ASKER_WAGE[r2]}\xD7.`);
     if (p.job) p.job.wage = soldierWage(w, r2);
     return;
   }
@@ -6879,7 +7027,7 @@ function promote(w, p) {
       p.work = "okul";
       p.job = stateJob(w, "hoca", "Okul hocas\u0131", "okul");
       log(w, `\u{1F4DA} ${p.name} hoca oldu.`, p.id);
-      if (isPlayer3(p)) tell3(w, p, "\u{1F4DA} Tebrikler, art\u0131k Hoca\u2019s\u0131n\u0131z: okulda maa\u015F al\u0131r, ders verirsiniz.");
+      if (isPlayer4(p)) tell3(w, p, "\u{1F4DA} Tebrikler, art\u0131k Hoca\u2019s\u0131n\u0131z: okulda maa\u015F al\u0131r, ders verirsiniz.");
       return;
     }
     askApproval(w, p, "kadi", `${p.name} kad\u0131l\u0131\u011Fa haz\u0131r (din ${Math.round(p.din)}, itibar ${Math.round(itibarOf(p))}).`);
@@ -6906,7 +7054,7 @@ function askApproval(w, p, what, text) {
   if ((cs2(p).noted?.[what] ?? -99) > w.day - 3) return;
   (cs2(p).noted ??= {})[what] = w.day;
   w.petitions.push({ id: nextId(w, "D"), fromId: p.id, kind: "unvan", text, day: w.day, expires: w.day + 3, status: "bekliyor", amount: 0, payload: what });
-  if (isPlayer3(p)) tell3(w, p, `\u{1F4DC} \u015Eartlar\u0131 tamamlad\u0131n\u0131z; ${what === "komutan" ? "Komutanl\u0131k" : what === "kadi" ? "Kad\u0131l\u0131k" : what === "soylu" ? "soyluluk" : "dan\u0131\u015Fmanl\u0131k"} i\xE7in Kayzer\u2019in onay\u0131 bekleniyor.`);
+  if (isPlayer4(p)) tell3(w, p, `\u{1F4DC} \u015Eartlar\u0131 tamamlad\u0131n\u0131z; ${what === "komutan" ? "Komutanl\u0131k" : what === "kadi" ? "Kad\u0131l\u0131k" : what === "soylu" ? "soyluluk" : "dan\u0131\u015Fmanl\u0131k"} i\xE7in Kayzer\u2019in onay\u0131 bekleniyor.`);
 }
 function approve(w, p, what) {
   if (what === "komutan" && p.prof === "asker") {
@@ -7033,7 +7181,7 @@ var shiftLen = (j) => (j.to - j.from + 24) % 24 || 24;
 function careerHour(w, now) {
   for (const p of w.people) {
     const j = p.job;
-    if (!j || !isPlayer3(p)) continue;
+    if (!j || !isPlayer4(p)) continue;
     if (j.attDay !== w.day && w.hour === j.from) {
       j.att = 0;
       j.attDay = w.day;
@@ -7069,7 +7217,7 @@ function endShift(w, p, j) {
       const u = findPerson(w, j.employerId);
       if (u) {
         u.itibar = clamp(itibarOf(u) + 0.5, 0, 100);
-        if (isPlayer3(u)) itibar(w, u, 1, `\xE7\u0131ra\u011F\u0131n\u0131z ${p.name} bir g\xFCn \xE7al\u0131\u015Ft\u0131`);
+        if (isPlayer4(u)) itibar(w, u, 1, `\xE7\u0131ra\u011F\u0131n\u0131z ${p.name} bir g\xFCn \xE7al\u0131\u015Ft\u0131`);
       }
       if (rankOf(p) === "isci" && c.ustaDays >= 3) promote(w, p);
     }
@@ -7128,7 +7276,7 @@ function expel2(w, p, why) {
   p.job = void 0;
   p.askerRank = void 0;
   log(w, `\u{1F6AB} ${p.name} ordudan at\u0131ld\u0131 (${why}).`, p.id);
-  if (isPlayer3(p)) tell3(w, p, `\u{1F6AB} Ordudan at\u0131ld\u0131n\u0131z: ${why}.`);
+  if (isPlayer4(p)) tell3(w, p, `\u{1F6AB} Ordudan at\u0131ld\u0131n\u0131z: ${why}.`);
 }
 function talim(w, p) {
   const c = cs2(p);
@@ -7172,7 +7320,7 @@ function combatRecord(w, kind, fighters, killers, won, onlineSoldiers) {
   }
   for (const id of onlineSoldiers) if (!fighters.includes(id)) {
     const p = findPerson(w, id);
-    if (p && p.prof === "asker" && isPlayer3(p)) {
+    if (p && p.prof === "asker" && isPlayer4(p)) {
       cs2(p).fled = (cs2(p).fled ?? 0) + 1;
       demote(w, p, 2, "bask\u0131ndan ka\xE7t\u0131");
     }
@@ -7214,7 +7362,7 @@ function readLesson(w, p) {
   c.read = (c.read ?? 0) + 1;
   if (c.read >= 3 && !c.literate) {
     c.literate = true;
-    if (isPlayer3(p)) tell3(w, p, "\u{1F4D6} Art\u0131k okuma-yazma biliyorsunuz.");
+    if (isPlayer4(p)) tell3(w, p, "\u{1F4D6} Art\u0131k okuma-yazma biliyorsunuz.");
   }
   p.din = clamp(p.din + 0.5);
   promote(w, p);
@@ -7241,7 +7389,7 @@ function migrateCareer(w) {
     if (p.prof === "asker") p.askerRank = p.xp >= 60 ? 3 : p.xp >= 20 ? 2 : 1;
     if (p.prof === "hoca" || p.prof === "imam") p.ilimRank = 1;
     if (p.prof === "hakim") p.ilimRank = 2;
-    if (isPlayer3(p) && !p.job) p.job = ownJob(w, p);
+    if (isPlayer4(p) && !p.job) p.job = ownJob(w, p);
     if (p.yol === "usta" || p.yol === "tuccar" || p.yol === "esraf") cs2(p).dukkan = true;
   }
 }
@@ -7364,7 +7512,8 @@ function buy(w, buyerAcc, good, qty, maxPrice = Infinity, opt = {}) {
   const traded = /* @__PURE__ */ new Set();
   for (const l of offers) {
     while (got < qty && l.qty > 0) {
-      const pay = Math.round((fixedWater ? Math.min(l.price, lawParam(w, "devletsuyu", 2)) : l.price) * imul * 100) / 100;
+      const pmul = bp?.faction && findPerson(w, l.sellerId)?.faction === bp.faction ? 0.97 : 1;
+      const pay = Math.round((fixedWater ? Math.min(l.price, lawParam(w, "devletsuyu", 2)) : l.price) * imul * pmul * 100) / 100;
       if (pay > maxPrice || balance(w, buyerAcc) < pay) return finishPoor();
       transfer(w, buyerAcc, l.sellerId, pay, `${good} al\u0131m\u0131`);
       if (fixedWater && l.price > pay && l.sellerId !== "dis") transfer(w, "saray", l.sellerId, l.price - pay, "su s\xFCbvansiyonu");
@@ -7768,6 +7917,8 @@ var KOMISYON_MIN = 200;
 var HAZINE_FLOOR = 300;
 var QUORUM_SHARE = 0.5;
 var PROPOSE_FEE = 4;
+var CAND_FEE = 30;
+var CAND_ITIBAR = 20;
 var CAND_AGE = 16;
 var COUNT_HOUR = 11;
 var BUILD = { cesme: ["\xC7e\u015Fme", 800], hamam: ["Hamam", 1500], kutuphane: ["K\xFCt\xFCphane", 1200], han: ["Kervansaray", 2e3] };
@@ -7791,7 +7942,8 @@ function profGroup(p) {
   return null;
 }
 var members = (w) => w.people.filter((p) => p.meclis);
-var mlog = (w, text, personId) => {
+var mlog = (w, text0, personId) => {
+  const text = tidy(text0);
   w.meclis.log.push({ day: w.day, text });
   if (w.meclis.log.length > 150) w.meclis.log.shift();
   log(w, `Meclis: ${text}`, personId);
@@ -8814,7 +8966,7 @@ function npcPropose(w, p) {
   const corrupt = w.ledger.filter((l) => (l.reason === "zimmet" || l.reason === "r\xFC\u015Fvet") && w.day - l.day < 15).map((l) => l.to);
   const off = w.people.filter((x) => STATE_PROFS.includes(x.prof) && x.honesty < 40);
   let r = "";
-  const recent = (k) => w.meclis.bills.some((b2) => b2.kind === k && (["tartisma", "oylama", "onay"].includes(b2.status) || w.day - b2.day < 5));
+  const recent = (k) => w.meclis.bills.some((b2) => b2.kind === k && (["tartisma", "oylama", "onay"].includes(b2.status) || w.day - b2.day < 5 || b2.status === "veto" && w.day - b2.day < 20));
   const budgetRejected = w.meclis.bills.filter((b2) => b2.kind === "butce" && b2.status === "ret").length;
   if (f === "cumhuriyetci" && w.regime === "imparatorluk" && !validateBill(w, "cumhuriyet", 0, "") && members(w).filter((m) => anayasaStance(w, m, { proposerId: p.id }) > 0.2).length >= ANAYASA_YES - 1) {
     propose(w, p, "cumhuriyet", 0, "");
@@ -11295,10 +11447,67 @@ function applyAction(w, playerId, a, now) {
       const r = sanction(w, b2, a.approve);
       return { ok: r.startsWith("Onay") || r.startsWith("Veto"), msg: r };
     }
-    case "joinFaction": {
-      if (!w.meclis.factions.some((f) => f.id === a.factionId)) return no("B\xF6yle bir parti yok.");
-      me.faction = a.factionId;
-      return ok2(`${w.meclis.factions.find((f) => f.id === a.factionId).name} \xFCyesisiniz.`);
+    case "joinFaction":
+    case "joinParty": {
+      const e = joinParty(w, me, a.factionId);
+      return e ? no(e) : ok2(`${w.meclis.factions.find((f) => f.id === a.factionId).name} \xFCyesisiniz. G\xFCnl\xFCk aidat 1 D parti kasas\u0131na gider.`);
+    }
+    // v2.0.2 campaign + party (player side of the S/U packages; NPCs already used them)
+    case "vaat": {
+      const e = setVaat(w, me, Array.isArray(a.kinds) ? a.kinds.map(String) : []);
+      return e ? no(e) : ok2("Vaatleriniz ilan edildi. Se\xE7menler ihtiya\xE7lar\u0131na g\xF6re tartar; se\xE7ilip \xF6nermezseniz itibar ve oy kaybedersiniz.");
+    }
+    case "canvass": {
+      const v = findPerson(w, a.personId);
+      if (!v || v.id === me.id) return no("Ki\u015Fi yok.");
+      const r = canvass(w, me, v);
+      return r.ok ? ok2(r.msg) : no(r.msg);
+    }
+    case "miting": {
+      const q = placeOf(w, me.id, now);
+      if (rules.reach && q && Math.hypot(q.x - MEYDAN.x, q.y - MEYDAN.y) > MITING_R) return no("Miting Meydan\u2019da yap\u0131l\u0131r \u2013 \xF6nce Meydan\u2019a y\xFCr\xFCy\xFCn.");
+      const r = miting(w, me, now, filterProfanity(String(a.text ?? "")).slice(0, 160));
+      return r.ok ? ok2(r.msg) : no(r.msg);
+    }
+    case "ikram": {
+      const v = findPerson(w, a.personId);
+      if (!v || v.id === me.id) return no("Ki\u015Fi yok.");
+      const k = a.kind === "para" || a.kind === "serbet" ? a.kind : "pilav";
+      const r = ikram(w, me, v, k, num(a.amount, 1, 100) ?? 5);
+      return r.ok ? ok2(r.msg) : no(r.msg);
+    }
+    case "partyPoster": {
+      const e = partyPoster(w, me);
+      return e ? no(e) : ok2("Parti afi\u015Fi as\u0131ld\u0131 (b\xFCt\xFCn parti adaylar\u0131na yarar).");
+    }
+    case "endorse": {
+      const v = findPerson(w, a.personId);
+      if (!v) return no("Ki\u015Fi yok.");
+      const e = endorse(w, me, v);
+      return e ? no(e) : ok2(`${v.name} adayl\u0131\u011F\u0131n\u0131 a\xE7\u0131k\xE7a desteklediniz.`);
+    }
+    case "smear": {
+      const v = findPerson(w, a.personId);
+      if (!v || v.id === me.id) return no("Ki\u015Fi yok.");
+      const r = smear(w, me, v);
+      return r.ok ? ok2(r.msg) : no(r.msg);
+    }
+    case "resignParty": {
+      const e = resignParty(w, me);
+      return e ? no(e) : ok2("Partinizden istifa ettiniz.");
+    }
+    case "foundParty": {
+      const id = ["saltanatci", "cumhuriyetci", "esnaf", "halkci"].includes(a.ideology) ? a.ideology : "halkci";
+      const e = foundParty(w, me, filterProfanity(String(a.name ?? "")), id);
+      return e ? no(e) : ok2("Partiniz kuruldu; genel ba\u015Fkan sizsiniz.");
+    }
+    case "donate": {
+      const e = donate(w, me, num(a.amount, 1, 1e4) ?? 0);
+      return e ? no(e) : ok2("Ba\u011F\u0131\u015F\u0131n\u0131z parti kasas\u0131na ge\xE7ti.");
+    }
+    case "ocak": {
+      const e = meeting(w, me);
+      return e ? no(e) : ok2("Ocak toplant\u0131s\u0131na kat\u0131ld\u0131n\u0131z (+parti itibar\u0131, +1 itibar).");
     }
     case "runForBaskan": {
       if (w.regime !== "cumhuriyet") return no("Ba\u015Fkanl\u0131k se\xE7imi sadece cumhuriyette yap\u0131l\u0131r.");
@@ -11314,8 +11523,23 @@ function applyAction(w, playerId, a, now) {
       if (me.id === w.kayzerId && w.regime === "imparatorluk") return no("Kayzer aday olamaz.");
       if (me.prof === "asker" || me.prof === "bekci") return no("Askerler ve bek\xE7iler Meclis\u2019e aday olamaz.");
       if (electionPhase(w).phase !== "aday") return no(`Adayl\u0131k d\xF6nemi de\u011Fil. ${electionPhase(w).label}.`);
-      if (!w.election.candidates.includes(me.id)) w.election.candidates.push(me.id);
-      return ok2(`Adays\u0131n\u0131z. Se\xE7im ${w.election.nextDay}. g\xFCn.`);
+      if (w.election.candidates.includes(me.id)) return ok2("Zaten adays\u0131n\u0131z.");
+      if (yearsOf(w, me) < CAND_AGE) return no(`Aday olmak i\xE7in en az ${CAND_AGE} ya\u015F\u0131nda olmal\u0131s\u0131n\u0131z.`);
+      if (itibarOf(me) < CAND_ITIBAR) return no(`Aday olmak i\xE7in itibar\u0131n\u0131z en az ${CAND_ITIBAR} olmal\u0131 (\u015Fu an ${Math.round(itibarOf(me))}).`);
+      if (!transfer(w, me.id, "saray", CAND_FEE, "adayl\u0131k harc\u0131")) return no(`Adayl\u0131k harc\u0131 ${CAND_FEE} Dinar \u2013 paran\u0131z yetmiyor.`);
+      w.election.withdrawn = (w.election.withdrawn ?? []).filter((x) => x !== me.id);
+      w.election.candidates.push(me.id);
+      log(w, `${me.name} Meclis'e aday oldu.`, me.id);
+      return ok2(`Adays\u0131n\u0131z (har\xE7 ${CAND_FEE} D). Se\xE7im ${w.election.nextDay}. g\xFCn.`);
+    }
+    case "withdrawCandidacy": {
+      const e = w.election;
+      if (!e.candidates.includes(me.id) && !me.meclis) return no("Aday de\u011Filsiniz.");
+      if (electionPhase(w).phase === "oylama") return no("Oylama g\xFCn\xFC adayl\u0131ktan \xE7ekilemezsiniz.");
+      e.candidates = e.candidates.filter((x) => x !== me.id);
+      e.withdrawn = [.../* @__PURE__ */ new Set([...e.withdrawn ?? [], me.id])];
+      log(w, `${me.name} adayl\u0131ktan \xE7ekildi.`, me.id);
+      return ok2("Adayl\u0131ktan \xE7ekildiniz.");
     }
     case "vote": {
       if (!w.election.candidates.includes(a.candidateId)) return no("Bu ki\u015Fi aday de\u011Fil.");
@@ -11905,7 +12129,7 @@ function applyAction(w, playerId, a, now) {
       return ok2(ransom(w, a.personId));
     }
     case "attack": {
-      const r = attackFoe(w, me, a.foeId, now);
+      const r = attackFoe(w, me, a.foeId, now, Number.isFinite(a.aimX) && Number.isFinite(a.aimY) ? { x: a.aimX, y: a.aimY } : null);
       return r.ok ? ok2(r.msg) : no(r.msg);
     }
     case "onboardDone": {
@@ -12168,7 +12392,7 @@ function applyAdmin(w, op) {
 
 // src/server/core.ts
 function drainChat(w) {
-  const out = w.chatOut ?? [];
+  const out = (w.chatOut ?? []).map((m) => ({ ...m, text: tidy(m.text) }));
   w.chatOut = [];
   return out;
 }
@@ -12185,7 +12409,7 @@ function act2(w, playerId, a, now, deferJudge = false) {
   migrateWorld(w);
   advanceWorld(w, now);
   realtime(w, now);
-  const r = applyAction(w, playerId, a, now);
+  const r = applyAction(w, playerId, a, now) ?? { ok: false, msg: "Bilinmeyen i\u015Flem." };
   if (a.t === "defense" && r.ok && !deferJudge) {
     const c = w.cases.find((x) => x.id === a.caseId);
     const last = c?.trial?.msgs.at(-1);

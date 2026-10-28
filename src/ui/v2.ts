@@ -17,7 +17,7 @@ import { assignSlot, hotbarSlots } from './controls';
 import { marketPrice } from '../sim/economy';
 
 export const APP_NAME = 'Medieval Empire';
-export const VERSION = 'v2.0.1';
+export const VERSION = 'v2.0.2';
 const EAT: Good[] = ['ekmek', 'et', 'balik', 'yumurta', 'sut', 'su'];
 
 /** 🎒 Çanta: carried weapons (draw / holster), food & water (use), and the house chest. */
@@ -100,15 +100,17 @@ export function eventOptions(kind: string, env: PopupEnv, close: () => void): HT
 export function eventTitle(kind: string): string { return `${ICON[kind] ?? '⚠'} ${TITLE[kind] ?? 'OLAY'}`; }
 
 export const WHATS_NEW: string[] = [
-  '🏛 Yeni Meclis ekranı: üstte hazine, hükümet, sonraki seçim; sekmeler Gündem / Teklif Ver / Geçmiş / Üyeler / Partiler / Seçim-Kampanya.',
-  '📊 Bütçe Komisyonu: 200 D ve üstü harcamalara “Hazine karşılar mı?” raporu. Hazinenin karşılayamadığı harcama ancak “Borçlanma” etiketiyle önerilir.',
-  '✍ Halk dilekçesi: herkes Meclis’te dilekçe açabilir; 20 imza toplanınca konu doğrudan gündeme girer. Etkileşimde “Dilekçemi imzalat”.',
-  '🗳 Gerçek sandık: seçim günü Meclis binasına yürüyüp oy verin. “Oyunuz kaydedildi”, canlı katılım oranı, oylar gizli.',
-  '⏳ “Oylama başladı, X saat kaldı” bildirimi ve sayaç; yeter sayı (16’da 9) uygulanıyor. Boş sandalyeler ara seçimle hemen doluyor.',
-  '📜 Yürürlükteki genelge ve kanunların bitiş günü görünür; yeni “Kanunu/genelgeyi kaldır” teklifi.',
-  '🗽 Cumhuriyet İlanı (anayasa): 14/16 evet, vicdan oyu (parti disiplini yok), Kayzer veto edemez.',
-  '🤖 Tek başına oynanabilir: NPC’ler seçim kampanyası yapıyor, parti kuruyor, dilekçe imzalıyor, iş arıyor, terfi ediyor, camiye gidiyor; Kayzer yokken naip vergi, ambar ve narhı yönetiyor ve bekleyen kararları zamanında onaylıyor ya da reddediyor.',
-  '🌾 Ekonomi düzeltmeleri: ekmek zinciri (çiftçi→değirmen→fırın) artık kopmuyor, esnaf kredisi, gerçek doğumlar, kıtlıkta göç tamamen durmuyor.',
+  '⚓ Çıkarma artık dalga dalga: askerler gemiden 3’erli gruplar halinde iniyor (“N asker daha gemiden iniyor”).',
+  '⚔ Kılıç ve hançer elde görünüyor; “Saldır” her an basılabilir ve savuruş animasyonu oynar. Yakın dövüş menzili 0,5 m (1 kare = 1,2 m); uzaktaki savuruş ıskalar.',
+  '🏹 Yay: “Saldır”ı basılı tutun → nişan çizgisi ve menzil (kare) görünür; joystick ile nişan alın, bırakınca ok uçar. Düşman okçularının okları da görünür.',
+  '💥 Vuruş geri bildirimi: hasar sayıları, beyaz parlama, ses ve sarsıntı, düşman can çubukları (azalırken iz bırakır). Macar askerleri kılıçla saldırıyor.',
+  '📉 Bütün çubuklar yumuşak: can, açlık, susuzluk, enerji anında zıplamadan yavaşça değişir.',
+  '🛠 Savaş sonrası donma giderildi: sunucu yoğunken bile dünya güncellenmeye devam eder.',
+  '🗳 Seçim kampanyası: vaat seçin, kapı kapı “Bana oy ver”, Meydan’da miting, pilav/şerbet ikramı, parti afişi, destek ve (riskli) kara propaganda. Seçim nabzı gazetede.',
+  '🎗 Partiler sekmesi: program, eksenler, mahalle desteği, parti kasası; Katıl, Ocak toplantısı, Bağış, İstifa, Parti kur. Pazar’da parti Ocakları, Göstergede parti grafiği.',
+  '📝 Adaylık: harç 30 D, itibar ve yaş şartı; milletvekilleri çekilmedikçe otomatik yeniden aday olur. Genelge teklifi artık katalogdan seçiliyor (harç 4 D butonda).',
+  '🎪 Panayır günü Pazar süsleniyor; Yer bul hedefe noktalı iz ve ekran kenarında ok gösterir; “Gir: …” düğmesi.',
+  '🕌 Dindarlar kıtlık ve salgında daha sabırlı; dindar sarraf dindara düşük faizle borç verir; yeni cami halkı memnun eder.',
 ];
 export function whatsNewModal(onClose: () => void): HTMLElement {
   const el = h('div', { class: 'modal whatsnew' }, h('div', { class: 'box' }, h('h2', {}, `✨ Neler yeni? (${VERSION})`), h('div', { class: 'stack' }, ...WHATS_NEW.map((t) => h('div', { class: 'msg' }, t))), h('button', { class: 'primary', onclick: () => { el.remove(); onClose(); } }, 'Harika!')));

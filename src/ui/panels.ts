@@ -1,3 +1,4 @@
+import { trait } from '../sim/piety';
 import { GENELGE, GKINDS, type GKind } from '../sim/genelge';
 import { rulerName } from '../sim/log';
 import { PROPOSE_FEE, CAND_FEE, CAND_ITIBAR, CAND_AGE } from '../sim/meclis';
@@ -54,7 +55,7 @@ export function personCard(c: Ctx, p: Person): HTMLElement {
   const friends = rel.filter(([, v]) => v > 20).slice(0, 3).map(([id]) => findPerson(w, id)?.name).filter(Boolean).join(', ');
   const foes = rel.filter(([, v]) => v < -20).slice(-3).map(([id]) => findPerson(w, id)?.name).filter(Boolean).join(', ');
   const box = h('div', {},
-    h('div', { class: 'row' }, avatar(p, 72), h('div', {}, h('h2', {}, p.name), h('div', { class: 'muted' }, officeOf(w, p), p.playerId ? ' · oyuncu' : ' · yapay vatandaş', p.jailedDays > 0 ? ' · ⛓ zindanda' : ''))),
+    h('div', { class: 'row' }, avatar(p, 72), h('div', {}, h('h2', {}, p.name), h('div', { class: 'muted' }, officeOf(w, p), p.playerId ? ' · oyuncu' : ' · yapay vatandaş', p.jailedDays > 0 ? ' · ⛓ zindanda' : ''), partyBadge(w, p))),
     h('div', { class: 'card' }, `💭 “${p.thought || '…'}”`),
     h('table', {},
       (() => { const an = p.animals; const lbl: Record<string, string> = { inek: 'İnek', koyun: 'Koyun', tavuk: 'Tavuk', at: 'At' }; const txt = an ? Object.entries(an).filter(([, n]) => n > 0).map(([k, n]) => `${lbl[k] ?? k} ${n}`).join(', ') : ''; if (!txt) return ''; const where = p.prof === 'hayvanci' ? 'Hayvan Pazarı ağılında' : p.farm ? 'çiftlikte' : 'evinin kapısında'; return h('tr', {}, h('td', {}, 'Hayvanlar'), h('td', {}, `${txt} (${where}${p.riding && (an?.at ?? 0) > 0 ? ' · atın üstünde' : ''}) `, mine && (an?.at ?? 0) > 0 && p.riding ? h('button', { class: 'sm', onclick: () => c.act({ t: 'ride', on: false }) }, 'İn') : '')); })(),
@@ -252,7 +253,7 @@ const VOTE_ICON: Record<VoteChoice, string> = { evet: '✅', hayir: '❌', cekim
 function billCard(c: Ctx, b: Bill, open: boolean): HTMLElement {
   const w = c.w; const t = tally(b); const prop = findPerson(w, b.proposerId);
   const status: Record<Bill['status'], string> = { tartisma: `görüşmede (oylama ${b.debateUntil + 1}. gün)`, oylama: `OYLAMADA (sonuç ${b.voteUntil}. gün sonu)`, onay: 'Kayzer onayı bekliyor', kabul: 'KABUL – yürürlükte', ret: 'RET', veto: 'VETO (kesin)', zamanasimi: 'düştü' };
-  const card = h('div', { class: 'card' }, h('b', {}, `${BILL_LABEL[b.kind]}: ${b.title}`), h('div', { class: 'muted' }, `Teklif: ${prop?.name ?? '?'} · ${status[b.status]} · ${t.evet}✅ ${t.hayir}❌ ${t.cekimser}➖`));
+  const card = h('div', { class: 'card' }, h('b', {}, `${BILL_LABEL[b.kind]}: ${b.title}`), h('div', { class: 'muted' }, `Teklif: ${prop?.name ?? '?'} · ${status[b.status]} · ${t.evet} evet · ${t.hayir} hayır · ${t.cekimser} çekimser`));
   if (b.status === 'oylama') card.append(h('div', { class: 'pill warn' }, `⏳ Oylama sürüyor: sayıma ${hoursToCount(w, b)} oyun saati kaldı · yeter sayı ${Math.floor(w.meclis.seats.length / 2) + 1}/${w.meclis.seats.length}`));
   if (b.komisyon) card.append(h('div', { class: `msg ${b.komisyon.ok ? '' : 'warn'}` }, `📊 ${b.komisyon.text}`));
   if (b.kind === 'cumhuriyet' && ['tartisma', 'oylama'].includes(b.status)) card.append(h('div', { class: 'bar' }, h('div', { style: `width:${Math.min(100, t.evet / ANAYASA_YES * 100)}%;background:#c9a227;height:8px` })), h('small', { class: 'muted' }, `${t.evet}/${ANAYASA_YES} evet`));
@@ -485,4 +486,11 @@ export function isyanBar(c: Ctx): HTMLElement | null {
   else if (me && i.rebels.includes(me.id)) box.append(' · siz asilerlesiniz ✊');
   box.append(h('div', { class: 'muted', style: 'font-size:12px' }, i.log.slice(-2).join(' · ')));
   return box;
+}
+
+/** v2.0.2 U11: party colour badge + trait word next to a person's name. */
+function partyBadge(w: World, p: Person): HTMLElement | string {
+  const f = p.faction ? w.meclis.factions.find((x) => x.id === p.faction) : undefined; const tr = trait(p);
+  if (!f && !tr) return '';
+  return h('div', { class: 'row', style: 'gap:6px;margin-top:2px' }, f ? h('span', { class: 'pbadge', style: `background:${f.color}` }, f.name) : '', tr ? h('small', { class: 'muted' }, tr) : '');
 }
