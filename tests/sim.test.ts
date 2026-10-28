@@ -78,8 +78,8 @@ describe('economy', () => {
     expect(w.kayzerId).toBe(w.founderPersonId);
     expect(Math.max(...w.stats.map((s) => s.cumhuriyet))).toBeLessThan(25);
   });
-  it('tyranny (30% tax → poverty, every bill vetoed) ends in a republic within 90 days', () => {
-    const { w } = runSim(90, 7, 'tyrant');
+  it('tyranny (30% tax → poverty, every bill vetoed) ends in a republic within 120 days (isyan needs 50% at cumhuriyetçilik ≥70)', () => {
+    const { w } = runSim(120, 7, 'tyrant');
     expect(w.regime).toBe('cumhuriyet');
     expect(w.kayzerId).not.toBe(w.founderPersonId);
     expect(w.kayzerId).not.toBeNull();

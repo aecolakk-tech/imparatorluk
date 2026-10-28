@@ -187,16 +187,16 @@ function renderHud(): void {
   const chips = hudChips(ctx()); // [clock, meals, water, health, mood, din, ...events]
   const events = chips.slice(m ? 6 : 1);
   const night = w.hour < 6 || w.hour >= 21;
-  const chip = (icon: string, text: string, tip: string, cls = ''): HTMLElement => h('span', { class: `stat${cls ? ' ' + cls : ''}`, title: tip }, ic(icon), h('span', {}, text));
+  const chip = (icon: string, text: string, tip: string, cls = ''): HTMLElement => h('span', { class: `stat${cls ? ' ' + cls : ''}`, title: tip, onclick: () => toast(tip) }, ic(icon), h('span', {}, text));
   hudEl.replaceChildren(
     h('div', { class: 'hud-l' },
       chip(night ? 'moon' : 'sun', `Gün ${w.day} · ${String(w.hour).padStart(2, '0')}:00`, '1 oyun günü = 6 gerçek dakika (1x)'),
       chip(SEASON_IC[season(w)]!, SEASON_LABEL[season(w)].replace(/^\S+\s/, ''), 'Mevsim'),
       ...(m ? [
-        meterI('heart', m.health, 'var(--red)', `Sağlık${m.wounded ? ' – yaralısınız, hekime gidin' : ''}`, m.health < 40 || m.wounded, 'hp'),
-        meterI('bread', 100 - m.hunger, 'var(--gold)', `Tokluk – açlık ${Math.round(m.hunger)}/100`, m.hunger >= 85, 'hunger'),
-        meterI('water', 100 - m.thirst, 'var(--blue)', `Su – susuzluk ${Math.round(m.thirst)}/100`, m.thirst >= 85, 'thirst'),
-        meterI('moon', m.energy ?? 80, '#b59cf0', `Enerji ${Math.round(m.energy ?? 80)}/100 – evinizde uyuyarak yenilenir`, (m.energy ?? 80) < 15, 'energy'),
+        meterI('heart', m.health, 'var(--red)', `❤️ Sağlık${m.wounded ? ' – yaralısınız, hekime gidin' : ' – hastalık/yara düşürür, hekim ve dinlenme iyileştirir'}`, m.health < 40 || m.wounded, 'hp'),
+        meterI('bread', 100 - m.hunger, 'var(--gold)', `🍞 Tokluk – açlık ${Math.round(m.hunger)}/100. Pazarda ya da evde yemek yiyin`, m.hunger >= 85, 'hunger'),
+        meterI('water', 100 - m.thirst, 'var(--blue)', `💧 Su – susuzluk ${Math.round(m.thirst)}/100. Kuyuda, evde ya da pazarda için`, m.thirst >= 85, 'thirst'),
+        meterI('moon', m.energy ?? 80, '#b59cf0', `🌙 Enerji (uyku) ${Math.round(m.energy ?? 80)}/100 – dışarıda saatte 4 düşer; evinizde dinlenince/uyuyunca dolar. 15’in altında mutluluğunuz düşer.`, (m.energy ?? 80) < 15, 'energy'),
         chip('coin', fmt(m.money), 'Keseniz'),
       ] : []),
       ruler ? chip('castle', fmt(w.treasury), 'Hazine') : '',
@@ -212,7 +212,7 @@ function renderHud(): void {
   iconify(hudEl); needAlerts(m);
 }
 function meterI(icon: string, v: number, color: string, tip: string, warn: boolean, key: string): HTMLElement {
-  return h('span', { class: `stat meter${warn ? ' warn' : ''}${flashKey === key && performance.now() < flashUntil ? ' flash' : ''}`, title: tip, 'data-k': key }, ic(icon), bar(v, color));
+  return h('span', { class: `stat meter${warn ? ' warn' : ''}${flashKey === key && performance.now() < flashUntil ? ' flash' : ''}`, title: tip, 'data-k': key, onclick: () => toast(tip) }, ic(icon), bar(v, color));
 }
 // v1.9: hunger / thirst alarms – one popup + vibration per threshold crossing (≤15 left), with a cooldown
 let flashKey = ''; let flashUntil = 0; const alarmArmed: Record<string, boolean> = { hunger: true, thirst: true }; const alarmAt: Record<string, number> = { hunger: -1e9, thirst: -1e9 };
@@ -585,7 +585,7 @@ async function tick(): Promise<void> {
     const mm = me(); if (localWalk && mm && mm.id === localWalk.id && gameNow() < walkEnd(localWalk.walk) + 15_000) mm.walk = localWalk.walk;
     if (first) { stat = buildStatic(world); const m = me(); const b = m ? world.buildings.find((x) => x.id === m.home) : undefined; if (b) { cam.x = b.x - canvas.width / (cam.z * T) / 2; cam.y = b.y - canvas.height / (cam.z * T) / 2; clampCam(); } }
     if (r.summary) modal(maecenas(r.summary));
-    renderDock(); events(first); trialPopup();
+    renderDock(); events(first); trialPopup(); disasterPopup();
   } catch (e) { console.warn('heartbeat', e); } finally { ticking = false; }
 }
 
@@ -615,9 +615,11 @@ function openCitizens(): void {
     const col = cols.find((c) => c[0] === citSort)!; list = list.sort((a, b) => { const x = col[2](a), y = col[2](b); return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'tr')) * citDir; });
     const avg = (f: (p: Person) => number): number => Math.round(list.reduce((s, p) => s + f(p), 0) / Math.max(1, list.length));
     box.append(h('div', { class: 'row' }, q, pf), h('div', { class: 'muted' }, `${list.length} kişi · ort. sağlık ${avg((p) => p.health)} · mutluluk ${avg((p) => p.mood)} · sadakat ${avg((p) => p.loyalty)} · cumhuriyetçilik ${avg((p) => p.republic)}`));
-    const t = h('table', { class: 'citizens' }, h('tr', {}, ...cols.map(([k, l]) => h('th', { style: 'cursor:pointer', onclick: () => { if (citSort === k) citDir = -citDir; else { citSort = k; citDir = k === 'name' || k === 'prof' || k === 'where' ? 1 : -1; } rerenderSheet(true); } }, `${l}${citSort === k ? (citDir > 0 ? ' ▲' : ' ▼') : ''}`))));
+    const MEAN: Record<string, string> = { health: '❤️ Sağlık (0–100): düşükse hasta/yaralı, hekime gitmeli.', mood: '😊 Mutluluk (0–100): açlık, yoksulluk, vergi düşürür.', loyalty: '🤝 Sadakat (0–100): tahta ve devlete bağlılık; düşükse emir dinlemez, isyana yatkın.', din: '🕌 Dindarlık (0–100): camiye gitme, vaaz ve tarikat etkisi.', republic: '🗽 Cumhuriyetçilik (0–100): 70 ve üstü olanlar isyana katılır; halkın %50’si 70+ olursa isyan başlar.', money: '👛 Kesesindeki para (Dinar).', where: '📍 Şu an nerede: bina, sokak, ev ya da zindan.', name: 'İsim · 🎮 = gerçek oyuncu.', prof: 'Meslek.' };
+    box.append(h('div', { class: 'row legend', style: 'flex-wrap:wrap;gap:4px' }, ...Object.entries(MEAN).filter(([k]) => k !== 'name' && k !== 'prof').map(([, txt]) => h('button', { class: 'sm', title: txt, onclick: () => toast(txt) }, `${txt.split(' ')[0]} ${txt.split(' ')[1]?.replace(/:$/, '') ?? ''}`)), h('span', { class: 'muted' }, '🎮 gerçek oyuncu · simgeye dokunun: açıklama')));
+    const t = h('table', { class: 'citizens' }, h('tr', {}, ...cols.map(([k, l]) => h('th', { style: 'cursor:pointer', title: MEAN[k] ?? '', onclick: () => { toast(MEAN[k] ?? l); if (citSort === k) citDir = -citDir; else { citSort = k; citDir = k === 'name' || k === 'prof' || k === 'where' ? 1 : -1; } rerenderSheet(true); } }, `${l}${citSort === k ? (citDir > 0 ? ' ▲' : ' ▼') : ''}`))));
     for (const p of list) t.append(h('tr', { style: 'cursor:pointer', onclick: () => openPersonSheet(p.id) }, h('td', {}, `${p.name}${p.playerId && !p.npc ? ' 🎮' : ''}`), h('td', {}, PROF_LABEL[p.prof]),
-      ...(['health', 'mood', 'loyalty', 'din', 'republic'] as const).map((k) => h('td', {}, bar(p[k], k === 'health' ? '#c8483a' : k === 'republic' ? '#4a7fd4' : k === 'loyalty' ? '#e8c14a' : k === 'din' ? '#8a6fd1' : '#5fae5a'), h('small', {}, ` ${Math.round(p[k])}`))),
+      ...(['health', 'mood', 'loyalty', 'din', 'republic'] as const).map((k) => h('td', { title: MEAN[k], onclick: (e: Event) => { e.stopPropagation(); toast(`${p.name}: ${MEAN[k]!.split(':')[0]} ${Math.round(p[k])}. ${MEAN[k]!.split(':').slice(1).join(':').trim()}`); } }, bar(p[k], k === 'health' ? '#c8483a' : k === 'republic' ? '#4a7fd4' : k === 'loyalty' ? '#e8c14a' : k === 'din' ? '#8a6fd1' : '#5fae5a'), h('small', {}, ` ${Math.round(p[k])}`))),
       h('td', {}, fmt(p.money)), h('td', {}, where(p))));
     void now; box.append(h('div', { style: 'overflow:auto;max-height:60vh' }, t)); return box;
   });
@@ -666,15 +668,34 @@ function soundscape(): void {
 let trialEl: HTMLElement | null = null; const trialSeen = new Set<string>((localStorage.getItem('imp-trial-seen') ?? '').split(',').filter(Boolean));
 const tKey = (id: string): string => `${world?.seed ?? 0}:${id}`; // case ids restart after a reset
 const markSeen = (id: string): void => { trialSeen.add(tKey(id)); localStorage.setItem('imp-trial-seen', [...trialSeen].slice(-60).join(',')); };
+/** v1.9.6: eyewitnesses, the summoned and volunteers speak in the trial chat. */
+function witnessBox(c: CourtCase, blamed: boolean): HTMLElement {
+  const wi = h('input', { maxlength: '300', placeholder: blamed ? 'Suçlamaya cevap verin…' : 'Ne gördünüz? Tanıklığınızı yazın…', style: 'flex:1' });
+  const go = (against: boolean): void => { void send({ t: 'witness', caseId: c.id, against, text: wi.value }).then(() => trialPopup()); wi.value = ''; };
+  return h('div', {}, h('div', { class: 'muted' }, blamed ? '❗ Sanık sizi suçladı; mahkemeye çağrıldınız.' : '👁 Tanıklık yap: sözünüz kararı etkiler.'), h('div', { class: 'row' }, wi),
+    h('div', { class: 'row' }, h('button', { class: 'danger', onclick: () => go(true) }, blamed ? 'Sanık yaptı' : 'Aleyhte tanıklık'), h('button', { class: 'primary', onclick: () => go(false) }, blamed ? 'Bilmiyorum, ben yapmadım' : 'Lehte tanıklık')));
+}
+let disasterSeen = Number(localStorage.getItem('imp-disaster-seen') ?? '0'); let disasterFirst = true;
+/** v1.9.6: a disaster pops up for every online player, with vibration. */
+function disasterPopup(): void {
+  const d = world?.disaster; if (!d) { disasterFirst = false; return; }
+  if (disasterFirst) { disasterFirst = false; if (world!.day - d.day > 1) { disasterSeen = Math.max(disasterSeen, d.id); return; } }
+  if (d.id <= disasterSeen) return; disasterSeen = d.id; localStorage.setItem('imp-disaster-seen', String(d.id));
+  try { navigator.vibrate?.([300, 120, 300, 120, 300]); } catch { /* no vibration */ }
+  sfx('drums');
+  const icon: Record<string, string> = { kuraklik: '☀️', salgin: '🦠', sel: '🌊', kitlik: '🍞', yangin: '🔥' };
+  const el = h('div', { class: 'modal disaster' }, h('div', { class: 'box' }, h('h2', {}, `${icon[d.kind] ?? '⚠'} AFET!`), h('div', { class: 'card warn' }, h('b', {}, d.text)), h('button', { class: 'primary', onclick: () => el.remove() }, 'Anladım')));
+  app.append(el);
+}
 function trialPopup(): void {
   const w = world; const m = me(); if (!w || !m) return;
-  const c: CourtCase | undefined = w.cases.find((x) => x.trial && (x.accusedId === m.id || x.trial.judgeId === m.id || x.trial.prosecutorId === m.id) && (!x.trial.done || (!trialSeen.has(tKey(x.id)) && x.stage !== 'kapandi' ? true : !trialSeen.has(tKey(x.id)) && gameNow() - (x.trial.doneAt ?? 0) < 120_000)) && !(x.trial.done && x.verdict === 'dusuruldu' && x.sentence?.startsWith('Aynı olay')));
+  const c: CourtCase | undefined = w.cases.find((x) => x.trial && (x.accusedId === m.id || x.trial.judgeId === m.id || x.trial.prosecutorId === m.id || x.trial.blamedId === m.id || (x.eyeIds ?? []).includes(m.id) || (x.witnesses ?? []).some((v) => v.id === m.id)) && (!x.trial.done || (!trialSeen.has(tKey(x.id)) && x.stage !== 'kapandi' ? true : !trialSeen.has(tKey(x.id)) && gameNow() - (x.trial.doneAt ?? 0) < 120_000)) && !(x.trial.done && x.verdict === 'dusuruldu' && x.sentence?.startsWith('Aynı olay')));
   if (!c?.trial) { trialEl?.remove(); trialEl = null; return; }
   if (trialEl?.contains(document.activeElement) && document.activeElement?.tagName === 'INPUT') { const n = trialEl.querySelectorAll('.msg').length; if (n === c.trial.msgs.length) return; }
   const tr = c.trial; const role = (id: string | null, label: string): HTMLElement => { const p = findPerson(w, id); return h('div', { class: 'role' }, p ? av2(p, 56) : h('div', { class: 'avatar' }), h('b', {}, label), h('div', { class: 'muted' }, p?.name ?? '—')); };
   const acc = findPerson(w, c.accusedId);
   const left = Math.max(0, Math.round((tr.until - gameNow()) / 1000));
-  const list = h('div', { class: 'msgs' }, ...tr.msgs.map((x) => h('div', { class: `msg ${x.who}` }, h('b', {}, `${x.who === 'hakim' ? '⚖ ' : x.who === 'savci' ? '📜 ' : '🙋 '}${x.name}`), ': ', x.text)));
+  const list = h('div', { class: 'msgs' }, ...tr.msgs.map((x) => h('div', { class: `msg ${x.who}` }, h('b', {}, `${x.who === 'hakim' ? '⚖ ' : x.who === 'savci' ? '📜 ' : x.who === 'tanik' ? '👁 ' : x.who === 'suclanan' ? '❗ ' : '🙋 '}${x.name}`), ': ', x.text)));
   if (tr.pending) list.append(h('div', { class: 'muted typing' }, 'Kadı düşünüyor…'));
   const inp = h('input', { maxlength: '300', placeholder: 'Kendinizi savunun… (tanık, mazeret, pişmanlık)', style: 'flex:1' });
   const go = async (): Promise<void> => { const t = inp.value; if (!t.trim()) return; inp.value = ''; await send({ t: 'defense', caseId: c.id, text: t }); trialPopup(); };
@@ -683,7 +704,7 @@ function trialPopup(): void {
     h('div', { class: 'roles' }, role(tr.judgeId, 'Kadı'), role(tr.prosecutorId, 'Savcı'), role(c.accusedId, 'Sanık')), list,
     tr.done ? h('div', { class: 'card verdict' }, h('b', {}, tr.verdictText ?? 'Karar verildi.'), h('div', { style: 'margin-top:8px' }, h('button', { class: 'primary', onclick: () => { markSeen(c.id); trialEl?.remove(); trialEl = null; } }, 'Tamam')))
       : c.accusedId === m.id ? h('div', {}, h('div', { class: 'row' }, inp, h('button', { class: 'primary', onclick: () => void go() }, 'Savun')), h('div', { class: 'row' }, h('span', { class: 'muted' }, `Kalan süre ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} · en fazla 5 söz`), h('button', { onclick: () => void send({ t: 'restCase', caseId: c.id }) }, 'Savunmam bitti, karar verilsin')))
-        : h('div', { class: 'muted' }, 'Duruşmayı izliyorsunuz.'));
+        : tr.judgeId === m.id || tr.prosecutorId === m.id ? h('div', { class: 'muted' }, 'Duruşmayı izliyorsunuz.') : witnessBox(c, tr.blamedId === m.id));
   const wasDone = trialEl?.dataset.done === '1';
   const el = h('div', { class: 'modal trial-modal' }, box); el.dataset.done = tr.done ? '1' : '0';
   if (trialEl) trialEl.replaceWith(el); else { app.append(el); sfx('gavel'); }

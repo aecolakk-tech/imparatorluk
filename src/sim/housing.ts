@@ -50,7 +50,10 @@ export function leaveHome(p: Person): void { p.homeUntil = 0; p.sleeping = false
 /** Hourly: energy drains while awake, sleep/rest restores energy and health. */
 export function energyHour(w: World, now: number): void {
   for (const p of w.people) {
+    // v1.9.6: zindan rations – inmates get bread and water at 08:00 and 18:00, and can rest on the cell bench
+    if (p.jailedDays > 0 && (w.hour === 8 || w.hour === 18)) { p.hunger = Math.min(p.hunger, 25); p.thirst = Math.min(p.thirst, 20); }
     if (!p.playerId || p.npc) { p.energy = 80; continue; }
+    if (p.jailedDays > 0) { p.energy = clamp((p.energy ?? 80) + 3); continue; }
     const inside = (p.homeUntil ?? 0) > now;
     if (inside) { p.energy = clamp((p.energy ?? 80) + (p.sleeping ? 14 : 6)); p.health = clamp(p.health + (p.sleeping ? 1.5 : 0.5)); }
     else { p.energy = clamp((p.energy ?? 80) - 4); if ((p.energy ?? 0) < 15) p.mood = clamp(p.mood - 1); }

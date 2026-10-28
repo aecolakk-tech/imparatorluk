@@ -26,6 +26,7 @@ export const BILL_LABEL: Record<BillKind, string> = {
   vergi: 'Vergi', fiyat: 'Narh (fiyat)', maas: 'Maaş', butce: 'Bütçe', kanun: 'Kanun', insaat: 'İnşaat', af: 'Genel af',
   gensoru: 'Gensoru', genelge: 'Genelge (Meclis bildirisi)', sorusturma: 'Soruşturma komisyonu', dokunulmazlik: 'Dokunulmazlığın kaldırılması', azil: 'Başkan’ın azli',
 };
+export const MP_ALLOWANCE = 4; // Dinar/day on top of the Meclis salary (wages are ~7)
 const DEBATE_DAYS = 1; const VOTE_DAYS = 1; const SANCTION_DAYS = 3;
 export const DEFAULT_BUDGET = 600; // discretionary spending per 20-day term without an approved budget
 
@@ -246,11 +247,14 @@ export function tally(b: Bill): { evet: number; hayir: number; cekimser: number 
   const t = { evet: 0, hayir: 0, cekimser: 0 }; for (const v of Object.values(b.votes)) t[v] += 1; return t;
 }
 
+const headIsPlayer = (w: World): boolean => { const k = findPerson(w, w.kayzerId); return !!k?.playerId && !k.npc; };
 /** Daily Meclis business. `playerControlled(p)` = a player who decides himself (NPCs/offline-conservative vote by AI). */
 export function meclisDay(w: World, playerDecides: (p: Person) => boolean, headOnline: boolean): void {
   const ms = members(w);
   // salaries for members
   for (const p of ms) if (w.meclis.salary > 0 && p.jailedDays === 0) transfer(w, 'saray', p.id, w.meclis.salary, 'meclis maaşı');
+  // v1.9.6: extra daily allowance for every sitting MP, paid from the treasury (shows in the ledger)
+  for (const p of ms) if (p.jailedDays === 0 && w.treasury >= MP_ALLOWANCE) transfer(w, 'saray', p.id, MP_ALLOWANCE, 'milletvekili ödeneği');
   // NPC proposals
   for (const p of ms) if (!playerDecides(p) && chance(w, 0.12)) npcPropose(w, p);
   for (const b of w.meclis.bills) {
@@ -269,6 +273,10 @@ export function meclisDay(w: World, playerDecides: (p: Person) => boolean, headO
       const needsSanction = w.regime === 'imparatorluk' && b.kind !== 'sorusturma' && b.kind !== 'dokunulmazlik' && b.kind !== 'genelge' && !!w.kayzerId && !b.fromKayzer;
       if (needsSanction) { b.status = 'onay'; b.voteUntil = w.day + SANCTION_DAYS; mlog(w, `“${b.title}” Kayzer'in onayını bekliyor.`); }
       else enact(w, b);
+    } else if (b.status === 'onay' && (!headIsPlayer(w) || (!headOnline && w.day >= b.voteUntil))) {
+      // v1.9.6: an NPC ruler (Maecenas, an NPC heir) or an absent player ruler still answers the Meclis
+      const approve = b.kind === 'af' ? chance(w, 0.3) : b.kind === 'vergi' ? b.value >= w.taxRate - 4 || w.treasury > 1500 : true;
+      sanction(w, b, approve);
     } else if (b.status === 'onay' && w.day > b.voteUntil) {
       b.status = 'zamanasimi'; b.result = 'Kayzer onaylamadı, karar düştü'; mlog(w, `“${b.title}” Kayzer onaylamadığı için düştü.`);
     }
@@ -292,16 +300,19 @@ function npcPropose(w: World, p: Person): void {
   const corrupt = w.ledger.filter((l) => (l.reason === 'zimmet' || l.reason === 'rüşvet') && w.day - l.day < 15).map((l) => l.to);
   const off = w.people.filter((x) => STATE_PROFS.includes(x.prof) && x.honesty < 40);
   let r: Bill | string = '';
-  if (!w.budget.approved && f !== 'cumhuriyetci') r = propose(w, p, 'butce', Math.round(Math.min(3000, Math.max(800, w.treasury * 0.2)) / 100) * 100, '');
-  else if (f === 'esnaf' && w.taxRate > 12) r = propose(w, p, 'vergi', w.taxRate - 2, '');
-  else if (f === 'cumhuriyetci' && corrupt[0] && findPerson(w, corrupt[0])?.id !== w.kayzerId) r = propose(w, p, 'sorusturma', 0, corrupt[0]);
-  else if (f === 'cumhuriyetci' && w.regime === 'cumhuriyet' && avgMood < 35 && w.kayzerId && findPerson(w, w.kayzerId)?.faction !== p.faction) r = propose(w, p, 'azil', 0, '');
-  else if (f === 'cumhuriyetci' && off[0]) r = propose(w, p, 'gensoru', 0, off[0].id);
-  else if (f === 'halkci' && w.people.filter((x) => x.jailedDays > 0).length > 4) r = propose(w, p, 'af', 0, '');
-  else if (f === 'halkci' && !w.projects.some((x) => !x.done) && w.treasury > 1500) r = propose(w, p, 'insaat', 800, '');
-  else if (f === 'halkci' && w.prices.ekmek > 4.5) r = propose(w, p, 'fiyat', Math.round(BASE_PRICE.ekmek * 1.2 * 10) / 10, 'ekmek');
-  else if (f === 'saltanatci' && (w.salaries.asker ?? 0) < 12) r = propose(w, p, 'maas', 12, 'asker');
-  else if (chance(w, 0.3)) r = propose(w, p, 'genelge', 0, '', pick(w, ['Kuyuların temizliği için çağrı', 'Pazarda dürüst tartı çağrısı', 'Yetimlere yardım çağrısı', 'Gece asayişi için bekçilere teşekkür', 'Kıtlığa karşı ambar çağrısı']));
+  // v1.9.6: no duplicate agenda – skip a kind that is already on the agenda or was voted on in the last 5 days
+  const recent = (k: BillKind): boolean => w.meclis.bills.some((b) => b.kind === k && (['tartisma', 'oylama', 'onay'].includes(b.status) || w.day - b.day < 5));
+  const budgetRejected = w.meclis.bills.filter((b) => b.kind === 'butce' && b.status === 'ret').length;
+  if (!w.budget.approved && f !== 'cumhuriyetci' && !recent('butce')) r = propose(w, p, 'butce', Math.round(Math.min(budgetRejected ? 1400 : 3000, Math.max(800, w.treasury * 0.2)) / 100) * 100, '');
+  else if (!recent('vergi') && f === 'esnaf' && w.taxRate > 12) r = propose(w, p, 'vergi', w.taxRate - 2, '');
+  else if (!recent('sorusturma') && f === 'cumhuriyetci' && corrupt[0] && findPerson(w, corrupt[0])?.id !== w.kayzerId) r = propose(w, p, 'sorusturma', 0, corrupt[0]);
+  else if (!recent('azil') && f === 'cumhuriyetci' && w.regime === 'cumhuriyet' && avgMood < 35 && w.kayzerId && findPerson(w, w.kayzerId)?.faction !== p.faction) r = propose(w, p, 'azil', 0, '');
+  else if (!recent('gensoru') && f === 'cumhuriyetci' && off[0]) r = propose(w, p, 'gensoru', 0, off[0].id);
+  else if (!recent('af') && f === 'halkci' && w.people.filter((x) => x.jailedDays > 0).length > 4) r = propose(w, p, 'af', 0, '');
+  else if (!recent('insaat') && f === 'halkci' && !w.projects.some((x) => !x.done) && w.treasury > 1500) r = propose(w, p, 'insaat', 800, '');
+  else if (!recent('fiyat') && f === 'halkci' && w.prices.ekmek > 4.5) r = propose(w, p, 'fiyat', Math.round(BASE_PRICE.ekmek * 1.2 * 10) / 10, 'ekmek');
+  else if (!recent('maas') && f === 'saltanatci' && (w.salaries.asker ?? 0) < 12) r = propose(w, p, 'maas', 12, 'asker');
+  else if (!recent('genelge') && chance(w, 0.3)) r = propose(w, p, 'genelge', 0, '', pick(w, ['Kuyuların temizliği için çağrı', 'Pazarda dürüst tartı çağrısı', 'Yetimlere yardım çağrısı', 'Gece asayişi için bekçilere teşekkür', 'Kıtlığa karşı ambar çağrısı']));
   void r;
 }
 

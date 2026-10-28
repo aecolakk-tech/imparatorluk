@@ -4,7 +4,7 @@ import { GOODS } from '../sim/types';
 import { GOOD_LABEL, PLAYER_PROFS, PROF_LABEL, STATE_PROFS } from '../sim/constants';
 import { coupStatus, officeOf } from '../sim/actions';
 import { CRIME_LABEL } from '../sim/ai';
-import { BILL_LABEL, tally, budgetLeft } from '../sim/meclis';
+import { BILL_LABEL, tally, budgetLeft, MP_ALLOWANCE } from '../sim/meclis';
 import type { Bill, BillKind, VoteChoice } from '../sim/types';
 import { findPerson } from '../sim/world';
 import { bar, fmt, h, select } from './dom';
@@ -269,6 +269,7 @@ function meclisPanel(c: Ctx): HTMLElement {
   box.append(h('div', { class: 'seats' }, ...w.meclis.seats.map((s) => { const p = findPerson(w, s.holder); const f = fac(p?.faction ?? null);
     return h('div', { class: `seat${p ? '' : ' empty'}${p && p.id === c.me?.id ? ' me' : ''}`, style: `--fc:${f?.color ?? '#555'}`, title: p ? `${p.name} · ${f?.name ?? ''}` : 'boş', onclick: () => p && c.openPerson(p.id) }, h('b', {}, p?.name.split(' ').slice(-1)[0] ?? '—'), h('small', {}, f?.name.split(' ')[0] ?? '')); })));
   const mp = !!c.me?.meclis;
+  box.append(h('div', { class: 'muted' }, `💰 Milletvekili geliri: günlük ${w.meclis.salary} Dinar Meclis maaşı + ${MP_ALLOWANCE} Dinar milletvekili ödeneği (Hazine’den, hesap defterinde görünür).`));
   box.append(h('h3', {}, 'Partiler'));
   for (const f of w.meclis.factions) {
     const n = w.people.filter((p) => p.meclis && p.faction === f.id).length;

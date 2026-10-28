@@ -78,13 +78,13 @@ export interface Person {
   walk?: import('./move').Walk; // player characters: current walk (real-time path)
 }
 
-export interface Arrest { id: string; criminalId: string; catcherId: string; crime: CrimeKind; victimId: string | null; amount: number; day: number; hour: number; offer: number; status: 'bekliyor' | 'kabul' | 'ret'; at?: number }
+export interface Arrest { id: string; criminalId: string; catcherId: string; crime: CrimeKind; victimId: string | null; amount: number; day: number; hour: number; offer: number; status: 'bekliyor' | 'kabul' | 'ret'; at?: number; evidence?: number; eyewitnesses?: number; basis?: string; eyeIds?: string[]; complainantId?: string | null }
 export type CrimeKind = 'hirsizlik' | 'rusvet' | 'zimmet' | 'isyan' | 'saldiri' | 'cinayet' | 'kacakcilik';
 export interface Talk { a: string; b: string; text: string; day: number; hour: number; at?: number; lines?: string[]; ai?: boolean }
 export interface Corpse { id: string; personId: string; name: string; look: { hairColor: number; skin: number; shirt: number; female: boolean; prof: Profession }; x: number; y: number; at: number; killerId: string | null; witnesses: string[]; stage: 'yerde' | 'ihbar' | 'inceleme' | 'kapandi'; reportedBy?: string; reportedAt?: number; bekciId?: string; bekciFrom?: { x: number; y: number }; note?: string }
 export interface Escort { personId: string; bekciId: string; from: { x: number; y: number }; at: number }
-export interface TrialMsg { who: 'hakim' | 'savci' | 'sanik'; name: string; text: string; at: number }
-export interface Trial { at: number; until: number; judgeId: string | null; prosecutorId: string | null; msgs: TrialMsg[]; persuasion: number; done: boolean; doneAt?: number; verdictText?: string; pending?: boolean }
+export interface TrialMsg { who: 'hakim' | 'savci' | 'sanik' | 'tanik' | 'suclanan'; name: string; text: string; at: number }
+export interface Trial { at: number; until: number; judgeId: string | null; prosecutorId: string | null; msgs: TrialMsg[]; persuasion: number; done: boolean; doneAt?: number; verdictText?: string; pending?: boolean; reasoning?: string; lastReason?: string; blamedId?: string | null }
 export interface NpcMsg { fromPersonId: string; fromName: string; toPersonId: string | null; text: string; at: number }
 export interface Offer { id: string; from: string; to: string; kind: 'mal' | 'borc' | 'is' | 'rusvet'; good?: Good; qty?: number; price?: number; amount?: number; arrestId?: string; day: number; text: string }
 export interface Nature { kind: 'kuraklik' | 'salgin' | 'sel' | 'bereket' | 'balik'; start: number; until: number }
@@ -119,7 +119,7 @@ export type CaseStage = 'savci' | 'hakim' | 'kapandi';
 export interface CourtCase {
   id: string; accusedId: string; crime: CrimeKind; victimId: string | null;
   amount: number; evidence: number; stage: CaseStage; day: number; deadline: number;
-  verdict?: 'suclu' | 'beraat' | 'dusuruldu' | 'af'; sentence?: string; trial?: Trial; bribed?: boolean; defenders?: string[]; witnesses?: { id: string; against: boolean }[];
+  verdict?: 'suclu' | 'beraat' | 'dusuruldu' | 'af'; sentence?: string; trial?: Trial; bribed?: boolean; defenders?: string[]; witnesses?: { id: string; against: boolean }[]; eyewitnesses?: number; basis?: string; eyeIds?: string[]; complainantId?: string | null;
 }
 
 export interface Law { id: string; name: string; desc: string; active: boolean; param?: number; paramLabel?: string; }
@@ -195,6 +195,8 @@ export interface World {
   proposals: { id: string; kind: 'evlilik' | 'cocuk'; from: string; to: string; day: number }[];
   pregnancies: { parents: string[]; due: number }[];
   veliaht: string | null; // designated heir (child id)
+  exKayzerId?: string | null;
+  disaster?: { id: number; kind: string; text: string; day: number } | null; // v1.9.6: shown to every online player as a popup // v1.9.6: a Kayzer who lost the throne by going to the zindan
   regentId: string | null; // rules for a minor heir
   regentFor: string | null;
   isyan: Isyan | null;
@@ -208,7 +210,7 @@ export interface World {
   arrests: Arrest[];
   chatOut: NpcMsg[];
   talks: Talk[];
-  corpses?: Corpse[]; crimeReports?: { criminalId: string; victimId: string; crime: CrimeKind; amount: number; at: number }[]; escorts?: Escort[];
+  corpses?: Corpse[]; crimeReports?: { criminalId: string; victimId: string; crime: CrimeKind; amount: number; at: number; eyes?: number; eyeIds?: string[] }[]; escorts?: Escort[];
   llm?: { day: string; n: number; talkAt: number; speechAt?: number };
   offers: Offer[];
   rumors: { day: number; text: string; about: string }[];
@@ -301,7 +303,7 @@ export type Action =
   | { t: 'directive'; topic: 'namaz' | 'icki' | 'laik' }
   | { t: 'granary'; op: 'buy' | 'release'; qty: number }
   | { t: 'priceCap'; good: Good; price: number | null }
-  | { t: 'defend'; caseId: string } | { t: 'witness'; caseId: string; against: boolean }
+  | { t: 'defend'; caseId: string } | { t: 'witness'; caseId: string; against: boolean; text?: string }
   | { t: 'smuggle'; on: boolean }
   | { t: 'borrow'; amount: number } | { t: 'repay'; loanId: string } | { t: 'festivalOpen'; cost: number } | { t: 'buildAt'; plotId: string; kind: string }
   | { t: 'move'; x: number; y: number } | { t: 'report'; corpseId: string } | { t: 'defense'; caseId: string; text: string } | { t: 'restCase'; caseId: string }

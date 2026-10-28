@@ -11,8 +11,8 @@ import { findPerson } from './world';
 import { isOnline, kayzerPlayerId, log, personal } from './log';
 import { expirePetitions, naipPetitions, saraykorBonus } from './state';
 import { meclisDay, meclisElection } from './meclis';
-import { command, isyanHour, settleFate, startIsyan, strength } from './isyan';
-import { actingHead, familyDay } from './family';
+import { command, isyanHour, settleFate, startIsyan, strength, republicShare, REBEL_SHARE } from './isyan';
+import { actingHead, dethroneForJail, familyDay } from './family';
 import { endOfDayLife, lifeHour, rumor, eatMeal, drinkWater } from './life';
 import { needsDrain, seasonDay, animalsDay, hayvanciDay, nobilityDay, intrigueDay, orgsDay } from './realm';
 import { chatHour } from './chat';
@@ -241,6 +241,7 @@ export function verdict(w: World, caseId: string, guilty: boolean, now: number):
     a.jailedDays = c.crime === 'cinayet' ? 25 : c.crime === 'isyan' ? 7 : c.crime === 'saldiri' ? 5 : 3; a.honesty = clamp(a.honesty + 5); a.mood = clamp(a.mood - 15);
     c.sentence = `${a.jailedDays} gün zindan, ${Math.round(fine)} Dinar ceza`;
     log(w, `Hâkim kararı: ${a.name} suçlu bulundu (${c.sentence}).`, a.id);
+    if (a.id === w.kayzerId) dethroneForJail(w, a);
   } else {
     a.jailedDays = 0; c.sentence = 'serbest'; log(w, `Hâkim kararı: ${a.name} beraat etti.`, a.id);
   }
@@ -284,9 +285,10 @@ function revolution(w: World, armyLoyalty: number): void {
   const adults = w.people.filter((p) => p.prof !== 'naip' && p.prof !== 'kayzer' && !p.soylu);
   const share = adults.filter((p) => p.republic >= 70).length / Math.max(1, adults.length);
   const loy = adults.reduce((s, p) => s + p.loyalty, 0) / Math.max(1, adults.length);
-  const hot = w.cumhuriyet >= 75 || share >= 0.5 || loy < 22 || (w.cumhuriyet >= 50 && armyLoyalty < 25);
-  if (hot) w.cumhuriyetDays += 1; else w.cumhuriyetDays = Math.max(0, w.cumhuriyetDays - 1);
-  if (w.cumhuriyetDays >= 3 && w.kayzerId && w.regime === 'imparatorluk' && !w.isyan) { w.cumhuriyetDays = 0; startIsyan(w); }
+  void share; void loy; void armyLoyalty;
+  const hot = republicShare(w) >= REBEL_SHARE; // v1.9.6: ≥50% of the people at cumhuriyetçilik ≥70
+  if (hot) w.cumhuriyetDays += 1; else w.cumhuriyetDays = 0;
+  if (hot && w.kayzerId && w.regime === 'imparatorluk' && !w.isyan) { w.cumhuriyetDays = 0; startIsyan(w); }
 }
 
 function election(w: World): void {

@@ -15,7 +15,12 @@ export const TARGETS = ['pazar', 'kahve', 'meclis', 'mahkeme', 'kisla', 'saray']
 export const FATE_LABEL: Record<Fate, string> = { surgun: 'Sürgün', zindan: 'Zindan', af: 'Af (sıradan vatandaşlık)' };
 const ilog = (w: World, text: string, pid?: string): void => { if (w.isyan) { w.isyan.log.push(`Gün ${w.day} ${String(w.hour).padStart(2, '0')}:00 – ${text}`); if (w.isyan.log.length > 40) w.isyan.log.shift(); } log(w, `İSYAN: ${text}`, pid); };
 
-const discontent = (w: World, p: Person): boolean => p.prof !== 'naip' && p.id !== w.kayzerId && p.jailedDays === 0 && p.exiledDays === 0 && !p.soylu && (p.republic > 50 || p.plotting === 'revolution' || p.loyalty < 22 || (p.mood < 25 && p.loyalty < 40));
+/** v1.9.6 rule: an isyan needs ≥50% of the people with cumhuriyetçilik ≥70; only those ≥70 join as rebels. */
+export const REBEL_MIN = 70; export const REBEL_SHARE = 0.5;
+const populace = (w: World): Person[] => w.people.filter((p) => p.prof !== 'naip' && p.id !== w.kayzerId && !(p.prof === 'kayzer' && p.id !== w.exKayzerId) && !p.soylu);
+export function republicShare(w: World): number { const a = populace(w); return a.filter((p) => p.republic >= REBEL_MIN).length / Math.max(1, a.length); }
+const discontent = (w: World, p: Person): boolean => p.prof !== 'naip' && p.id !== w.kayzerId && p.jailedDays === 0 && p.exiledDays === 0 && !p.soylu && p.republic >= REBEL_MIN;
+export const _oldDiscontent = (w: World, p: Person): boolean => p.prof !== 'naip' && p.id !== w.kayzerId && p.jailedDays === 0 && p.exiledDays === 0 && !p.soylu && (p.republic > 50 || p.plotting === 'revolution' || p.loyalty < 22 || (p.mood < 25 && p.loyalty < 40));
 export const loyalSoldiers = (w: World): Person[] => w.people.filter((p) => p.prof === 'asker' && p.jailedDays === 0 && !(w.isyan?.rebels.includes(p.id)));
 
 export function strength(w: World): { rebels: number; loyal: number } {
@@ -28,7 +33,7 @@ export function strength(w: World): { rebels: number; loyal: number } {
 
 export function startIsyan(w: World): void {
   if (w.isyan || w.regime !== 'imparatorluk' || !w.kayzerId) return;
-  const rebels = w.people.filter((p) => discontent(w, p) || (p.prof === 'asker' && p.loyalty < 30));
+  const rebels = w.people.filter((p) => discontent(w, p));
   const leader = rebels.find((p) => p.plotting === 'revolution') ?? [...rebels].sort((a, b) => b.republic + b.ambition - a.republic - a.ambition)[0];
   w.isyan = { day: w.day, hour: w.hour, leaderId: leader?.id ?? null, rebels: rebels.map((p) => p.id), occupied: [], killed: 0, soldiersLost: 0, lastCmd: '', lastCmdHour: -99, log: [], hours: 0, concessions: 0 };
   ilog(w, `${leader?.name ?? 'Halk'} önderliğinde ${rebels.length} kişi ayaklandı! Asiler Pazar'da toplanıyor.`, leader?.id);
@@ -100,6 +105,7 @@ function endIsyan(w: World, text: string): void {
 /** Rebels win: the republic is declared; the deposed Kayzer's fate is decided by the rebels within a day. */
 export function rebelVictory(w: World): void {
   const i = w.isyan!; const old = findPerson(w, w.kayzerId);
+  const claim = findPerson(w, i.leaderId); if (claim && claim.id === w.exKayzerId) { restoreClaimant(w, claim, old); return; }
   const voters = i.rebels.filter((id) => findPerson(w, id)?.playerId);
   ilog(w, `Asiler Saray'ı aldı! ${old?.name ?? 'Kayzer'} tahttan indirildi. CUMHURİYET İLAN EDİLDİ!`);
   w.isyan = null;
@@ -109,6 +115,16 @@ export function rebelVictory(w: World): void {
   for (const p of w.people) if (p.soylu && p.home === 'saray') { p.soylu = false; p.home = emptiestHouse(w); }
   if (old) { old.prof = 'memur'; old.work = 'saray'; old.home = emptiestHouse(w); w.deposed = { personId: old.id, until: w.day + 1, killed: i.killed, votes: {}, voters }; }
   w.cumhuriyetDays = 0; w.cumhuriyet = Math.round(w.people.reduce((s, p) => s + p.republic, 0) / w.people.length);
+}
+
+/** v1.9.6: the rising was led by the dethroned Kayzer → he takes the throne back instead of a republic. */
+function restoreClaimant(w: World, k: Person, old: Person | undefined): void {
+  const i = w.isyan!; ilog(w, `Asiler Saray'ı aldı! ${old?.name ?? 'Tahttaki'} indirildi; ${k.name} yeniden Kayzer!`, k.id);
+  w.isyan = null; w.kayzerId = k.id; w.exKayzerId = null; w.regentId = null; w.regentFor = null; w.coup = null;
+  k.prof = 'kayzer'; k.work = 'saray'; k.home = 'saray'; k.soylu = true; k.jailedDays = 0; k.exiledDays = 0; k.plotting = 'none';
+  if (old && old.id !== k.id && old.prof === 'kayzer') { old.prof = 'memur'; old.work = 'saray'; old.home = emptiestHouse(w); old.soylu = false; }
+  for (const p of w.people) { if (p.prof === 'asker') p.loyalty = 60; if (i.rebels.includes(p.id)) { p.mood = clamp(p.mood + 10); p.loyalty = clamp(p.loyalty + 15); } }
+  w.cumhuriyetDays = 0;
 }
 
 /** NPC rebel leaders' rule: bloodshed → zindan, a ruinous reign → sürgün, otherwise af. */

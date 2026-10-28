@@ -50,9 +50,9 @@ describe('murder → corpse → report → bekçi → case → trial → verdict
     now += 5 * 60_000; realtime(w, now); expect((w.corpses ?? []).length).toBe(0); // removed after 5 real minutes
     // a case for the player goes to a real hearing
     w.cases = w.cases.filter((x) => x.accusedId !== me.id); openCase(w, me.id, 'cinayet', v.id, 0, 60); const c = w.cases[w.cases.length - 1]!; c.stage = 'hakim'; startTrial(w, c, now);
-    expect(c.trial!.msgs.length).toBe(2);
+    expect(c.trial!.msgs.length).toBe(3);
     const dr = act(w, 'u2', { t: 'defense', caseId: c.id, text: 'Ben masumum, o gece evdeydim, tanığım komşum Hasan.' }, now + 1000); expect(dr.msg).toBe('');
-    expect(c.trial!.msgs.filter((m) => m.who === 'hakim').length).toBe(2); expect(c.trial!.persuasion).toBeGreaterThan(0);
+    expect(c.trial!.msgs.filter((m) => m.who === 'hakim').length).toBe(3); expect(c.trial!.persuasion).toBeGreaterThan(0);
     act(w, 'u2', { t: 'restCase', caseId: c.id }, now + 2000);
     expect(c.trial!.done).toBe(true); expect(c.trial!.verdictText).toMatch(/SUÇLU|BERAAT/);
     if (c.verdict === 'suclu') { expect(me.jailedDays).toBeGreaterThan(0); expect(w.escorts!.length).toBe(1); }

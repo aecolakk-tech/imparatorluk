@@ -170,14 +170,19 @@ export function endOfDayLife(w: World): void {
 
 // ---------------- nature ----------------
 const NATURE_TEXT = { kuraklik: 'KURAKLIK başladı! İki hafta boyunca buğday az çıkacak, ekmek pahalanacak.', salgin: 'SALGIN! Hastalık yayılıyor; hekimler çok çalışacak.', sel: 'SEL baskını! Tarlalar ve liman zarar gördü.', bereket: 'BEREKET yılı: tarlalar bol ürün veriyor.', balik: 'Denizde balık bolluğu var!' } as const;
+/** v1.9.6: a disaster everybody must hear about (popup + vibration on every online client, and the log). */
+export function disaster(w: World, kind: string, text: string): void { w.disaster = { id: (w.disaster?.id ?? 0) + 1, kind, text, day: w.day }; log(w, `⚠ ${text}`); }
 export function nature(w: World): void {
   const n = w.nature;
   if (n && w.day > n.until) { log(w, `${n.kind === 'kuraklik' ? 'Kuraklık' : n.kind === 'salgin' ? 'Salgın' : n.kind === 'sel' ? 'Sel' : n.kind === 'bereket' ? 'Bereket' : 'Balık bolluğu'} sona erdi.`); w.nature = null; }
-  if (!w.nature && w.day >= w.nextDrought) { w.nature = { kind: 'kuraklik', start: w.day, until: w.day + 13 }; w.nextDrought = w.day + 180; log(w, NATURE_TEXT.kuraklik); }
+  if (!w.nature && w.day >= w.nextDrought) { w.nature = { kind: 'kuraklik', start: w.day, until: w.day + 13 }; w.nextDrought = w.day + 180; disaster(w, 'kuraklik', NATURE_TEXT.kuraklik); }
   else if (!w.nature && chance(w, 0.02)) {
     const kind = pick(w, ['salgin', 'sel', 'bereket', 'balik'] as const);
-    w.nature = { kind, start: w.day, until: w.day + (kind === 'bereket' ? 7 : kind === 'salgin' ? 5 : 3) }; log(w, NATURE_TEXT[kind]);
+    w.nature = { kind, start: w.day, until: w.day + (kind === 'bereket' ? 7 : kind === 'salgin' ? 5 : 3) }; if (kind === 'salgin' || kind === 'sel') disaster(w, kind, NATURE_TEXT[kind]); else log(w, NATURE_TEXT[kind]);
   }
+  // hunger crisis / kıtlık: many people starving at once (at most every 5 days)
+  { const adults = w.people.filter((p) => p.prof !== 'naip'); const starving = adults.filter((p) => p.hunger >= 70).length / Math.max(1, adults.length);
+    if (starving >= 0.35 && (w.disaster?.kind !== 'kitlik' || w.day - w.disaster.day >= 5)) disaster(w, 'kitlik', `KITLIK! Halkın %${Math.round(starving * 100)}’i aç. Ekmek bulmak zorlaştı; ambar ve fırınlar kritik.`); }
   if (w.nature?.kind === 'salgin') for (const p of w.people) if (p.prof !== 'naip' && chance(w, 0.25)) p.health = clamp(p.health - 12);
 }
 
@@ -328,10 +333,10 @@ function catcher(w: World, night: boolean): Person | undefined {
   return pool.length && chance(w, power) ? pick(w, pool) : undefined;
 }
 /** Caught! A pending arrest: until the next morning/evening window the criminal may offer the catcher a bribe. */
-export function arrest(w: World, criminal: Person, crime: CrimeKind, victimId: string | null, amount: number, by?: Person): Arrest | null {
+export function arrest(w: World, criminal: Person, crime: CrimeKind, victimId: string | null, amount: number, by?: Person, proof?: { evidence: number; eyewitnesses: number; basis: string; eyeIds?: string[]; complainantId?: string | null }): Arrest | null {
   const c = by ?? catcher(w, w.hour >= 21 || w.hour < 6) ?? w.people.find((x) => x.prof === 'bekci' && active(x));
   if (!c) return null;
-  const a: Arrest = { id: nextId(w, 'A'), criminalId: criminal.id, catcherId: c.id, crime, victimId, amount, day: w.day, hour: w.hour, offer: 0, status: 'bekliyor', at: w.serverNow ?? w.lastTickAt };
+  const a: Arrest = { id: nextId(w, 'A'), criminalId: criminal.id, catcherId: c.id, crime, victimId, amount, day: w.day, hour: w.hour, offer: 0, status: 'bekliyor', at: w.serverNow ?? w.lastTickAt, ...(proof ?? {}) };
   w.arrests.push(a); criminal.jailedDays = Math.max(criminal.jailedDays, 1);
   if (criminal.orderedBy && chance(w, 0.65)) revealOrder(w, criminal); // the hired hand talks
   interrogate(w, criminal);
@@ -350,10 +355,11 @@ export function crimeSeen(w: World, criminal: Person, victim: Person | null, cri
   const placed = placePeople(w, now); const cq = placed.find((q) => q.p.id === criminal.id);
   const near = cq ? placed.filter((q) => q.visible && q.p.id !== criminal.id && q.p.id !== victim?.id && Math.hypot(q.x - cq.x, q.y - cq.y) <= WITNESS_R) : [];
   const bekci = near.find((q) => q.p.prof === 'bekci' && q.p.jailedDays === 0 && q.p.id !== criminal.id);
-  if (bekci) return arrest(w, criminal, crime, victim?.id ?? null, amount, bekci.p);
+  const eyes = near.length;
+  if (bekci) return arrest(w, criminal, crime, victim?.id ?? null, amount, bekci.p, { evidence: Math.min(95, 80 + eyes * 3), eyewitnesses: eyes, eyeIds: near.map((q) => q.p.id), complainantId: bekci.p.id, basis: `suçüstü: bekçi 2 m içinde gördü${eyes > 1 ? `, ${eyes - 1} görgü tanığı daha` : ''}` });
   const reporter = victim && findPerson(w, victim.id) && victim.health > 0 ? victim : near.find((q) => fullAI(q.p))?.p;
   if (reporter && victim) {
-    w.crimeReports = [...(w.crimeReports ?? []), { criminalId: criminal.id, victimId: victim.id, crime, amount, at: now }].slice(-20);
+    w.crimeReports = [...(w.crimeReports ?? []), { criminalId: criminal.id, victimId: victim.id, crime, amount, at: now, eyes, eyeIds: near.map((q) => q.p.id) }].slice(-20);
     log(w, `☎ ${reporter.name}, ${ek(criminal.name, 'ı')} bekçiye şikâyet etmeye gidiyor.`, reporter.id);
   }
   return null;
@@ -365,7 +371,7 @@ export function processReports(w: World, now: number): void {
     if (now - r.at < REPORT_MS) { left.push(r); continue; }
     const cr = findPerson(w, r.criminalId); if (!cr || cr.jailedDays > 0) continue;
     const by = w.people.find((x) => x.prof === 'bekci' && x.jailedDays === 0 && x.id !== cr.id);
-    if (by) { log(w, `${by.name} şikâyeti aldı ve savcıya bildirdi.`, by.id); arrest(w, cr, r.crime, r.victimId, r.amount, by); }
+    if (by) { log(w, `${by.name} şikâyeti aldı ve savcıya bildirdi.`, by.id); const e = r.eyes ?? 0; arrest(w, cr, r.crime, r.victimId, r.amount, by, { evidence: Math.min(85, 45 + e * 12), eyewitnesses: e, eyeIds: r.eyeIds ?? [], complainantId: r.victimId, basis: e ? `mağdurun şikâyeti + ${e} görgü tanığı` : 'yalnızca mağdurun şikâyeti (söz söze karşı)' }); }
   }
   w.crimeReports = left;
 }
@@ -381,7 +387,8 @@ export function decideBribe(w: World, a: Arrest, accept: boolean): string {
     if (chance(w, 0.2)) rumor(w, `${ca.name} yakaladığı ${ek(cr.name, 'ı')} rüşvetle salmış!`, ca.id, -10);
     return `${ca.name} ${a.offer} Dinar'ı aldı ve ${ek(cr.name, 'ı')} saldı.`;
   }
-  a.status = 'ret'; openCase(w, cr.id, a.crime, a.victimId, a.amount, a.crime === 'cinayet' ? 90 : 70); rel(cr, ca, -15, 'beni tutukladı');
+  a.status = 'ret'; openCase(w, cr.id, a.crime, a.victimId, a.amount, a.evidence ?? (a.crime === 'cinayet' ? 60 : 55));
+  { const nc = w.cases.filter((x) => x.accusedId === cr.id && x.crime === a.crime && x.stage !== 'kapandi').at(-1); if (nc) { nc.eyewitnesses = a.eyewitnesses ?? 0; nc.basis = a.basis ?? 'bekçi tutanağı'; nc.eyeIds = a.eyeIds ?? []; nc.complainantId = a.complainantId ?? a.catcherId; } } rel(cr, ca, -15, 'beni tutukladı');
   if (a.offer > 0) { openCase(w, cr.id, 'rusvet', null, a.offer, 80); ca.rep = clamp(ca.rep + 3, -100, 100); rumor(w, `${ca.name} rüşveti reddetti, ${ek(cr.name, 'ı')} kadıya teslim etti.`, ca.id, 5); }
   return `${ca.name} rüşveti reddetti; ${cr.name} kadının önüne çıkacak.`;
 }

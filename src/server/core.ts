@@ -101,11 +101,11 @@ export function applySpeeches(w: World, refs: [string, number][], out: { konusma
   refs.forEach(([bid, i], k) => { const b = w.meclis.bills.find((x) => x.id === bid); const s = b?.speeches[i]; const t = out?.konusmalar?.[k]; if (s && typeof t === 'string' && t.length > 8) { s.text = t.slice(0, 220); s.ai = true; } });
 }
 export function judgeRequest(w: World, caseId: string): { system: string; user: string } | null { const c = w.cases.find((x) => x.id === caseId); return c?.trial?.pending ? judgePrompt(w, c) : null; }
-export function judgeReply(w: World, caseId: string, out: { cevap?: string; ikna?: number } | null, now: number): void {
+export function judgeReply(w: World, caseId: string, out: { cevap?: string; ikna?: number; gerekce?: string } | null, now: number): void {
   const c = w.cases.find((x) => x.id === caseId); if (!c?.trial?.pending) return;
   const last = c.trial.msgs.at(-1)?.text ?? ''; const rule = judgeRule(w, c, last);
-  const score = typeof out?.ikna === 'number' && Number.isFinite(out.ikna) ? Math.max(-4, Math.min(3, Math.round(out.ikna))) : rule.score;
-  judgeAnswer(w, c, out?.cevap ? String(out.cevap) : rule.reply, score, now);
+  const score = typeof out?.ikna === 'number' && Number.isFinite(out.ikna) ? Math.max(-4, Math.min(4, Math.round(out.ikna))) : rule.score;
+  judgeAnswer(w, c, out?.cevap ? String(out.cevap) : rule.reply, score, now, out?.gerekce ? String(out.gerekce) : undefined);
 }
 export function llmBudget(w: World, today: string, perDay: number): boolean { w.llm = w.llm ?? { day: '', n: 0, talkAt: 0 }; if (w.llm.day !== today) { w.llm.day = today; w.llm.n = 0; } return w.llm.n < perDay; }
 export function llmSpend(w: World, today: string, n = 1): void { w.llm = w.llm ?? { day: today, n: 0, talkAt: 0 }; if (w.llm.day !== today) { w.llm.day = today; w.llm.n = 0; } w.llm.n += n; }

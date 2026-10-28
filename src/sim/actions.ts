@@ -100,7 +100,8 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
   const isKayzer = (ww: World, p: Person): boolean => canRule(ww, p, now, ONLINE_WINDOW_MS);
   if ((me.homeUntil ?? 0) > now && !['goHome', 'setSpeed', 'setGoal', 'petition', 'answerProposal', 'defense', 'restCase'].includes(a.t)) leaveHome(me); // any other action = you step outside
   const jailedOk: Action['t'][] = ['petition', 'eat', 'divorce', 'answerProposal', 'defense', 'restCase', 'offerBribe', 'setSpeed', 'setGoal'];
-  if (me.jailedDays > 0 && !jailedOk.includes(a.t)) return no('Zindandasınız; şimdilik sadece dilekçe yazabilirsiniz.');
+  const cellRising = a.t === 'orgAct' && a.deed === 'ayaklanma'; // v1.9.6: a jailed leader can still give the signal
+  if (me.jailedDays > 0 && !jailedOk.includes(a.t) && !cellRising) return no('Zindandasınız; şimdilik sadece dilekçe yazabilirsiniz.');
   const exileOk: Action['t'][] = [...jailedOk, 'restore', 'buy', 'sell', 'marry', 'haveChild', 'school', 'cure'];
   if (me.exiledDays > 0 && !exileOk.includes(a.t)) return no(`Sürgündesiniz (${me.exiledDays} gün kaldı).`);
   const need = rules.reach ? actionNeed(w, me, a) : null;
@@ -435,7 +436,8 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'witness': {
       const c = w.cases.find((x) => x.id === a.caseId && x.stage !== 'kapandi'); if (!c || c.accusedId === me.id) return no('Dava yok.');
       c.witnesses = c.witnesses ?? []; if (c.witnesses.some((x) => x.id === me.id)) return no('Zaten tanıksınız.');
-      c.witnesses.push({ id: me.id, against: a.against }); c.evidence = clamp(c.evidence + (a.against ? 15 : -10)); const acc = findPerson(w, c.accusedId);
+      c.witnesses.push({ id: me.id, against: a.against }); if (!c.trial) c.evidence = clamp(c.evidence + (a.against ? 15 : -10)); const acc = findPerson(w, c.accusedId);
+      if (c.trial && !c.trial.done) c.trial.msgs.push({ who: me.id === c.trial.blamedId ? 'suclanan' : 'tanik', name: me.name, text: (String(a.text ?? '').trim() || (a.against ? 'Aleyhte tanıklık ediyorum.' : 'Lehte tanıklık ediyorum.')).slice(0, 300), at: now });
       if (acc) relate(acc, me, a.against ? -30 : 12, a.against ? 'aleyhime tanıklık etti' : 'lehime tanıklık etti'); return ok('Tanıklığınız tutanağa geçti.');
     }
     case 'smuggle': { me.smuggle = a.on; return ok(a.on ? 'Satışlarınızı vergiden saklıyorsunuz (kaçakçılık suçtur!).' : 'Dürüst ticarete döndünüz.'); }
@@ -510,6 +512,7 @@ function seize(w: World, me: Person, now: number): ActionResult {
 function restore(w: World, me: Person, founder: boolean): ActionResult {
   if (!founder) return no('Hanedan hakkı sadece kurucuya ve soyundan gelenlere aittir.');
   if (w.kayzerId === me.id) return no('Zaten tahttasınız efendim.');
+  if (w.exKayzerId === me.id) return no('Zindana girdiğiniz için tahtı kaybettiniz. Geri almanın yolu: Cemiyet → Ayaklanma ile bir isyana önderlik edip kazanmak, ya da cumhuriyette Başkan seçilmek.');
   const loyal = w.people.filter((p) => p.prof === 'asker' && p.loyalty >= 45).length;
   if (loyal < 3 && w.cumhuriyet >= 60) return no(`Hanedan hakkı için en az 3 sadık asker ya da cumhuriyet isteğinin 60'ın altına inmesi gerekir (şu an ${loyal} asker, cumhuriyet ${w.cumhuriyet}).`);
   const old = findPerson(w, w.kayzerId); if (old) old.loyalty = 20;

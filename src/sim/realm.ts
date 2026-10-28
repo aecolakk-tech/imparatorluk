@@ -2,6 +2,7 @@ import { ek } from './tr';
 import { rehouse } from './housing';
 import { migrateMeclis16 } from './meclis';
 import { startIsyanHook } from './hooks';
+import { republicShare, REBEL_SHARE, REBEL_MIN } from './isyan';
 /**
  * v1.8 "realm": nobility & palace intrigue, secret organizations & detection, seasons, animals & farms,
  * continuous hunger/thirst, and the Tarih Kitabı (chronicle). All server-authoritative, shared with the mock.
@@ -271,7 +272,7 @@ export function orgAct(w: World, by: Person, deed: OrgDeed): string {
     if (o.kind === 'cumhuriyet') w.cumhuriyet = clamp(w.cumhuriyet + 0.8);
     o.suspicion = clamp(o.suspicion + 4); return `Gece duvarlara bildiriler asıldı (${ppl.length} kişi okudu). Şüphe arttı.`;
   }
-  o.actedDay = w.day;
+  if (deed !== 'ayaklanma') o.actedDay = w.day; // a refused rising call does not use up the day
   if (deed === 'hirsizlik') {
     if (o.kind !== 'hirsiz') return 'Soygun hırsızlar loncasının işidir.';
     const v = [...w.people].filter((p) => p.money > 120 && !o.members.includes(p.id)).sort((a, b) => b.money - a.money)[0]; if (!v) return 'Soyacak zengin yok.';
@@ -284,17 +285,19 @@ export function orgAct(w: World, by: Person, deed: OrgDeed): string {
     if (o.kind === 'hirsiz') return 'Lonca siyasete karışmaz.';
     for (const p of w.people) if (p.prof === 'asker') p.loyalty = clamp(p.loyalty - 3);
     w.treasury = Math.max(0, w.treasury); const proj = (w.projects ?? []).find((x) => !x.done); if (proj) proj.progress = Math.max(0, proj.progress - 2);
-    o.suspicion = clamp(o.suspicion + 12); log(w, '💥 Gece Kışla’nın ambarı ateşe verildi! Faili meçhul.');
+    o.suspicion = clamp(o.suspicion + 12); w.disaster = { id: (w.disaster?.id ?? 0) + 1, kind: 'yangin', text: 'YANGIN! Kışla’nın ambarı ateşe verildi; askerlerin morali düştü.', day: w.day }; log(w, '💥 Gece Kışla’nın ambarı ateşe verildi! Faili meçhul.');
     if (chance(w, 0.2 + o.suspicion / 250)) reveal(w, o, [by.id], 'Sabotajcılar görüldü');
     return 'Sabotaj başarılı: askerlerin morali düştü' + (proj ? ', şantiye gecikti.' : '.');
   }
   // ayaklanma
   if (o.kind === 'hirsiz') return 'Lonca ayaklanmaz.';
-  if (o.members.length < 8) return `Ayaklanma için en az 8 üye gerekir (${o.members.length}).`;
-  if (o.kind === 'cumhuriyet' && w.cumhuriyet < 40) return `Halk henüz hazır değil (cumhuriyet ${Math.round(w.cumhuriyet)}/40).`;
+  const claimant = by.id === w.exKayzerId && w.regime === 'imparatorluk';
+  if (w.regime !== 'imparatorluk' || !w.kayzerId) return 'Ayaklanacak bir taht yok.';
+  const sh = republicShare(w); if (sh < REBEL_SHARE) return `Halk henüz hazır değil: halkın %${Math.round(sh * 100)}'i cumhuriyetçilikte 70+ (en az %50 gerekir).`;
   if (w.isyan) return 'Zaten isyan var.';
-  for (const id of o.members) { const p = findPerson(w, id); if (p) { p.republic = clamp(p.republic + 25); p.plotting = 'revolution'; p.loyalty = clamp(p.loyalty - 30); } }
-  startIsyanHook.fn(w); const iz = w.isyan as World['isyan']; if (iz) { iz.leaderId = by.id; for (const id of o.members) if (!iz.rebels.includes(id)) iz.rebels.push(id); chronicle(w, 'isyan', `“${o.name}” ayaklanmayı başlattı.`); return '🔥 AYAKLANMA BAŞLADI! Saray’a yürüyün.'; }
+  void claimant;
+  if (claimant && by.jailedDays > 0) { by.jailedDays = 0; log(w, `⛓ Asiler zindanı bastı ve ${ek(by.name, 'ı')} kurtardı!`, by.id); }
+  startIsyanHook.fn(w); const iz = w.isyan as World['isyan']; if (iz) { o.actedDay = w.day; iz.leaderId = by.id; if (!iz.rebels.includes(by.id)) iz.rebels.push(by.id); for (const id of o.members) { const p = findPerson(w, id); if (p && p.republic >= REBEL_MIN && p.jailedDays === 0 && !iz.rebels.includes(id)) iz.rebels.push(id); } chronicle(w, 'isyan', `“${o.name}” ayaklanmayı başlattı.`); return '🔥 AYAKLANMA BAŞLADI! Saray’a yürüyün.'; }
   return 'Ayaklanma başlatılamadı.';
 }
 export function orgMeet(w: World, p: Person): string { const o = orgOf(w, p.id); if (!o) return 'Örgütte değilsiniz.'; if (o.leaderId !== p.id) return 'Toplantıyı lider çağırır.'; o.meetTonight = true; return 'Bu gece gizli toplantı var. Dikkat: bekçiler baskın yapabilir.'; }

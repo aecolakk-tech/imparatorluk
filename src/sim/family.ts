@@ -9,7 +9,8 @@ import { PROF_LABEL } from './constants';
 import { transfer } from './economy';
 import { chance, clamp, nextId, pick, rand, randInt } from './rng';
 import { findPerson, makePerson, WORKPLACE } from './world';
-import { log, isOnline } from './log';
+import { log, isOnline, personal } from './log';
+import { chronicle } from './realm';
 
 export const ADULT_AGE = 60; // game days
 export const CHILD_UPKEEP = 3; // Dinar per child per day
@@ -289,6 +290,29 @@ export function heirOf(w: World, k: Person): { id: string; adult: boolean } | nu
   const kids = childrenOf(w, k.id);
   const v = kids.find((x) => x.id === w.veliaht); if (v) return v;
   return kids.find((x) => x.adult) ?? kids[0] ?? null;
+}
+
+/** v1.9.6: a Kayzer sent to the zindan loses the throne. Heir (adult) → Kayzer; minor heir → regent (spouse, else
+ *  Maecenas); no heir → Maecenas. The former Kayzer becomes a plain citizen (“Eski Kayzer”); the admin panel stays
+ *  with his account. No automatic return: only an isyan he leads, or (in a republic) a Başkan election. */
+export function dethroneForJail(w: World, k: Person): string | null {
+  if (w.kayzerId !== k.id || w.regime !== 'imparatorluk') return null;
+  const heir = heirOf(w, k); const sp = findPerson(w, k.spouse); const mae = w.people.find((p) => p.prof === 'naip');
+  let text: string;
+  if (heir?.adult && findPerson(w, heir.id)) {
+    const h = findPerson(w, heir.id)!; w.kayzerId = h.id; h.prof = 'kayzer'; h.work = 'saray'; h.home = 'saray'; h.soylu = true; h.jailedDays = 0; w.veliaht = null;
+    text = `${k.name} zindana girdiği için tahtı kaybetti. Varisi ${h.name} yeni Kayzer!`;
+  } else if (heir && (sp?.jailedDays === 0 ? sp : mae)) {
+    const reg = (sp && sp.jailedDays === 0 ? sp : mae)!; w.kayzerId = reg.id; if (reg.prof !== 'naip') { reg.prof = 'kayzer'; reg.work = 'saray'; }
+    w.regentId = reg.id; w.regentFor = heir.id;
+    text = `${k.name} zindana girdiği için tahtı kaybetti. Veliaht ${nameOf(w, heir.id)} reşit olana dek ${reg.name} naip olarak tahtta.`;
+  } else if (mae) { w.kayzerId = mae.id; text = `${k.name} zindana girdiği için tahtı kaybetti. Varisi olmadığından tahta ${mae.name} çıktı.`; }
+  else return null;
+  // stays prof 'kayzer' (shown as “Eski Kayzer”), but no longer lives in the Saray or counts as a soylu
+  k.soylu = false; k.home = emptiestHouse(w); k.work = 'pazar'; k.sidedWith = null; w.exKayzerId = k.id; w.coup = null;
+  log(w, `👑 ${text}`, k.id); chronicle(w, 'taht', text);
+  if (k.playerId) personal(w, k.playerId, 'Zindana girdiğiniz için Kayzerlikten düştünüz. Tahtı ancak bir isyana önderlik edip kazanarak ya da (cumhuriyette) Başkan seçilerek geri alabilirsiniz. Kurucu paneli sizde kalır.');
+  return text;
 }
 
 /** Succession on abdication. Returns a message or null if there is no one to take the throne. */

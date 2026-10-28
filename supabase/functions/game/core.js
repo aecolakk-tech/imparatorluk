@@ -1211,6 +1211,47 @@ function heirOf(w, k) {
   if (v) return v;
   return kids.find((x) => x.adult) ?? kids[0] ?? null;
 }
+function dethroneForJail(w, k) {
+  if (w.kayzerId !== k.id || w.regime !== "imparatorluk") return null;
+  const heir = heirOf(w, k);
+  const sp = findPerson(w, k.spouse);
+  const mae = w.people.find((p) => p.prof === "naip");
+  let text;
+  if (heir?.adult && findPerson(w, heir.id)) {
+    const h = findPerson(w, heir.id);
+    w.kayzerId = h.id;
+    h.prof = "kayzer";
+    h.work = "saray";
+    h.home = "saray";
+    h.soylu = true;
+    h.jailedDays = 0;
+    w.veliaht = null;
+    text = `${k.name} zindana girdi\u011Fi i\xE7in taht\u0131 kaybetti. Varisi ${h.name} yeni Kayzer!`;
+  } else if (heir && (sp?.jailedDays === 0 ? sp : mae)) {
+    const reg = sp && sp.jailedDays === 0 ? sp : mae;
+    w.kayzerId = reg.id;
+    if (reg.prof !== "naip") {
+      reg.prof = "kayzer";
+      reg.work = "saray";
+    }
+    w.regentId = reg.id;
+    w.regentFor = heir.id;
+    text = `${k.name} zindana girdi\u011Fi i\xE7in taht\u0131 kaybetti. Veliaht ${nameOf(w, heir.id)} re\u015Fit olana dek ${reg.name} naip olarak tahtta.`;
+  } else if (mae) {
+    w.kayzerId = mae.id;
+    text = `${k.name} zindana girdi\u011Fi i\xE7in taht\u0131 kaybetti. Varisi olmad\u0131\u011F\u0131ndan tahta ${mae.name} \xE7\u0131kt\u0131.`;
+  } else return null;
+  k.soylu = false;
+  k.home = emptiestHouse(w);
+  k.work = "pazar";
+  k.sidedWith = null;
+  w.exKayzerId = k.id;
+  w.coup = null;
+  log(w, `\u{1F451} ${text}`, k.id);
+  chronicle(w, "taht", text);
+  if (k.playerId) personal(w, k.playerId, "Zindana girdi\u011Finiz i\xE7in Kayzerlikten d\xFC\u015Ft\xFCn\xFCz. Taht\u0131 ancak bir isyana \xF6nderlik edip kazanarak ya da (cumhuriyette) Ba\u015Fkan se\xE7ilerek geri alabilirsiniz. Kurucu paneli sizde kal\u0131r.");
+  return text;
+}
 function succeed(w, k) {
   const heir = heirOf(w, k);
   const sp = findPerson(w, k.spouse);
@@ -1270,7 +1311,14 @@ var ilog = (w, text, pid) => {
   }
   log(w, `\u0130SYAN: ${text}`, pid);
 };
-var discontent = (w, p) => p.prof !== "naip" && p.id !== w.kayzerId && p.jailedDays === 0 && p.exiledDays === 0 && !p.soylu && (p.republic > 50 || p.plotting === "revolution" || p.loyalty < 22 || p.mood < 25 && p.loyalty < 40);
+var REBEL_MIN = 70;
+var REBEL_SHARE = 0.5;
+var populace = (w) => w.people.filter((p) => p.prof !== "naip" && p.id !== w.kayzerId && !(p.prof === "kayzer" && p.id !== w.exKayzerId) && !p.soylu);
+function republicShare(w) {
+  const a = populace(w);
+  return a.filter((p) => p.republic >= REBEL_MIN).length / Math.max(1, a.length);
+}
+var discontent = (w, p) => p.prof !== "naip" && p.id !== w.kayzerId && p.jailedDays === 0 && p.exiledDays === 0 && !p.soylu && p.republic >= REBEL_MIN;
 var loyalSoldiers = (w) => w.people.filter((p) => p.prof === "asker" && p.jailedDays === 0 && !w.isyan?.rebels.includes(p.id));
 function strength(w) {
   const i = w.isyan;
@@ -1282,7 +1330,7 @@ function strength(w) {
 }
 function startIsyan(w) {
   if (w.isyan || w.regime !== "imparatorluk" || !w.kayzerId) return;
-  const rebels = w.people.filter((p) => discontent(w, p) || p.prof === "asker" && p.loyalty < 30);
+  const rebels = w.people.filter((p) => discontent(w, p));
   const leader = rebels.find((p) => p.plotting === "revolution") ?? [...rebels].sort((a, b2) => b2.republic + b2.ambition - a.republic - a.ambition)[0];
   w.isyan = { day: w.day, hour: w.hour, leaderId: leader?.id ?? null, rebels: rebels.map((p) => p.id), occupied: [], killed: 0, soldiersLost: 0, lastCmd: "", lastCmdHour: -99, log: [], hours: 0, concessions: 0 };
   ilog(w, `${leader?.name ?? "Halk"} \xF6nderli\u011Finde ${rebels.length} ki\u015Fi ayakland\u0131! Asiler Pazar'da toplan\u0131yor.`, leader?.id);
@@ -1385,6 +1433,11 @@ function endIsyan(w, text) {
 function rebelVictory(w) {
   const i = w.isyan;
   const old = findPerson(w, w.kayzerId);
+  const claim = findPerson(w, i.leaderId);
+  if (claim && claim.id === w.exKayzerId) {
+    restoreClaimant(w, claim, old);
+    return;
+  }
   const voters = i.rebels.filter((id) => findPerson(w, id)?.playerId);
   ilog(w, `Asiler Saray'\u0131 ald\u0131! ${old?.name ?? "Kayzer"} tahttan indirildi. CUMHUR\u0130YET \u0130LAN ED\u0130LD\u0130!`);
   w.isyan = null;
@@ -1414,6 +1467,37 @@ function rebelVictory(w) {
   }
   w.cumhuriyetDays = 0;
   w.cumhuriyet = Math.round(w.people.reduce((s, p) => s + p.republic, 0) / w.people.length);
+}
+function restoreClaimant(w, k, old) {
+  const i = w.isyan;
+  ilog(w, `Asiler Saray'\u0131 ald\u0131! ${old?.name ?? "Tahttaki"} indirildi; ${k.name} yeniden Kayzer!`, k.id);
+  w.isyan = null;
+  w.kayzerId = k.id;
+  w.exKayzerId = null;
+  w.regentId = null;
+  w.regentFor = null;
+  w.coup = null;
+  k.prof = "kayzer";
+  k.work = "saray";
+  k.home = "saray";
+  k.soylu = true;
+  k.jailedDays = 0;
+  k.exiledDays = 0;
+  k.plotting = "none";
+  if (old && old.id !== k.id && old.prof === "kayzer") {
+    old.prof = "memur";
+    old.work = "saray";
+    old.home = emptiestHouse(w);
+    old.soylu = false;
+  }
+  for (const p of w.people) {
+    if (p.prof === "asker") p.loyalty = 60;
+    if (i.rebels.includes(p.id)) {
+      p.mood = clamp(p.mood + 10);
+      p.loyalty = clamp(p.loyalty + 15);
+    }
+  }
+  w.cumhuriyetDays = 0;
 }
 function ruleFate(w, killed) {
   if (killed >= 3) return "zindan";
@@ -2092,6 +2176,7 @@ function verdict(w, caseId, guilty, now) {
     a.mood = clamp(a.mood - 15);
     c.sentence = `${a.jailedDays} g\xFCn zindan, ${Math.round(fine)} Dinar ceza`;
     log(w, `H\xE2kim karar\u0131: ${a.name} su\xE7lu bulundu (${c.sentence}).`, a.id);
+    if (a.id === w.kayzerId) dethroneForJail(w, a);
   } else {
     a.jailedDays = 0;
     c.sentence = "serbest";
@@ -2150,10 +2235,13 @@ function revolution(w, armyLoyalty) {
   const adults2 = w.people.filter((p) => p.prof !== "naip" && p.prof !== "kayzer" && !p.soylu);
   const share = adults2.filter((p) => p.republic >= 70).length / Math.max(1, adults2.length);
   const loy = adults2.reduce((s, p) => s + p.loyalty, 0) / Math.max(1, adults2.length);
-  const hot = w.cumhuriyet >= 75 || share >= 0.5 || loy < 22 || w.cumhuriyet >= 50 && armyLoyalty < 25;
+  void share;
+  void loy;
+  void armyLoyalty;
+  const hot = republicShare(w) >= REBEL_SHARE;
   if (hot) w.cumhuriyetDays += 1;
-  else w.cumhuriyetDays = Math.max(0, w.cumhuriyetDays - 1);
-  if (w.cumhuriyetDays >= 3 && w.kayzerId && w.regime === "imparatorluk" && !w.isyan) {
+  else w.cumhuriyetDays = 0;
+  if (hot && w.kayzerId && w.regime === "imparatorluk" && !w.isyan) {
     w.cumhuriyetDays = 0;
     startIsyan(w);
   }
@@ -2428,9 +2516,14 @@ function actionNeed(w, me, a) {
       return B(["okul"], "Okul\u2019a");
     case "work":
       return B([me.work, "santiye"], "i\u015F yerinize");
+    case "witness": {
+      const c = w.cases.find((x) => x.id === a.caseId);
+      if (c?.trial && !c.trial.done && ((c.eyeIds ?? []).includes(me.id) || c.trial.blamedId === me.id)) return null;
+      return B(["mahkeme"], "Mahkeme\u2019ye");
+    }
+    // summoned / eyewitness speak from the popup
     case "caseDecision":
     case "defend":
-    case "witness":
       return B(["mahkeme"], "Mahkeme\u2019ye");
     case "runForMeclis":
     case "castVote":
@@ -2850,7 +2943,8 @@ function investigate(w, co, now) {
   const killer = findPerson(w, co.killerId);
   const p = killer ? clamp(0.45 + 0.15 * co.witnesses.length, 0, 0.95) : 0;
   if (killer && rand(w) < p) {
-    arrest(w, killer, "cinayet", co.personId, 0, bekci);
+    const e = co.witnesses.length;
+    arrest(w, killer, "cinayet", co.personId, 0, bekci ?? void 0, { evidence: Math.min(92, 35 + e * 15), eyewitnesses: e, eyeIds: co.witnesses, complainantId: co.reportedBy ?? null, basis: e ? `ceset incelemesi + ${e} g\xF6rg\xFC tan\u0131\u011F\u0131 (2 m i\xE7inde)` : "ceset incelemesi, g\xF6rg\xFC tan\u0131\u011F\u0131 yok (dolayl\u0131 delil)" });
     co.note = `${bekci?.name ?? "Bek\xE7i"} olay yerini inceledi${co.witnesses.length ? `, ${co.witnesses.length} tan\u0131k dinledi` : ""} ve ${savci?.name ?? "savc\u0131ya"} bildirdi. \u015E\xFCpheli: ${killer.name}.`;
   } else co.note = `${bekci?.name ?? "Bek\xE7i"} olay yerini inceledi, ${savci?.name ?? "savc\u0131ya"} bildirdi; katil \u015Fimdilik bulunamad\u0131.`;
   log(w, `\u{1F50E} ${co.note}`, co.killerId ?? void 0, now);
@@ -2911,10 +3005,29 @@ function startTrial(w, c, now) {
   const victim = findPerson(w, c.victimId)?.name ?? w.corpses?.find((x) => x.personId === c.victimId)?.name;
   c.trial = { at: now, until: now + TRIAL_MS, judgeId: judge?.id ?? null, prosecutorId: pros?.id ?? null, persuasion: 0, done: false, msgs: [
     { who: "savci", name: pros?.name ?? "Savc\u0131", text: `Say\u0131n Kad\u0131, san\u0131k ${a.name} ${CRIME_LABEL[c.crime].toLocaleLowerCase("tr")} ile itham ediliyor${victim ? `; ma\u011Fdur ${victim}` : ""}. Deliller ${c.evidence >= 70 ? "g\xFC\xE7l\xFC" : c.evidence >= 45 ? "yeterli" : "zay\u0131f"}${c.witnesses?.length ? `, ${c.witnesses.length} tan\u0131k var` : ""}. Cezaland\u0131r\u0131lmas\u0131n\u0131 talep ediyorum.`, at: now },
-    { who: "hakim", name: judge?.name ?? "Kad\u0131", text: `San\u0131k ${a.name}, s\xF6z sizde. Kendinizi savunun; ${Math.round(TRIAL_MS / 6e4 * 10) / 10} dakikan\u0131z var.`, at: now + 1e3 }
+    { who: "hakim", name: judge?.name ?? "Kad\u0131", text: openingStatement(w, c, a), at: now + 500 },
+    ...eyeTestimony(w, c, a, now + 700),
+    { who: "hakim", name: judge?.name ?? "Kad\u0131", text: `San\u0131k ${a.name}, s\xF6z sizde. Ba\u015Fkas\u0131n\u0131 su\xE7luyorsan\u0131z ad\u0131n\u0131 s\xF6yleyin; mahkemeye \xE7a\u011Fr\u0131l\u0131r. Kendinizi savunun; ${Math.round(TRIAL_MS / 6e4 * 10) / 10} dakikan\u0131z var.`, at: now + 1e3 }
   ] };
   c.deadline = w.day + 2;
   log(w, `\u2696 ${ek(a.name, "\u0131n")} ${CRIME_LABEL[c.crime].toLocaleLowerCase("tr")} davas\u0131 g\xF6r\xFCl\xFCyor. Kad\u0131: ${judge?.name ?? "\u2014"}, Savc\u0131: ${pros?.name ?? "\u2014"}.`, a.id, now);
+}
+function openingStatement(w, c, a) {
+  const victim = findPerson(w, c.victimId)?.name ?? w.corpses?.find((x) => x.personId === c.victimId)?.name;
+  const comp = findPerson(w, c.complainantId)?.name;
+  const eyes = (c.eyeIds ?? []).map((id) => findPerson(w, id)?.name).filter(Boolean);
+  return `${a.name}, ${CRIME_LABEL[c.crime].toLocaleLowerCase("tr")} ile yarg\u0131lan\u0131yorsunuz${victim ? ` (ma\u011Fdur: ${victim})` : ""}. Deliller: ${c.basis ?? "savc\u0131l\u0131k iddias\u0131"}; delil g\xFCc\xFC ${Math.round(c.evidence)}/100${eyes.length ? `; olay\u0131 2 m i\xE7inden g\xF6renler: ${eyes.join(", ")}` : "; g\xF6rg\xFC tan\u0131\u011F\u0131 yok"}. \u015Eik\xE2yet eden: ${comp ?? "savc\u0131l\u0131k (resen)"}.`;
+}
+function eyeTestimony(w, c, a, at) {
+  const out = [];
+  for (const id of (c.eyeIds ?? []).slice(0, 3)) {
+    const p = findPerson(w, id);
+    if (!p || p.id === a.id || !fullAI(p) || p.jailedDays > 0) continue;
+    const against = (p.relations[a.id] ?? 0) < 40 || p.honesty > 60;
+    (c.witnesses ??= []).push({ id: p.id, against });
+    out.push({ who: "tanik", name: p.name, text: against ? `Kendi g\xF6z\xFCmle g\xF6rd\xFCm, ${a.name} yapt\u0131. Yemin ederim.` : `Oradayd\u0131m ama tam g\xF6remedim; ${a.name} iyi bir insand\u0131r.`, at: at + out.length * 100 });
+  }
+  return out;
 }
 function judgeRule(w, c, text) {
   const t = text.toLocaleLowerCase("tr");
@@ -2939,11 +3052,30 @@ function addDefense(_w, c, me, text, now) {
   if (tr.pending) return "Kad\u0131 bir \xF6nceki s\xF6z\xFCn\xFCz\xFC d\xFC\u015F\xFCn\xFCyor\u2026";
   tr.msgs.push({ who: "sanik", name: me.name, text: text.slice(0, 300), at: now });
   tr.pending = true;
+  if (!tr.blamedId) summonBlamed(_w, c, me, text, now);
   return null;
 }
-function judgeAnswer(w, c, reply, score, now) {
+function summonBlamed(w, c, me, text, now) {
+  const tr = c.trial;
+  const t = text.toLocaleLowerCase("tr");
+  if (!/yaptı|öldürdü|suçlu|o vurdu|katil|çaldı|saldırdı|o idi|oydu/.test(t)) return;
+  const skip = /* @__PURE__ */ new Set([me.id, tr.judgeId, tr.prosecutorId, c.victimId]);
+  const hit = w.people.filter((p) => !skip.has(p.id) && p.prof !== "naip").find((p) => {
+    const n = p.name.toLocaleLowerCase("tr");
+    const last = n.split(" ").slice(-1)[0];
+    return t.includes(n) || last.length >= 4 && new RegExp(`(^|[^a-z\xE7\u011F\u0131\xF6\u015F\xFC])${last}`).test(t);
+  });
+  if (!hit) return;
+  tr.blamedId = hit.id;
+  const atScene = (c.eyeIds ?? []).includes(hit.id);
+  tr.msgs.push({ who: "hakim", name: findPerson(w, tr.judgeId)?.name ?? "Kad\u0131", text: `${hit.name} mahkemeye \xE7a\u011Fr\u0131ls\u0131n! Su\xE7lama ciddi.`, at: now + 1 });
+  if (hit.playerId && !hit.npc) personal(w, hit.playerId, `\u2696 ${me.name} davas\u0131nda sizi su\xE7lad\u0131; mahkemeye \xE7a\u011Fr\u0131ld\u0131n\u0131z (duru\u015Fma ekran\u0131ndan cevap verin).`, now);
+  else tr.msgs.push({ who: "suclanan", name: hit.name, text: atScene ? hit.honesty < 40 ? "Oradayd\u0131m\u2026 ama elim kimseye kalkmad\u0131, yemin ederim!" : "Oradayd\u0131m, her \u015Feyi g\xF6rd\xFCm; ben yapmad\u0131m." : "Ben o s\u0131rada ba\u015Fka yerdeydim, bu bir iftira!", at: now + 2 });
+}
+function judgeAnswer(w, c, reply, score, now, reason) {
   const tr = c.trial;
   if (!tr || tr.done) return;
+  if (reason) tr.lastReason = reason.slice(0, 200);
   tr.pending = false;
   tr.persuasion = clamp(tr.persuasion + score, -12, 12);
   tr.msgs.push({ who: "hakim", name: findPerson(w, tr.judgeId)?.name ?? "Kad\u0131", text: reply.slice(0, 300), at: now });
@@ -2967,22 +3099,40 @@ function finishTrial(w, c, now) {
   const a = findPerson(w, c.accusedId);
   if (!a) return;
   const judge = findPerson(w, tr.judgeId);
-  const pGuilty = (c.evidence * ((judge?.honesty ?? 70) / 80) + Math.min(20, (c.witnesses?.length ?? 0) * 5) - tr.persuasion * 5) / 100;
-  const floor = c.evidence >= 80 ? Math.max(0.5, 0.85 - Math.max(0, tr.persuasion - 3) * 0.05) : 0.03;
+  const eyes = c.eyewitnesses ?? 0;
+  const courtAgainst = (c.witnesses ?? []).filter((x) => x.against).length;
+  const courtFor = (c.witnesses ?? []).filter((x) => !x.against).length;
+  const pGuilty = (c.evidence * ((judge?.honesty ?? 70) / 75) + Math.min(24, eyes * 8) + courtAgainst * 6 - courtFor * 6 - tr.persuasion * 7) / 100;
+  const floor = eyes >= 2 ? Math.max(0.2, 0.7 - Math.max(0, tr.persuasion - 4) * 0.07) : 0.03;
+  const p = clamp(Math.max(pGuilty, floor), 0.03, 0.97);
+  const blamed = findPerson(w, tr.blamedId);
+  const blameSticks = !!blamed && (c.eyeIds ?? []).includes(blamed.id) && tr.persuasion >= 4 && blamed.honesty < 60;
   const roll = rand(w);
-  const guilty = roll < clamp(Math.max(pGuilty, floor), 0.03, 0.97);
+  const guilty = !blameSticks && roll < p;
+  const strength2 = tr.persuasion >= 6 ? "g\xFC\xE7l\xFC" : tr.persuasion >= 2 ? "k\u0131smen ikna edici" : tr.persuasion >= 0 ? "zay\u0131f" : "aleyhine";
+  tr.reasoning = `Gerek\xE7e: ${c.basis ?? "savc\u0131l\u0131k iddias\u0131"}; delil g\xFCc\xFC ${Math.round(c.evidence)}/100${eyes ? `, ${eyes} g\xF6rg\xFC tan\u0131\u011F\u0131` : ", g\xF6rg\xFC tan\u0131\u011F\u0131 yok"}${courtAgainst ? `, ${courtAgainst} aleyhte tan\u0131k` : ""}; savunma ${strength2} (ikna ${tr.persuasion}). Su\xE7luluk ihtimali %${Math.round(p * 100)}.${blamed ? blameSticks ? ` Su\xE7 ${ek(blamed.name, "a")} y\xF6neldi: olay yerindeydi ve savunma ikna edici.` : ` ${blamed.name} su\xE7land\u0131 ama aleyhine delil bulunmad\u0131.` : ""}${tr.lastReason ? ` Kad\u0131n\u0131n notu: ${tr.lastReason}` : ""}`;
   const fromQ = placeOf(w, a.id, now);
   verdict(w, c.id, guilty, now);
   if (guilty && tr.persuasion >= 4 && c.crime !== "cinayet" && c.crime !== "isyan") {
     a.jailedDays = 0;
     c.sentence = `${c.sentence?.replace(/^\d+ gün zindan, /, "") ?? ""} (zindan yerine para cezas\u0131 \u2013 savunma ikna edici bulundu)`;
   }
-  tr.verdictText = guilty ? `SU\xC7LU. H\xFCk\xFCm: ${c.sentence}.` : "BERAAT. San\u0131k serbest.";
+  tr.verdictText = `${guilty ? `SU\xC7LU. H\xFCk\xFCm: ${c.sentence}.` : "BERAAT. San\u0131k serbest."} ${tr.reasoning}`;
   tr.msgs.push({ who: "hakim", name: judge?.name ?? "Kad\u0131", text: `Karar: ${tr.verdictText}${guilty && a.jailedDays > 0 ? " Bek\xE7i, mahk\xFBmu zindana g\xF6t\xFCr!" : ""}`, at: now });
   if (guilty && a.jailedDays > 0) {
-    const bekci = w.people.find((p) => p.prof === "bekci" && p.jailedDays === 0 && p.id !== a.id);
+    const bekci = w.people.find((p2) => p2.prof === "bekci" && p2.jailedDays === 0 && p2.id !== a.id);
     const m = w.buildings.find((b2) => b2.id === "mahkeme");
     if (bekci) w.escorts = [...w.escorts ?? [], { personId: a.id, bekciId: bekci.id, from: m ? { x: m.door.x + 0.5, y: m.door.y + 0.6 } : { x: fromQ?.x ?? 20, y: fromQ?.y ?? 12 }, at: now }];
+  }
+  if (blameSticks && blamed) {
+    openCase(w, blamed.id, c.crime, c.victimId, c.amount, 60);
+    const nc = w.cases.at(-1);
+    if (nc && nc.accusedId === blamed.id && nc.stage !== "kapandi") {
+      nc.basis = `${a.name} davas\u0131nda su\xE7land\u0131; olay yerindeydi`;
+      nc.eyeIds = (c.eyeIds ?? []).filter((x) => x !== blamed.id);
+      nc.complainantId = a.id;
+      log(w, `\u2696 Kad\u0131, ${ek(blamed.name, "\u0131")} yarg\u0131lanmak \xFCzere savc\u0131ya havale etti.`, blamed.id, now);
+    }
   }
   if (a.playerId) personal(w, a.playerId, `Davan\u0131z: ${tr.verdictText}`, now);
 }
@@ -3050,10 +3200,10 @@ function judgePrompt(w, c) {
   return {
     system: `${STYLE}
 Sen ${judge?.name ?? "\u015Fehrin kad\u0131s\u0131"}s\u0131n, adil ama sert bir kad\u0131 (h\xE2kim). D\xFCr\xFCstl\xFC\u011F\xFCn ${Math.round(judge?.honesty ?? 70)}/100. San\u0131\u011F\u0131n savunmas\u0131n\u0131 dinleyip k\u0131sa cevap verirsin ve ne kadar ikna oldu\u011Funu puanlars\u0131n.`,
-    user: `Dava: ${CRIME_LABEL[c.crime]}. San\u0131k: ${a?.name}. Delil g\xFCc\xFC ${Math.round(c.evidence)}/100. Tan\u0131k say\u0131s\u0131 ${c.witnesses?.length ?? 0}.
+    user: `Dava: ${CRIME_LABEL[c.crime]}. San\u0131k: ${a?.name}. Delil g\xFCc\xFC ${Math.round(c.evidence)}/100. Delilin kayna\u011F\u0131: ${c.basis ?? "savc\u0131l\u0131k iddias\u0131"}. Olay\u0131 2 m i\xE7inden g\xF6ren g\xF6rg\xFC tan\u0131\u011F\u0131: ${c.eyewitnesses ?? 0}. Mahkemeye gelen tan\u0131k: ${c.witnesses?.length ?? 0}.
 Duru\u015Fma:
 ${tr.msgs.map((m) => `${m.name} (${m.who}): ${m.text}`).join("\n")}
-San\u0131\u011F\u0131n son s\xF6z\xFCne kad\u0131 olarak cevap ver. Hakaret ya da r\xFC\u015Fvet teklifi ikna puan\u0131n\u0131 d\xFC\u015F\xFCr\xFCr; somut tan\u0131k, mazeret ve tutarl\u0131l\u0131k art\u0131r\u0131r. JSON d\xF6nd\xFCr: {"cevap":"...","ikna":-4..3 aras\u0131 tam say\u0131}`
+San\u0131\u011F\u0131n son s\xF6z\xFCne kad\u0131 olarak cevap ver. Adil ol: g\xF6rg\xFC tan\u0131\u011F\u0131 yoksa ve delil dolayl\u0131ysa, tutarl\u0131 bir mazeret (nerede/kiminle oldu\u011Fu), delillerle \xE7eli\u015Fmeyen makul bir a\xE7\u0131klama ya da nefsi m\xFCdafaa san\u0131\u011F\u0131 aklayabilir \u2192 y\xFCksek puan ver. Savunma delillerle ya da tan\u0131klarla \xE7eli\u015Fiyorsa, kendi i\xE7inde tutars\u0131zsa, hakaret ya da r\xFC\u015Fvet i\xE7eriyorsa d\xFC\u015F\xFCk puan ver. JSON d\xF6nd\xFCr: {"cevap":"kad\u0131n\u0131n k\u0131sa cevab\u0131","ikna":-4..4 aras\u0131 tam say\u0131,"gerekce":"tek c\xFCmle: neden bu puan"}`
   };
 }
 
@@ -3393,6 +3543,10 @@ function endOfDayLife(w) {
   if (w.rumors.length > 30) w.rumors.splice(0, w.rumors.length - 30);
 }
 var NATURE_TEXT = { kuraklik: "KURAKLIK ba\u015Flad\u0131! \u0130ki hafta boyunca bu\u011Fday az \xE7\u0131kacak, ekmek pahalanacak.", salgin: "SALGIN! Hastal\u0131k yay\u0131l\u0131yor; hekimler \xE7ok \xE7al\u0131\u015Facak.", sel: "SEL bask\u0131n\u0131! Tarlalar ve liman zarar g\xF6rd\xFC.", bereket: "BEREKET y\u0131l\u0131: tarlalar bol \xFCr\xFCn veriyor.", balik: "Denizde bal\u0131k bollu\u011Fu var!" };
+function disaster(w, kind, text) {
+  w.disaster = { id: (w.disaster?.id ?? 0) + 1, kind, text, day: w.day };
+  log(w, `\u26A0 ${text}`);
+}
 function nature(w) {
   const n = w.nature;
   if (n && w.day > n.until) {
@@ -3402,11 +3556,17 @@ function nature(w) {
   if (!w.nature && w.day >= w.nextDrought) {
     w.nature = { kind: "kuraklik", start: w.day, until: w.day + 13 };
     w.nextDrought = w.day + 180;
-    log(w, NATURE_TEXT.kuraklik);
+    disaster(w, "kuraklik", NATURE_TEXT.kuraklik);
   } else if (!w.nature && chance(w, 0.02)) {
     const kind = pick(w, ["salgin", "sel", "bereket", "balik"]);
     w.nature = { kind, start: w.day, until: w.day + (kind === "bereket" ? 7 : kind === "salgin" ? 5 : 3) };
-    log(w, NATURE_TEXT[kind]);
+    if (kind === "salgin" || kind === "sel") disaster(w, kind, NATURE_TEXT[kind]);
+    else log(w, NATURE_TEXT[kind]);
+  }
+  {
+    const adults2 = w.people.filter((p) => p.prof !== "naip");
+    const starving = adults2.filter((p) => p.hunger >= 70).length / Math.max(1, adults2.length);
+    if (starving >= 0.35 && (w.disaster?.kind !== "kitlik" || w.day - w.disaster.day >= 5)) disaster(w, "kitlik", `KITLIK! Halk\u0131n %${Math.round(starving * 100)}\u2019i a\xE7. Ekmek bulmak zorla\u015Ft\u0131; ambar ve f\u0131r\u0131nlar kritik.`);
   }
   if (w.nature?.kind === "salgin") {
     for (const p of w.people) if (p.prof !== "naip" && chance(w, 0.25)) p.health = clamp(p.health - 12);
@@ -3595,10 +3755,10 @@ function catcher(w, night) {
   const power = Math.min(0.85, 0.12 + pool.length * 0.12 + (night ? 0 : 0.1));
   return pool.length && chance(w, power) ? pick(w, pool) : void 0;
 }
-function arrest(w, criminal, crime, victimId, amount, by) {
+function arrest(w, criminal, crime, victimId, amount, by, proof) {
   const c = by ?? catcher(w, w.hour >= 21 || w.hour < 6) ?? w.people.find((x) => x.prof === "bekci" && active2(x));
   if (!c) return null;
-  const a = { id: nextId(w, "A"), criminalId: criminal.id, catcherId: c.id, crime, victimId, amount, day: w.day, hour: w.hour, offer: 0, status: "bekliyor", at: w.serverNow ?? w.lastTickAt };
+  const a = { id: nextId(w, "A"), criminalId: criminal.id, catcherId: c.id, crime, victimId, amount, day: w.day, hour: w.hour, offer: 0, status: "bekliyor", at: w.serverNow ?? w.lastTickAt, ...proof ?? {} };
   w.arrests.push(a);
   criminal.jailedDays = Math.max(criminal.jailedDays, 1);
   if (criminal.orderedBy && chance(w, 0.65)) revealOrder(w, criminal);
@@ -3620,10 +3780,11 @@ function crimeSeen(w, criminal, victim, crime, amount) {
   const cq = placed.find((q) => q.p.id === criminal.id);
   const near = cq ? placed.filter((q) => q.visible && q.p.id !== criminal.id && q.p.id !== victim?.id && Math.hypot(q.x - cq.x, q.y - cq.y) <= WITNESS_R) : [];
   const bekci = near.find((q) => q.p.prof === "bekci" && q.p.jailedDays === 0 && q.p.id !== criminal.id);
-  if (bekci) return arrest(w, criminal, crime, victim?.id ?? null, amount, bekci.p);
+  const eyes = near.length;
+  if (bekci) return arrest(w, criminal, crime, victim?.id ?? null, amount, bekci.p, { evidence: Math.min(95, 80 + eyes * 3), eyewitnesses: eyes, eyeIds: near.map((q) => q.p.id), complainantId: bekci.p.id, basis: `su\xE7\xFCst\xFC: bek\xE7i 2 m i\xE7inde g\xF6rd\xFC${eyes > 1 ? `, ${eyes - 1} g\xF6rg\xFC tan\u0131\u011F\u0131 daha` : ""}` });
   const reporter = victim && findPerson(w, victim.id) && victim.health > 0 ? victim : near.find((q) => fullAI(q.p))?.p;
   if (reporter && victim) {
-    w.crimeReports = [...w.crimeReports ?? [], { criminalId: criminal.id, victimId: victim.id, crime, amount, at: now }].slice(-20);
+    w.crimeReports = [...w.crimeReports ?? [], { criminalId: criminal.id, victimId: victim.id, crime, amount, at: now, eyes, eyeIds: near.map((q) => q.p.id) }].slice(-20);
     log(w, `\u260E ${reporter.name}, ${ek(criminal.name, "\u0131")} bek\xE7iye \u015Fik\xE2yet etmeye gidiyor.`, reporter.id);
   }
   return null;
@@ -3640,7 +3801,8 @@ function processReports(w, now) {
     const by = w.people.find((x) => x.prof === "bekci" && x.jailedDays === 0 && x.id !== cr.id);
     if (by) {
       log(w, `${by.name} \u015Fik\xE2yeti ald\u0131 ve savc\u0131ya bildirdi.`, by.id);
-      arrest(w, cr, r.crime, r.victimId, r.amount, by);
+      const e = r.eyes ?? 0;
+      arrest(w, cr, r.crime, r.victimId, r.amount, by, { evidence: Math.min(85, 45 + e * 12), eyewitnesses: e, eyeIds: r.eyeIds ?? [], complainantId: r.victimId, basis: e ? `ma\u011Fdurun \u015Fik\xE2yeti + ${e} g\xF6rg\xFC tan\u0131\u011F\u0131` : "yaln\u0131zca ma\u011Fdurun \u015Fik\xE2yeti (s\xF6z s\xF6ze kar\u015F\u0131)" });
     }
   }
   w.crimeReports = left;
@@ -3665,7 +3827,16 @@ function decideBribe(w, a, accept) {
     return `${ca.name} ${a.offer} Dinar'\u0131 ald\u0131 ve ${ek(cr.name, "\u0131")} sald\u0131.`;
   }
   a.status = "ret";
-  openCase(w, cr.id, a.crime, a.victimId, a.amount, a.crime === "cinayet" ? 90 : 70);
+  openCase(w, cr.id, a.crime, a.victimId, a.amount, a.evidence ?? (a.crime === "cinayet" ? 60 : 55));
+  {
+    const nc = w.cases.filter((x) => x.accusedId === cr.id && x.crime === a.crime && x.stage !== "kapandi").at(-1);
+    if (nc) {
+      nc.eyewitnesses = a.eyewitnesses ?? 0;
+      nc.basis = a.basis ?? "bek\xE7i tutana\u011F\u0131";
+      nc.eyeIds = a.eyeIds ?? [];
+      nc.complainantId = a.complainantId ?? a.catcherId;
+    }
+  }
   rel(cr, ca, -15, "beni tutuklad\u0131");
   if (a.offer > 0) {
     openCase(w, cr.id, "rusvet", null, a.offer, 80);
@@ -4045,6 +4216,7 @@ var FACTIONS = [
 ];
 var SEAT_COUNT = 16;
 var SEATS = Array.from({ length: SEAT_COUNT }, (_, i) => ({ id: `mv${i + 1}`, label: `Milletvekili ${i + 1}`, kind: "genel", key: "genel" }));
+var MP_ALLOWANCE = 4;
 var DEBATE_DAYS = 1;
 var VOTE_DAYS = 1;
 var SANCTION_DAYS = 3;
@@ -4423,9 +4595,14 @@ function tally(b2) {
   for (const v of Object.values(b2.votes)) t[v] += 1;
   return t;
 }
+var headIsPlayer = (w) => {
+  const k = findPerson(w, w.kayzerId);
+  return !!k?.playerId && !k.npc;
+};
 function meclisDay(w, playerDecides, headOnline) {
   const ms = members(w);
   for (const p of ms) if (w.meclis.salary > 0 && p.jailedDays === 0) transfer(w, "saray", p.id, w.meclis.salary, "meclis maa\u015F\u0131");
+  for (const p of ms) if (p.jailedDays === 0 && w.treasury >= MP_ALLOWANCE) transfer(w, "saray", p.id, MP_ALLOWANCE, "milletvekili \xF6dene\u011Fi");
   for (const p of ms) if (!playerDecides(p) && chance(w, 0.12)) npcPropose(w, p);
   for (const b2 of w.meclis.bills) {
     if (b2.status === "tartisma") {
@@ -4454,6 +4631,9 @@ function meclisDay(w, playerDecides, headOnline) {
         b2.voteUntil = w.day + SANCTION_DAYS;
         mlog(w, `\u201C${b2.title}\u201D Kayzer'in onay\u0131n\u0131 bekliyor.`);
       } else enact(w, b2);
+    } else if (b2.status === "onay" && (!headIsPlayer(w) || !headOnline && w.day >= b2.voteUntil)) {
+      const approve = b2.kind === "af" ? chance(w, 0.3) : b2.kind === "vergi" ? b2.value >= w.taxRate - 4 || w.treasury > 1500 : true;
+      sanction(w, b2, approve);
     } else if (b2.status === "onay" && w.day > b2.voteUntil) {
       b2.status = "zamanasimi";
       b2.result = "Kayzer onaylamad\u0131, karar d\xFC\u015Ft\xFC";
@@ -4483,16 +4663,18 @@ function npcPropose(w, p) {
   const corrupt = w.ledger.filter((l) => (l.reason === "zimmet" || l.reason === "r\xFC\u015Fvet") && w.day - l.day < 15).map((l) => l.to);
   const off = w.people.filter((x) => STATE_PROFS.includes(x.prof) && x.honesty < 40);
   let r = "";
-  if (!w.budget.approved && f !== "cumhuriyetci") r = propose(w, p, "butce", Math.round(Math.min(3e3, Math.max(800, w.treasury * 0.2)) / 100) * 100, "");
-  else if (f === "esnaf" && w.taxRate > 12) r = propose(w, p, "vergi", w.taxRate - 2, "");
-  else if (f === "cumhuriyetci" && corrupt[0] && findPerson(w, corrupt[0])?.id !== w.kayzerId) r = propose(w, p, "sorusturma", 0, corrupt[0]);
-  else if (f === "cumhuriyetci" && w.regime === "cumhuriyet" && avgMood < 35 && w.kayzerId && findPerson(w, w.kayzerId)?.faction !== p.faction) r = propose(w, p, "azil", 0, "");
-  else if (f === "cumhuriyetci" && off[0]) r = propose(w, p, "gensoru", 0, off[0].id);
-  else if (f === "halkci" && w.people.filter((x) => x.jailedDays > 0).length > 4) r = propose(w, p, "af", 0, "");
-  else if (f === "halkci" && !w.projects.some((x) => !x.done) && w.treasury > 1500) r = propose(w, p, "insaat", 800, "");
-  else if (f === "halkci" && w.prices.ekmek > 4.5) r = propose(w, p, "fiyat", Math.round(BASE_PRICE.ekmek * 1.2 * 10) / 10, "ekmek");
-  else if (f === "saltanatci" && (w.salaries.asker ?? 0) < 12) r = propose(w, p, "maas", 12, "asker");
-  else if (chance(w, 0.3)) r = propose(w, p, "genelge", 0, "", pick(w, ["Kuyular\u0131n temizli\u011Fi i\xE7in \xE7a\u011Fr\u0131", "Pazarda d\xFCr\xFCst tart\u0131 \xE7a\u011Fr\u0131s\u0131", "Yetimlere yard\u0131m \xE7a\u011Fr\u0131s\u0131", "Gece asayi\u015Fi i\xE7in bek\xE7ilere te\u015Fekk\xFCr", "K\u0131tl\u0131\u011Fa kar\u015F\u0131 ambar \xE7a\u011Fr\u0131s\u0131"]));
+  const recent = (k) => w.meclis.bills.some((b2) => b2.kind === k && (["tartisma", "oylama", "onay"].includes(b2.status) || w.day - b2.day < 5));
+  const budgetRejected = w.meclis.bills.filter((b2) => b2.kind === "butce" && b2.status === "ret").length;
+  if (!w.budget.approved && f !== "cumhuriyetci" && !recent("butce")) r = propose(w, p, "butce", Math.round(Math.min(budgetRejected ? 1400 : 3e3, Math.max(800, w.treasury * 0.2)) / 100) * 100, "");
+  else if (!recent("vergi") && f === "esnaf" && w.taxRate > 12) r = propose(w, p, "vergi", w.taxRate - 2, "");
+  else if (!recent("sorusturma") && f === "cumhuriyetci" && corrupt[0] && findPerson(w, corrupt[0])?.id !== w.kayzerId) r = propose(w, p, "sorusturma", 0, corrupt[0]);
+  else if (!recent("azil") && f === "cumhuriyetci" && w.regime === "cumhuriyet" && avgMood < 35 && w.kayzerId && findPerson(w, w.kayzerId)?.faction !== p.faction) r = propose(w, p, "azil", 0, "");
+  else if (!recent("gensoru") && f === "cumhuriyetci" && off[0]) r = propose(w, p, "gensoru", 0, off[0].id);
+  else if (!recent("af") && f === "halkci" && w.people.filter((x) => x.jailedDays > 0).length > 4) r = propose(w, p, "af", 0, "");
+  else if (!recent("insaat") && f === "halkci" && !w.projects.some((x) => !x.done) && w.treasury > 1500) r = propose(w, p, "insaat", 800, "");
+  else if (!recent("fiyat") && f === "halkci" && w.prices.ekmek > 4.5) r = propose(w, p, "fiyat", Math.round(BASE_PRICE.ekmek * 1.2 * 10) / 10, "ekmek");
+  else if (!recent("maas") && f === "saltanatci" && (w.salaries.asker ?? 0) < 12) r = propose(w, p, "maas", 12, "asker");
+  else if (!recent("genelge") && chance(w, 0.3)) r = propose(w, p, "genelge", 0, "", pick(w, ["Kuyular\u0131n temizli\u011Fi i\xE7in \xE7a\u011Fr\u0131", "Pazarda d\xFCr\xFCst tart\u0131 \xE7a\u011Fr\u0131s\u0131", "Yetimlere yard\u0131m \xE7a\u011Fr\u0131s\u0131", "Gece asayi\u015Fi i\xE7in bek\xE7ilere te\u015Fekk\xFCr", "K\u0131tl\u0131\u011Fa kar\u015F\u0131 ambar \xE7a\u011Fr\u0131s\u0131"]));
   void r;
 }
 function budgetLeft(w) {
@@ -5005,8 +5187,16 @@ function leaveHome(p) {
 }
 function energyHour(w, now) {
   for (const p of w.people) {
+    if (p.jailedDays > 0 && (w.hour === 8 || w.hour === 18)) {
+      p.hunger = Math.min(p.hunger, 25);
+      p.thirst = Math.min(p.thirst, 20);
+    }
     if (!p.playerId || p.npc) {
       p.energy = 80;
+      continue;
+    }
+    if (p.jailedDays > 0) {
+      p.energy = clamp((p.energy ?? 80) + 3);
       continue;
     }
     const inside = (p.homeUntil ?? 0) > now;
@@ -5468,7 +5658,7 @@ function orgAct(w, by, deed) {
     o.suspicion = clamp(o.suspicion + 4);
     return `Gece duvarlara bildiriler as\u0131ld\u0131 (${ppl.length} ki\u015Fi okudu). \u015E\xFCphe artt\u0131.`;
   }
-  o.actedDay = w.day;
+  if (deed !== "ayaklanma") o.actedDay = w.day;
   if (deed === "hirsizlik") {
     if (o.kind !== "hirsiz") return "Soygun h\u0131rs\u0131zlar loncas\u0131n\u0131n i\u015Fidir.";
     const v = [...w.people].filter((p) => p.money > 120 && !o.members.includes(p.id)).sort((a, b2) => b2.money - a.money)[0];
@@ -5492,27 +5682,32 @@ function orgAct(w, by, deed) {
     const proj = (w.projects ?? []).find((x) => !x.done);
     if (proj) proj.progress = Math.max(0, proj.progress - 2);
     o.suspicion = clamp(o.suspicion + 12);
+    w.disaster = { id: (w.disaster?.id ?? 0) + 1, kind: "yangin", text: "YANGIN! K\u0131\u015Fla\u2019n\u0131n ambar\u0131 ate\u015Fe verildi; askerlerin morali d\xFC\u015Ft\xFC.", day: w.day };
     log(w, "\u{1F4A5} Gece K\u0131\u015Fla\u2019n\u0131n ambar\u0131 ate\u015Fe verildi! Faili me\xE7hul.");
     if (chance(w, 0.2 + o.suspicion / 250)) reveal(w, o, [by.id], "Sabotajc\u0131lar g\xF6r\xFCld\xFC");
     return "Sabotaj ba\u015Far\u0131l\u0131: askerlerin morali d\xFC\u015Ft\xFC" + (proj ? ", \u015Fantiye gecikti." : ".");
   }
   if (o.kind === "hirsiz") return "Lonca ayaklanmaz.";
-  if (o.members.length < 8) return `Ayaklanma i\xE7in en az 8 \xFCye gerekir (${o.members.length}).`;
-  if (o.kind === "cumhuriyet" && w.cumhuriyet < 40) return `Halk hen\xFCz haz\u0131r de\u011Fil (cumhuriyet ${Math.round(w.cumhuriyet)}/40).`;
+  const claimant = by.id === w.exKayzerId && w.regime === "imparatorluk";
+  if (w.regime !== "imparatorluk" || !w.kayzerId) return "Ayaklanacak bir taht yok.";
+  const sh = republicShare(w);
+  if (sh < REBEL_SHARE) return `Halk hen\xFCz haz\u0131r de\u011Fil: halk\u0131n %${Math.round(sh * 100)}'i cumhuriyet\xE7ilikte 70+ (en az %50 gerekir).`;
   if (w.isyan) return "Zaten isyan var.";
-  for (const id of o.members) {
-    const p = findPerson(w, id);
-    if (p) {
-      p.republic = clamp(p.republic + 25);
-      p.plotting = "revolution";
-      p.loyalty = clamp(p.loyalty - 30);
-    }
+  void claimant;
+  if (claimant && by.jailedDays > 0) {
+    by.jailedDays = 0;
+    log(w, `\u26D3 Asiler zindan\u0131 bast\u0131 ve ${ek(by.name, "\u0131")} kurtard\u0131!`, by.id);
   }
   startIsyanHook.fn(w);
   const iz = w.isyan;
   if (iz) {
+    o.actedDay = w.day;
     iz.leaderId = by.id;
-    for (const id of o.members) if (!iz.rebels.includes(id)) iz.rebels.push(id);
+    if (!iz.rebels.includes(by.id)) iz.rebels.push(by.id);
+    for (const id of o.members) {
+      const p = findPerson(w, id);
+      if (p && p.republic >= REBEL_MIN && p.jailedDays === 0 && !iz.rebels.includes(id)) iz.rebels.push(id);
+    }
     chronicle(w, "isyan", `\u201C${o.name}\u201D ayaklanmay\u0131 ba\u015Flatt\u0131.`);
     return "\u{1F525} AYAKLANMA BA\u015ELADI! Saray\u2019a y\xFCr\xFCy\xFCn.";
   }
@@ -6435,7 +6630,8 @@ function applyAction(w, playerId, a, now) {
   const isKayzer = (ww, p) => canRule(ww, p, now, ONLINE_WINDOW_MS);
   if ((me.homeUntil ?? 0) > now && !["goHome", "setSpeed", "setGoal", "petition", "answerProposal", "defense", "restCase"].includes(a.t)) leaveHome(me);
   const jailedOk = ["petition", "eat", "divorce", "answerProposal", "defense", "restCase", "offerBribe", "setSpeed", "setGoal"];
-  if (me.jailedDays > 0 && !jailedOk.includes(a.t)) return no("Zindandas\u0131n\u0131z; \u015Fimdilik sadece dilek\xE7e yazabilirsiniz.");
+  const cellRising = a.t === "orgAct" && a.deed === "ayaklanma";
+  if (me.jailedDays > 0 && !jailedOk.includes(a.t) && !cellRising) return no("Zindandas\u0131n\u0131z; \u015Fimdilik sadece dilek\xE7e yazabilirsiniz.");
   const exileOk = [...jailedOk, "restore", "buy", "sell", "marry", "haveChild", "school", "cure"];
   if (me.exiledDays > 0 && !exileOk.includes(a.t)) return no(`S\xFCrg\xFCndesiniz (${me.exiledDays} g\xFCn kald\u0131).`);
   const need = rules.reach ? actionNeed(w, me, a) : null;
@@ -7180,8 +7376,9 @@ function applyAction(w, playerId, a, now) {
       c.witnesses = c.witnesses ?? [];
       if (c.witnesses.some((x) => x.id === me.id)) return no("Zaten tan\u0131ks\u0131n\u0131z.");
       c.witnesses.push({ id: me.id, against: a.against });
-      c.evidence = clamp(c.evidence + (a.against ? 15 : -10));
+      if (!c.trial) c.evidence = clamp(c.evidence + (a.against ? 15 : -10));
       const acc = findPerson(w, c.accusedId);
+      if (c.trial && !c.trial.done) c.trial.msgs.push({ who: me.id === c.trial.blamedId ? "suclanan" : "tanik", name: me.name, text: (String(a.text ?? "").trim() || (a.against ? "Aleyhte tan\u0131kl\u0131k ediyorum." : "Lehte tan\u0131kl\u0131k ediyorum.")).slice(0, 300), at: now });
       if (acc) rel(acc, me, a.against ? -30 : 12, a.against ? "aleyhime tan\u0131kl\u0131k etti" : "lehime tan\u0131kl\u0131k etti");
       return ok2("Tan\u0131kl\u0131\u011F\u0131n\u0131z tutana\u011Fa ge\xE7ti.");
     }
@@ -7305,6 +7502,7 @@ function seize(w, me, now) {
 function restore(w, me, founder) {
   if (!founder) return no("Hanedan hakk\u0131 sadece kurucuya ve soyundan gelenlere aittir.");
   if (w.kayzerId === me.id) return no("Zaten tahttas\u0131n\u0131z efendim.");
+  if (w.exKayzerId === me.id) return no("Zindana girdi\u011Finiz i\xE7in taht\u0131 kaybettiniz. Geri alman\u0131n yolu: Cemiyet \u2192 Ayaklanma ile bir isyana \xF6nderlik edip kazanmak, ya da cumhuriyette Ba\u015Fkan se\xE7ilmek.");
   const loyal = w.people.filter((p) => p.prof === "asker" && p.loyalty >= 45).length;
   if (loyal < 3 && w.cumhuriyet >= 60) return no(`Hanedan hakk\u0131 i\xE7in en az 3 sad\u0131k asker ya da cumhuriyet iste\u011Finin 60'\u0131n alt\u0131na inmesi gerekir (\u015Fu an ${loyal} asker, cumhuriyet ${w.cumhuriyet}).`);
   const old = findPerson(w, w.kayzerId);
@@ -7530,8 +7728,8 @@ function judgeReply(w, caseId, out, now) {
   if (!c?.trial?.pending) return;
   const last = c.trial.msgs.at(-1)?.text ?? "";
   const rule = judgeRule(w, c, last);
-  const score = typeof out?.ikna === "number" && Number.isFinite(out.ikna) ? Math.max(-4, Math.min(3, Math.round(out.ikna))) : rule.score;
-  judgeAnswer(w, c, out?.cevap ? String(out.cevap) : rule.reply, score, now);
+  const score = typeof out?.ikna === "number" && Number.isFinite(out.ikna) ? Math.max(-4, Math.min(4, Math.round(out.ikna))) : rule.score;
+  judgeAnswer(w, c, out?.cevap ? String(out.cevap) : rule.reply, score, now, out?.gerekce ? String(out.gerekce) : void 0);
 }
 function llmBudget(w, today, perDay) {
   w.llm = w.llm ?? { day: "", n: 0, talkAt: 0 };

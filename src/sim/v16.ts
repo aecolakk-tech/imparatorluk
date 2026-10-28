@@ -13,7 +13,7 @@ import { chance, clamp, nextId, pick, rand } from './rng';
 import { placeOf, placePeople, ESCORT_MS } from './place';
 import { arrest, decideBribe, bribeAcceptChance, WITNESS_R, processReports } from './life';
 import { verdict } from './tick';
-import { CRIME_LABEL, fullAI } from './ai';
+import { CRIME_LABEL, fullAI, openCase } from './ai';
 import { addressOf, opinion } from './chat';
 import { marketPrice } from './economy';
 import { findPath, WALK_SPEED, walkPos, type Pt } from './move';
@@ -50,7 +50,7 @@ function investigate(w: World, co: Corpse, now: number): void {
   const killer = findPerson(w, co.killerId);
   const p = killer ? clamp(0.45 + 0.15 * co.witnesses.length, 0, 0.95) : 0;
   if (killer && rand(w) < p) {
-    arrest(w, killer, 'cinayet', co.personId, 0, bekci);
+    const e = co.witnesses.length; arrest(w, killer, 'cinayet', co.personId, 0, bekci ?? undefined, { evidence: Math.min(92, 35 + e * 15), eyewitnesses: e, eyeIds: co.witnesses, complainantId: co.reportedBy ?? null, basis: e ? `ceset incelemesi + ${e} görgü tanığı (2 m içinde)` : 'ceset incelemesi, görgü tanığı yok (dolaylı delil)' });
     co.note = `${bekci?.name ?? 'Bekçi'} olay yerini inceledi${co.witnesses.length ? `, ${co.witnesses.length} tanık dinledi` : ''} ve ${savci?.name ?? 'savcıya'} bildirdi. Şüpheli: ${killer.name}.`;
   } else co.note = `${bekci?.name ?? 'Bekçi'} olay yerini inceledi, ${savci?.name ?? 'savcıya'} bildirdi; katil şimdilik bulunamadı.`;
   log(w, `🔎 ${co.note}`, co.killerId ?? undefined, now);
@@ -98,10 +98,31 @@ export function startTrial(w: World, c: CourtCase, now: number): void {
   const victim = findPerson(w, c.victimId)?.name ?? w.corpses?.find((x) => x.personId === c.victimId)?.name;
   c.trial = { at: now, until: now + TRIAL_MS, judgeId: judge?.id ?? null, prosecutorId: pros?.id ?? null, persuasion: 0, done: false, msgs: [
     { who: 'savci', name: pros?.name ?? 'Savcı', text: `Sayın Kadı, sanık ${a.name} ${CRIME_LABEL[c.crime].toLocaleLowerCase('tr')} ile itham ediliyor${victim ? `; mağdur ${victim}` : ''}. Deliller ${c.evidence >= 70 ? 'güçlü' : c.evidence >= 45 ? 'yeterli' : 'zayıf'}${c.witnesses?.length ? `, ${c.witnesses.length} tanık var` : ''}. Cezalandırılmasını talep ediyorum.`, at: now },
-    { who: 'hakim', name: judge?.name ?? 'Kadı', text: `Sanık ${a.name}, söz sizde. Kendinizi savunun; ${Math.round(TRIAL_MS / 60000 * 10) / 10} dakikanız var.`, at: now + 1000 },
+    { who: 'hakim', name: judge?.name ?? 'Kadı', text: openingStatement(w, c, a), at: now + 500 },
+    ...eyeTestimony(w, c, a, now + 700),
+    { who: 'hakim', name: judge?.name ?? 'Kadı', text: `Sanık ${a.name}, söz sizde. Başkasını suçluyorsanız adını söyleyin; mahkemeye çağrılır. Kendinizi savunun; ${Math.round(TRIAL_MS / 60000 * 10) / 10} dakikanız var.`, at: now + 1000 },
   ] };
   c.deadline = w.day + 2;
   log(w, `⚖ ${ek(a.name, 'ın')} ${CRIME_LABEL[c.crime].toLocaleLowerCase('tr')} davası görülüyor. Kadı: ${judge?.name ?? '—'}, Savcı: ${pros?.name ?? '—'}.`, a.id, now);
+}
+
+/** v1.9.6: the judge tells the defendant the charge, the evidence and who complained. */
+function openingStatement(w: World, c: CourtCase, a: Person): string {
+  const victim = findPerson(w, c.victimId)?.name ?? w.corpses?.find((x) => x.personId === c.victimId)?.name;
+  const comp = findPerson(w, c.complainantId)?.name;
+  const eyes = (c.eyeIds ?? []).map((id) => findPerson(w, id)?.name).filter(Boolean);
+  return `${a.name}, ${CRIME_LABEL[c.crime].toLocaleLowerCase('tr')} ile yargılanıyorsunuz${victim ? ` (mağdur: ${victim})` : ''}. Deliller: ${c.basis ?? 'savcılık iddiası'}; delil gücü ${Math.round(c.evidence)}/100${eyes.length ? `; olayı 2 m içinden görenler: ${eyes.join(', ')}` : '; görgü tanığı yok'}. Şikâyet eden: ${comp ?? 'savcılık (resen)'}.`;
+}
+/** NPC eyewitnesses (within 2 m) testify; their word moves the scale. */
+function eyeTestimony(w: World, c: CourtCase, a: Person, at: number): { who: 'tanik'; name: string; text: string; at: number }[] {
+  const out: { who: 'tanik'; name: string; text: string; at: number }[] = [];
+  for (const id of (c.eyeIds ?? []).slice(0, 3)) {
+    const p = findPerson(w, id); if (!p || p.id === a.id || !fullAI(p) || p.jailedDays > 0) continue;
+    const against = (p.relations[a.id] ?? 0) < 40 || p.honesty > 60;
+    (c.witnesses ??= []).push({ id: p.id, against });
+    out.push({ who: 'tanik', name: p.name, text: against ? `Kendi gözümle gördüm, ${a.name} yaptı. Yemin ederim.` : `Oradaydım ama tam göremedim; ${a.name} iyi bir insandır.`, at: at + out.length * 100 });
+  }
+  return out;
 }
 
 /** Rule-based judge: how convincing a defence line is (−4..+3) and an answer. */
@@ -125,10 +146,24 @@ export function addDefense(_w: World, c: CourtCase, me: Person, text: string, no
   const tr = c.trial; if (!tr || tr.done) return 'Şu an görülen bir davanız yok.';
   if (c.accusedId !== me.id) return 'Sadece sanık savunma yapar.';
   if (tr.pending) return 'Kadı bir önceki sözünüzü düşünüyor…';
-  tr.msgs.push({ who: 'sanik', name: me.name, text: text.slice(0, 300), at: now }); tr.pending = true; return null;
+  tr.msgs.push({ who: 'sanik', name: me.name, text: text.slice(0, 300), at: now }); tr.pending = true;
+  if (!tr.blamedId) summonBlamed(_w, c, me, text, now);
+  return null;
 }
-export function judgeAnswer(w: World, c: CourtCase, reply: string, score: number, now: number): void {
-  const tr = c.trial; if (!tr || tr.done) return;
+/** v1.9.6: “X yaptı” → X is summoned and answers; if X was at the scene, the blame can stick. */
+function summonBlamed(w: World, c: CourtCase, me: Person, text: string, now: number): void {
+  const tr = c.trial!; const t = text.toLocaleLowerCase('tr');
+  if (!/yaptı|öldürdü|suçlu|o vurdu|katil|çaldı|saldırdı|o idi|oydu/.test(t)) return;
+  const skip = new Set([me.id, tr.judgeId, tr.prosecutorId, c.victimId]);
+  const hit = w.people.filter((p) => !skip.has(p.id) && p.prof !== 'naip').find((p) => { const n = p.name.toLocaleLowerCase('tr'); const last = n.split(' ').slice(-1)[0]!; return t.includes(n) || (last.length >= 4 && new RegExp(`(^|[^a-zçğıöşü])${last}`).test(t)); });
+  if (!hit) return;
+  tr.blamedId = hit.id; const atScene = (c.eyeIds ?? []).includes(hit.id);
+  tr.msgs.push({ who: 'hakim', name: findPerson(w, tr.judgeId)?.name ?? 'Kadı', text: `${hit.name} mahkemeye çağrılsın! Suçlama ciddi.`, at: now + 1 });
+  if (hit.playerId && !hit.npc) personal(w, hit.playerId, `⚖ ${me.name} davasında sizi suçladı; mahkemeye çağrıldınız (duruşma ekranından cevap verin).`, now);
+  else tr.msgs.push({ who: 'suclanan', name: hit.name, text: atScene ? (hit.honesty < 40 ? 'Oradaydım… ama elim kimseye kalkmadı, yemin ederim!' : 'Oradaydım, her şeyi gördüm; ben yapmadım.') : 'Ben o sırada başka yerdeydim, bu bir iftira!', at: now + 2 });
+}
+export function judgeAnswer(w: World, c: CourtCase, reply: string, score: number, now: number, reason?: string): void {
+  const tr = c.trial; if (!tr || tr.done) return; if (reason) tr.lastReason = reason.slice(0, 200);
   tr.pending = false; tr.persuasion = clamp(tr.persuasion + score, -12, 12);
   tr.msgs.push({ who: 'hakim', name: findPerson(w, tr.judgeId)?.name ?? 'Kadı', text: reply.slice(0, 300), at: now });
   if (tr.msgs.filter((m) => m.who === 'sanik').length >= 5) finishTrial(w, c, now);
@@ -139,19 +174,28 @@ export function finishTrial(w: World, c: CourtCase, now: number): void {
   for (const o of w.cases) if (o !== c && o.accusedId === c.accusedId && o.stage !== 'kapandi' && (o.crime === c.crime || (o.victimId && o.victimId === c.victimId))) { o.stage = 'kapandi'; o.verdict = 'dusuruldu'; o.sentence = 'Aynı olay için görülen davayla birleştirildi.'; if (o.trial) { o.trial.done = true; o.trial.doneAt = now; } }
   const a = findPerson(w, c.accusedId); if (!a) return;
   const judge = findPerson(w, tr.judgeId);
-  const pGuilty = (c.evidence * ((judge?.honesty ?? 70) / 80) + Math.min(20, (c.witnesses?.length ?? 0) * 5) - tr.persuasion * 5) / 100; // v1.9.3: witnesses weigh; one good sentence no longer erases a 90-evidence murder
-  const floor = c.evidence >= 80 ? Math.max(0.5, 0.85 - Math.max(0, tr.persuasion - 3) * 0.05) : 0.03; // v1.9.3: a well-witnessed deed is rarely acquitted on words alone
-  const roll = rand(w); const guilty = roll < clamp(Math.max(pGuilty, floor), 0.03, 0.97);
+  // v1.9.6: the defence really matters. Evidence comes from what actually happened (suçüstü / şikâyet / ceset);
+  // only eyewitnesses within 2 m (≥2) keep guilt likely whatever is said.
+  const eyes = c.eyewitnesses ?? 0; const courtAgainst = (c.witnesses ?? []).filter((x) => x.against).length;
+  const courtFor = (c.witnesses ?? []).filter((x) => !x.against).length;
+  const pGuilty = (c.evidence * ((judge?.honesty ?? 70) / 75) + Math.min(24, eyes * 8) + courtAgainst * 6 - courtFor * 6 - tr.persuasion * 7) / 100;
+  const floor = eyes >= 2 ? Math.max(0.2, 0.7 - Math.max(0, tr.persuasion - 4) * 0.07) : 0.03;
+  const p = clamp(Math.max(pGuilty, floor), 0.03, 0.97);
+  const blamed = findPerson(w, tr.blamedId); const blameSticks = !!blamed && (c.eyeIds ?? []).includes(blamed.id) && tr.persuasion >= 4 && blamed.honesty < 60;
+  const roll = rand(w); const guilty = !blameSticks && roll < p;
+  const strength = tr.persuasion >= 6 ? 'güçlü' : tr.persuasion >= 2 ? 'kısmen ikna edici' : tr.persuasion >= 0 ? 'zayıf' : 'aleyhine';
+  tr.reasoning = `Gerekçe: ${c.basis ?? 'savcılık iddiası'}; delil gücü ${Math.round(c.evidence)}/100${eyes ? `, ${eyes} görgü tanığı` : ', görgü tanığı yok'}${courtAgainst ? `, ${courtAgainst} aleyhte tanık` : ''}; savunma ${strength} (ikna ${tr.persuasion}). Suçluluk ihtimali %${Math.round(p * 100)}.${blamed ? (blameSticks ? ` Suç ${ek(blamed.name, 'a')} yöneldi: olay yerindeydi ve savunma ikna edici.` : ` ${blamed.name} suçlandı ama aleyhine delil bulunmadı.`) : ''}${tr.lastReason ? ` Kadının notu: ${tr.lastReason}` : ''}`;
   const fromQ = placeOf(w, a.id, now);
   verdict(w, c.id, guilty, now);
   if (guilty && tr.persuasion >= 4 && c.crime !== 'cinayet' && c.crime !== 'isyan') { a.jailedDays = 0; c.sentence = `${c.sentence?.replace(/^\d+ gün zindan, /, '') ?? ''} (zindan yerine para cezası – savunma ikna edici bulundu)`; }
-  tr.verdictText = guilty ? `SUÇLU. Hüküm: ${c.sentence}.` : 'BERAAT. Sanık serbest.';
+  tr.verdictText = `${guilty ? `SUÇLU. Hüküm: ${c.sentence}.` : 'BERAAT. Sanık serbest.'} ${tr.reasoning}`;
   tr.msgs.push({ who: 'hakim', name: judge?.name ?? 'Kadı', text: `Karar: ${tr.verdictText}${guilty && a.jailedDays > 0 ? ' Bekçi, mahkûmu zindana götür!' : ''}`, at: now });
   if (guilty && a.jailedDays > 0) {
     const bekci = w.people.find((p) => p.prof === 'bekci' && p.jailedDays === 0 && p.id !== a.id);
     const m = w.buildings.find((b) => b.id === 'mahkeme');
     if (bekci) w.escorts = [...(w.escorts ?? []), { personId: a.id, bekciId: bekci.id, from: m ? { x: m.door.x + 0.5, y: m.door.y + 0.6 } : { x: fromQ?.x ?? 20, y: fromQ?.y ?? 12 }, at: now }];
   }
+  if (blameSticks && blamed) { openCase(w, blamed.id, c.crime, c.victimId, c.amount, 60); const nc = w.cases.at(-1); if (nc && nc.accusedId === blamed.id && nc.stage !== 'kapandi') { nc.basis = `${a.name} davasında suçlandı; olay yerindeydi`; nc.eyeIds = (c.eyeIds ?? []).filter((x) => x !== blamed.id); nc.complainantId = a.id; log(w, `⚖ Kadı, ${ek(blamed.name, 'ı')} yargılanmak üzere savcıya havale etti.`, blamed.id, now); } }
   if (a.playerId) personal(w, a.playerId, `Davanız: ${tr.verdictText}`, now);
 }
 
@@ -201,7 +245,7 @@ export function judgePrompt(w: World, c: CourtCase): { system: string; user: str
   const tr = c.trial!; const judge = findPerson(w, tr.judgeId); const a = findPerson(w, c.accusedId);
   return {
     system: `${STYLE}\nSen ${judge?.name ?? 'şehrin kadısı'}sın, adil ama sert bir kadı (hâkim). Dürüstlüğün ${Math.round(judge?.honesty ?? 70)}/100. Sanığın savunmasını dinleyip kısa cevap verirsin ve ne kadar ikna olduğunu puanlarsın.`,
-    user: `Dava: ${CRIME_LABEL[c.crime]}. Sanık: ${a?.name}. Delil gücü ${Math.round(c.evidence)}/100. Tanık sayısı ${c.witnesses?.length ?? 0}.\nDuruşma:\n${tr.msgs.map((m) => `${m.name} (${m.who}): ${m.text}`).join('\n')}\nSanığın son sözüne kadı olarak cevap ver. Hakaret ya da rüşvet teklifi ikna puanını düşürür; somut tanık, mazeret ve tutarlılık artırır. JSON döndür: {"cevap":"...","ikna":-4..3 arası tam sayı}`,
+    user: `Dava: ${CRIME_LABEL[c.crime]}. Sanık: ${a?.name}. Delil gücü ${Math.round(c.evidence)}/100. Delilin kaynağı: ${c.basis ?? 'savcılık iddiası'}. Olayı 2 m içinden gören görgü tanığı: ${c.eyewitnesses ?? 0}. Mahkemeye gelen tanık: ${c.witnesses?.length ?? 0}.\nDuruşma:\n${tr.msgs.map((m) => `${m.name} (${m.who}): ${m.text}`).join('\n')}\nSanığın son sözüne kadı olarak cevap ver. Adil ol: görgü tanığı yoksa ve delil dolaylıysa, tutarlı bir mazeret (nerede/kiminle olduğu), delillerle çelişmeyen makul bir açıklama ya da nefsi müdafaa sanığı aklayabilir → yüksek puan ver. Savunma delillerle ya da tanıklarla çelişiyorsa, kendi içinde tutarsızsa, hakaret ya da rüşvet içeriyorsa düşük puan ver. JSON döndür: {"cevap":"kadının kısa cevabı","ikna":-4..4 arası tam sayı,"gerekce":"tek cümle: neden bu puan"}`,
   };
 }
 void GOOD_LABEL; void chance;

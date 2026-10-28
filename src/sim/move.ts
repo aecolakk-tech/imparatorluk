@@ -116,7 +116,8 @@ export function actionNeed(w: World, me: Person, a: Action): Need {
     case 'doctor': case 'cure': return B(['hekimhane'], 'Hekimhane’ye');
     case 'school': return B(['okul'], 'Okul’a');
     case 'work': return B([me.work, 'santiye'], 'iş yerinize');
-    case 'caseDecision': case 'defend': case 'witness': return B(['mahkeme'], 'Mahkeme’ye');
+    case 'witness': { const c = w.cases.find((x) => x.id === a.caseId); if (c?.trial && !c.trial.done && ((c.eyeIds ?? []).includes(me.id) || c.trial.blamedId === me.id)) return null; return B(['mahkeme'], 'Mahkeme’ye'); } // summoned / eyewitness speak from the popup
+    case 'caseDecision': case 'defend': return B(['mahkeme'], 'Mahkeme’ye');
     case 'runForMeclis': case 'castVote': case 'speak': case 'propose': case 'joinFaction': case 'vote': case 'runForBaskan': case 'voteBaskan': return B(['meclis', 'pazar'], 'Meclis’e ya da Meydan’daki sandığa');
     case 'poster': case 'campaign': return B(['pazar'], 'Meydan’a (Pazar)');
     case 'plot': case 'fundPlot': return B(['kisla', 'bar'], 'Kışla’ya ya da Meyhane’ye');
