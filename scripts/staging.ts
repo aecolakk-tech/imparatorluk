@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { act, heartbeat, migrateWorld, register, createWorld } from '../src/server/core';
 import { findPerson } from '../src/sim/world';
 import type { World } from '../src/sim/types';
-import { hourLen } from '../src/sim/constants';
+import { hourMs } from '../src/sim/tick';
 
 const DIR = 'staging'; const FILE = `${DIR}/world.json`; const META = `${DIR}/meta.json`;
 let BOT = 'testbot';
@@ -25,16 +25,16 @@ const save = (w: World, now: number): void => { mkdirSync(DIR, { recursive: true
 const [cmd = 'status', arg] = process.argv.slice(2);
 if (cmd === 'init') {
   let w: World; let now = Date.now();
-  if (arg) { const raw = JSON.parse(readFileSync(arg, 'utf8')); w = (raw.rows?.[0]?.state ?? raw.state ?? raw) as World; now = Math.max(now, w.lastTick ?? 0); }
+  if (arg) { const raw = JSON.parse(readFileSync(arg, 'utf8')); w = (raw.rows?.[0]?.state ?? raw.state ?? raw) as World; now = Math.max(now, w.lastTickAt ?? 0); }
   else w = createWorld(42, now);
-  migrateWorld(w); w.landReal = undefined as never; // never re-run a scheduled landing from a copied live world
+  migrateWorld(w); if (w.foreign) w.foreign.landReal = undefined; // never re-run a scheduled landing from a copied live world
   BOT = findBot(w) ?? BOT; if (!w.players[BOT]) register(w, BOT, 'Test Botu', 'hamal', false, now);
   save(w, now); console.log(`Staging world hazır: ${FILE} (gün ${w.day}, ${w.people.length} kişi). Kaynak: ${arg ?? 'yeni dünya'}`);
 } else if (cmd === 'run') {
   const { w } = load(); let { now } = load(); const days = Number(arg ?? 1); const end = w.day + days; let n = 0;
   const me = (): ReturnType<typeof findPerson> => findPerson(w, w.players[BOT]!.personId);
   while (w.day < end && n < 5000) {
-    now += hourLen(w); heartbeat(w, BOT, now); const p = me(); n++;
+    now += hourMs(w); heartbeat(w, BOT, now); const p = me(); n++;
     if (!p) break;
     if (p.hunger > 50) act(w, BOT, { t: 'eat' } as never, now);
     if (p.thirst > 50) act(w, BOT, { t: 'drinkWater' } as never, now);
