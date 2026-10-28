@@ -554,7 +554,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'foreignAnswer': { if (!isKayzer(w, me)) return no('Kararı Kayzer verir.'); return ok(answerForeign(w, a.choice)); }
     case 'recruit': { if (!isKayzer(w, me)) return no('Asker toplamayı Kayzer emreder.'); const n = num(Math.min(Number(a.n) || 0, RECRUIT_MAX), 1, RECRUIT_MAX); if (n === null) return no('Geçersiz.'); return ok(recruit(w, n)); }
     case 'ransom': { if (!isKayzer(w, me)) return no('Fidyeyi Kayzer öder.'); return ok(ransom(w, a.personId)); }
-    case 'attack': { const r = attackFoe(w, me, a.foeId, now); return r.ok ? ok(r.msg) : no(r.msg); }
+    case 'attack': { const r = attackFoe(w, me, a.foeId, now, Number.isFinite(a.aimX) && Number.isFinite(a.aimY) ? { x: a.aimX!, y: a.aimY! } : null); return r.ok ? ok(r.msg) : no(r.msg); }
     case 'onboardDone': { if ((me.onboardUntil ?? 0) > now) me.onboardUntil = now; return ok(''); }
     case 'onboardPause': { // v2.0.1: while the one-time controls/creation screens are open the player's needs stand still (once per character)
       const pl = w.players[playerId]; if (!pl || pl.qf?.ctlPause) return ok(''); (pl.qf ??= {}).ctlPause = true; me.onboardUntil = Math.max(me.onboardUntil ?? 0, now + 5 * 60_000); return ok(''); }

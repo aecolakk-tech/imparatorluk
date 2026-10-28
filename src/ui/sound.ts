@@ -24,7 +24,7 @@ function noise(dur: number, vol = 0.2, filter = 1200, at = 0, q = 0.7, type: Biq
   const s = c.createBufferSource(); s.buffer = b; const f = c.createBiquadFilter(); f.type = type; f.frequency.value = filter; f.Q.value = q; const g = c.createGain();
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); s.connect(f); f.connect(g); g.connect(master); s.start(t);
 }
-export type Sfx = 'click' | 'coins' | 'door' | 'bell' | 'crowd' | 'drums' | 'prison' | 'death' | 'step' | 'error' | 'msg' | 'gavel' | 'menu' | 'confirm' | 'cancel' | 'tap';
+export type Sfx = 'click' | 'coins' | 'door' | 'bell' | 'crowd' | 'drums' | 'prison' | 'death' | 'step' | 'error' | 'msg' | 'gavel' | 'menu' | 'confirm' | 'cancel' | 'tap' | 'swing' | 'hit' | 'bow' | 'clang';
 export const sfxLog: Sfx[] = []; // for tests: what was played (only when not muted)
 export function sfx(k: Sfx): void {
   if (muted) return; sfxLog.push(k); if (sfxLog.length > 50) sfxLog.shift(); (window as unknown as { __sfx?: Sfx[]; __sfxN?: number }).__sfx = sfxLog; const ww = window as unknown as { __sfxN?: number }; ww.__sfxN = (ww.__sfxN ?? 0) + 1;
@@ -33,6 +33,10 @@ export function sfx(k: Sfx): void {
     case 'confirm': tone(660, 0.06, 'square', 0.05); tone(990, 0.09, 'square', 0.05, 0.06); break;
     case 'cancel': tone(520, 0.06, 'square', 0.05); tone(350, 0.09, 'square', 0.05, 0.06); break;
     case 'tap': tone(1200, 0.03, 'sine', 0.06); break;
+    case 'swing': noise(0.16, 0.18, 1800, 0, 2, 'bandpass'); break; // whoosh
+    case 'hit': noise(0.08, 0.45, 700); tone(110, 0.12, 'square', 0.18, 0, 60); break; // thud
+    case 'clang': tone(1450, 0.18, 'triangle', 0.12); tone(2210, 0.12, 'triangle', 0.07); noise(0.05, 0.2, 3000); break; // steel on shield
+    case 'bow': tone(240, 0.12, 'triangle', 0.14, 0, 120); noise(0.22, 0.12, 2400, 0.03, 1.5, 'bandpass'); break; // twang + arrow
     case 'click': tone(880, 0.05, 'square', 0.05); break;
     case 'step': noise(0.05, 0.05, 600); break;
     case 'error': tone(220, 0.15, 'sawtooth', 0.07); tone(180, 0.2, 'sawtooth', 0.07, 0.12); break;

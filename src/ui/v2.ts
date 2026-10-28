@@ -8,7 +8,8 @@ import { findPerson } from '../sim/world';
 import { ARM_LABEL, ARM_PRICE, ARM_WEIGHT, CARRY_MAX, carryWeight, isUniformed, WEAPONS, type ArmItem } from '../sim/arms';
 import { RANSOM, RECRUIT_MAX, RECRUIT_PAY } from '../sim/events2';
 import { REBUILD_COST } from '../sim/events3';
-import { foeMoving, foePos, SAIL_MS } from '../sim/combatpos';
+import { tween } from './tween';
+import { berth, foeMoving, foePos, SAIL_MS, shipCount } from '../sim/combatpos';
 import { myPos } from '../sim/v16';
 import { distToBuilding, REACH } from '../sim/move';
 import { assignSlot, hotbarSlots } from './controls';
@@ -134,11 +135,51 @@ function ship(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, fl
   ctx.fillStyle = '#f2ead8'; ctx.beginPath(); ctx.moveTo(x, y - s * 1.45); ctx.lineTo(x + s * 0.7, y - s * 0.45); ctx.lineTo(x, y - s * 0.45); ctx.fill();
   ctx.fillStyle = flag; ctx.fillRect(x, y - s * 1.65, s * 0.3, s * 0.18);
 }
-function figure(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, cloak: string, f: number, bow: boolean): void {
-  ctx.fillStyle = cloak; ctx.fillRect(x - s * 0.18, y - s * 0.75, s * 0.36, s * 0.5); ctx.fillStyle = '#e0b08a'; ctx.fillRect(x - s * 0.1, y - s * 0.92, s * 0.2, s * 0.17);
-  ctx.fillStyle = '#222'; ctx.fillRect(x - s * 0.12 + (f ? s * 0.04 : 0), y - s * 0.25, s * 0.08, s * 0.25); ctx.fillRect(x + s * 0.04 - (f ? s * 0.04 : 0), y - s * 0.25, s * 0.08, s * 0.25);
-  ctx.strokeStyle = bow ? '#7a5a2a' : '#cfd6dc'; ctx.lineWidth = Math.max(1, s * 0.05); ctx.beginPath(); if (bow) ctx.arc(x + s * 0.25, y - s * 0.55, s * 0.22, -1.2, 1.2); else { ctx.moveTo(x + s * 0.2, y - s * 0.4); ctx.lineTo(x + s * 0.45, y - s * 0.95); } ctx.stroke();
+/** v2.0.2: a weapon held in the hand (kılıç / hançer / yay), swinging when swing ∈ [0,1] (−1 = idle). dir = facing (±1). */
+export function drawHeld(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, kind: string, dir: number, swing: number): void {
+  const hx = x + dir * s * 0.24, hy = y - s * 0.42; ctx.save(); ctx.translate(hx, hy); if (dir < 0) ctx.scale(-1, 1);
+  if (kind === 'yay') {
+    const draw = swing >= 0 ? Math.sin(Math.min(1, swing) * Math.PI) : 0; // string pulled back while shooting
+    ctx.strokeStyle = '#7a5a2a'; ctx.lineWidth = Math.max(1.5, s * 0.06); ctx.beginPath(); ctx.arc(0, 0, s * 0.3, -1.25, 1.25); ctx.stroke();
+    ctx.strokeStyle = '#eee'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(Math.cos(-1.25) * s * 0.3, Math.sin(-1.25) * s * 0.3); ctx.lineTo(-draw * s * 0.18, 0); ctx.lineTo(Math.cos(1.25) * s * 0.3, Math.sin(1.25) * s * 0.3); ctx.stroke();
+  } else {
+    const len = kind === 'hancer' ? s * 0.32 : s * 0.62; // idle: raised; swing: an arc from up-back to down-front
+    const ang = swing >= 0 ? -2.2 + Math.min(1, swing) * 2.9 : -1.1; ctx.rotate(ang);
+    ctx.fillStyle = '#5a3a1a'; ctx.fillRect(-s * 0.03, -s * 0.03, s * 0.12, s * 0.06); // grip
+    ctx.fillStyle = '#c9a43a'; ctx.fillRect(s * 0.08, -s * 0.08, s * 0.03, s * 0.16); // guard
+    ctx.fillStyle = '#dfe6ec'; ctx.beginPath(); ctx.moveTo(s * 0.11, -s * 0.035); ctx.lineTo(s * 0.11 + len, 0); ctx.lineTo(s * 0.11, s * 0.035); ctx.fill();
+    if (swing >= 0 && swing < 1) { ctx.strokeStyle = `rgba(255,255,255,${0.7 * (1 - swing)})`; ctx.lineWidth = Math.max(1, s * 0.05); ctx.beginPath(); ctx.arc(0, 0, len * 0.9, -0.8 - swing * 1.6, 0.4); ctx.stroke(); } // motion trail
+  }
+  ctx.restore();
 }
+/** Local swings (own attacks show at once, before the server answers). */
+const localSwing = new Map<string, number>();
+export function markSwing(id: string): void { localSwing.set(id, performance.now()); }
+/** 0..1 progress of a strike by `id` (server hits with from=id or a local press), −1 when idle. */
+export function swingOf(w: World, id: string, now: number): number {
+  const l = localSwing.get(id); if (l !== undefined) { const k = (performance.now() - l) / 380; if (k <= 1) return k; }
+  const hs = w.combat?.hits; if (!hs) return -1;
+  for (let i = hs.length - 1; i >= 0; i--) { const hi = hs[i]!; if (hi.from !== id) continue; const age = now - hi.at; if (age < -100) continue; if (age > 420) break; return Math.max(0, age) / 420; }
+  return -1;
+}
+/** Bow aim indicator (set by main.ts while Saldır is held). */
+export const aim: { on: boolean; x: number; y: number; fx: number; fy: number; r: number; lock: boolean } = { on: false, x: 0, y: 0, fx: 0, fy: 0, r: 1.3, lock: false };
+function figure(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, cloak: string, f: number, bow: boolean, dir = 1, swing = -1, flash = 0): void {
+  ctx.fillStyle = cloak; ctx.fillRect(x - s * 0.18, y - s * 0.75, s * 0.36, s * 0.5); ctx.fillStyle = '#e0b08a'; ctx.fillRect(x - s * 0.1, y - s * 0.92, s * 0.2, s * 0.17);
+  ctx.fillStyle = '#5a5a5a'; ctx.fillRect(x - s * 0.12, y - s * 1.0, s * 0.24, s * 0.1); // helmet
+  ctx.fillStyle = '#222'; ctx.fillRect(x - s * 0.12 + (f ? s * 0.04 : 0), y - s * 0.25, s * 0.08, s * 0.25); ctx.fillRect(x + s * 0.04 - (f ? s * 0.04 : 0), y - s * 0.25, s * 0.08, s * 0.25);
+  drawHeld(ctx, x, y, s, bow ? 'yay' : 'kilic', dir, swing);
+  if (flash > 0) { ctx.fillStyle = `rgba(255,255,255,${flash})`; ctx.fillRect(x - s * 0.2, y - s * 1.02, s * 0.4, s * 1.02); } // hit flash
+}
+function arrowAt(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, k: number, s: number): void {
+  const x = x0 + (x1 - x0) * k, y = y0 + (y1 - y0) * k - Math.sin(k * Math.PI) * s * 0.6; // slight arc
+  const a = Math.atan2(y1 - y0 - Math.cos(k * Math.PI) * s * 1.2, x1 - x0); // nose follows the arc
+  ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.strokeStyle = '#4a3020'; ctx.lineWidth = Math.max(1.5, s * 0.05); ctx.beginPath(); ctx.moveTo(-s * 0.35, 0); ctx.lineTo(s * 0.3, 0); ctx.stroke();
+  ctx.fillStyle = '#ccc'; ctx.beginPath(); ctx.moveTo(s * 0.38, 0); ctx.lineTo(s * 0.26, -s * 0.06); ctx.lineTo(s * 0.26, s * 0.06); ctx.fill();
+  ctx.fillStyle = '#e8e0d0'; ctx.fillRect(-s * 0.38, -s * 0.05, s * 0.1, s * 0.1); ctx.restore();
+}
+export const ARROW_MS = 380;
+function lastHit<T>(a: T[], f: (x: T) => boolean): T | undefined { for (let i = a.length - 1; i >= 0; i--) if (f(a[i]!)) return a[i]; return undefined; }
 const hsh = (s: string): number => { let x = 0; for (const ch of s) x = (x * 31 + ch.charCodeAt(0)) | 0; return Math.abs(x); };
 export function drawV2(ctx: CanvasRenderingContext2D, w: World, cam: Cam, z: number, sz: number, now: number, placed?: { p: Person; x: number; y: number; visible: boolean }[]): void {
   const P = (x: number, y: number): [number, number] => [(x - cam.x) * z, (y - cam.y) * z];
@@ -157,16 +198,18 @@ export function drawV2(ctx: CanvasRenderingContext2D, w: World, cam: Cam, z: num
   }
   drawCombat(ctx, w, P, z, sz, now, placed);
 }
-function hpBar(ctx: CanvasRenderingContext2D, x: number, y: number, wd: number, v: number, max: number, col: string): void {
-  const k = Math.max(0, Math.min(1, v / max)); ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(x - wd / 2 - 1, y - 1, wd + 2, 5);
+function hpBar(ctx: CanvasRenderingContext2D, x: number, y: number, wd: number, v0: number, max: number, col: string, key?: string): void {
+  const v = key ? tween(`hp-${key}`, v0, 350) : v0; const k = Math.max(0, Math.min(1, v / max)); const old = key ? Math.max(0, Math.min(1, tween(`hpo-${key}`, v0, 1200) / max)) : k;
+  if (old > k) { ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(x - wd / 2 - 1, y - 1, wd + 2, 5); ctx.fillStyle = '#fff3'; ctx.fillRect(x - wd / 2, y, wd * old, 3); } // recent damage: a pale trail
+  if (old <= k) { ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(x - wd / 2 - 1, y - 1, wd + 2, 5); }
   ctx.fillStyle = k > 0.5 ? col : k > 0.25 ? '#e0a020' : '#d03020'; ctx.fillRect(x - wd / 2, y, wd * k, 3);
 }
 /** v2.0.1: real-time fight – foes with health bars, the enemy fleet sailing in and docking, floating damage numbers. */
 export function drawCombat(ctx: CanvasRenderingContext2D, w: World, P: (x: number, y: number) => [number, number], z: number, sz: number, now: number, placed?: { p: Person; x: number; y: number; visible: boolean }[]): void {
   const f = w.foreign; const c = w.combat;
   if (f && f.phase === 'savas') {
-    const ships = Math.max(3, Math.ceil(f.troops / 6));
-    const dock = (i: number): [number, number] => [LIMAN.x - 7 + i * (14 / Math.max(1, ships - 1)), 49.6 + (i % 2) * 1.3];
+    const ships = shipCount((c as { troops?: number } | null)?.troops ?? f.troops);
+    const dock = (i: number): [number, number] => { const b = berth(i, ships); return [b.x, b.y]; };
     const sail = c?.kind === 'war' ? Math.min(1, Math.max(0, (now - c.startAt) / SAIL_MS)) : f.landed ? 1 : -1;
     for (let i = 0; i < ships; i++) {
       const [dx, dy] = dock(i); const bob = Math.sin(now / 600 + i) * 0.12;
@@ -180,17 +223,25 @@ export function drawCombat(ctx: CanvasRenderingContext2D, w: World, P: (x: numbe
   }
   if (!c) return;
   for (const fo of c.foes) {
-    if (fo.hp <= 0) continue; const pt = foePos(fo, now); const [px, py] = P(pt.x, pt.y);
-    const mov = foeMoving(fo, now);
-    figure(ctx, px, py, sz, fo.kind === 'eskiya' ? '#2b2b2b' : '#2a4a9a', mov ? Math.floor(now / 220 + hsh(fo.id)) % 2 : 0, fo.bow);
+    if (fo.hp <= 0 || now < fo.walk.t0) continue; // still on board (v2.0.2: troops disembark in waves)
+    const pt = foePos(fo, now); const [px, py] = P(pt.x, pt.y);
+    const mov = foeMoving(fo, now); const lastTo = lastHit(c.hits, (x) => x.to === fo.id && x.k !== 'miss'); const fl = lastTo ? Math.max(0, 1 - (now - lastTo.at) / 220) : 0;
+    const tgt = lastHit(c.hits, (x) => x.from === fo.id); const dir = tgt ? (tgt.x < pt.x ? -1 : 1) : (fo.walk.path.length > 1 ? ((fo.walk.path.at(-1)!.x < pt.x) ? -1 : 1) : -1);
+    figure(ctx, px, py, sz, fo.kind === 'eskiya' ? '#2b2b2b' : '#2a4a9a', mov ? Math.floor(now / 220 + hsh(fo.id)) % 2 : 0, fo.bow, dir, swingOf(w, fo.id, now), fl);
     if (fo.kind === 'eskiya') { ctx.fillStyle = '#7a1010'; ctx.fillRect(px - sz * 0.14, py - sz * 0.86, sz * 0.28, sz * 0.07); } else { ctx.fillStyle = '#c8102e'; ctx.fillRect(px - sz * 0.05, py - sz * 0.7, sz * 0.1, sz * 0.3); ctx.fillRect(px - sz * 0.15, py - sz * 0.6, sz * 0.3, sz * 0.08); }
-    hpBar(ctx, px, py - sz * 1.12, Math.max(18, sz * 0.8), fo.hp, fo.max, '#e04040');
+    hpBar(ctx, px, py - sz * 1.12, Math.max(18, sz * 0.8), fo.hp, fo.max, '#e04040', fo.id);
   }
-  if (placed) for (const q of placed) { if (!q.visible) continue; const fight = !!c.assign[q.p.id] || (!!q.p.playerId && !q.p.npc); if (!fight) continue; const [px, py] = P(q.x, q.y); hpBar(ctx, px, py - sz * 1.15, Math.max(18, sz * 0.8), q.p.health, 100, '#40c040'); }
+  // gangplank wave counter: troops still aboard
+  if (c.kind === 'war' && c.spawned) { const aboard = c.foes.filter((x) => x.hp > 0 && now < x.walk.t0).length; if (aboard) { const [lx, ly] = P(LIMAN.x, 47.6); ctx.font = `bold ${Math.max(11, z * 0.6)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = '#000a'; ctx.fillText(`⚓ ${aboard} asker daha gemiden iniyor`, lx + 1, ly + 1); ctx.fillStyle = '#ffd36a'; ctx.fillText(`⚓ ${aboard} asker daha gemiden iniyor`, lx, ly); } }
+  // arrows in flight (players, soldiers and enemy archers)
+  for (const hi of c.hits) { if (!hi.arrow || hi.fx === undefined || hi.fy === undefined) continue; const age = now - hi.at; if (age < 0 || age > ARROW_MS) continue; const [x0, y0] = P(hi.fx, hi.fy - 0.45); const [x1, y1] = P(hi.x, hi.y - 0.45); arrowAt(ctx, x0, y0, x1, y1, age / ARROW_MS, sz); }
+  // bow aim indicator
+  if (aim.on) { const [x0, y0] = P(aim.fx, aim.fy - 0.4); const [x1, y1] = P(aim.x, aim.y); ctx.save(); ctx.setLineDash([6, 5]); ctx.strokeStyle = aim.lock ? 'rgba(255,90,60,0.95)' : 'rgba(255,240,150,0.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.setLineDash([]); ctx.beginPath(); ctx.ellipse(x1, y1, aim.r * z, aim.r * z * 0.5, 0, 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x1 - 6, y1); ctx.lineTo(x1 + 6, y1); ctx.moveTo(x1, y1 - 6); ctx.lineTo(x1, y1 + 6); ctx.stroke(); ctx.font = `bold ${Math.max(11, z * 0.55)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = '#000a'; ctx.fillText(`${Math.hypot(aim.x - aim.fx, aim.y - aim.fy).toFixed(1)} kare`, x1 + 1, y1 - aim.r * z * 0.5 - 4); ctx.fillStyle = aim.lock ? '#ff8060' : '#ffe070'; ctx.fillText(`${Math.hypot(aim.x - aim.fx, aim.y - aim.fy).toFixed(1)} kare`, x1, y1 - aim.r * z * 0.5 - 5); ctx.restore(); }
+  if (placed) for (const q of placed) { if (!q.visible) continue; const fight = !!c.assign[q.p.id] || (!!q.p.playerId && !q.p.npc); if (!fight) continue; const [px, py] = P(q.x, q.y); hpBar(ctx, px, py - sz * 1.15, Math.max(18, sz * 0.8), q.p.health, 100, '#40c040', q.p.id); }
   // floating numbers
   ctx.textAlign = 'center';
   for (const hi of c.hits) {
-    const age = now - hi.at; if (age < 0 || age > 1400) continue; const k = age / 1400; const [px, py] = P(hi.x, hi.y);
+    const age = now - hi.at - (hi.arrow ? ARROW_MS : 0); if (age < 0 || age > 1400) continue; const k = age / 1400; const [px, py] = P(hi.x, hi.y);
     const txt = hi.k === 'miss' ? 'ıska' : hi.k === 'rob' ? `−${hi.dmg} D` : hi.k === 'down' ? '✝' : `−${hi.dmg}`;
     ctx.font = `bold ${Math.max(12, Math.round(z * (hi.k === 'kill' ? 0.95 : 0.75)))}px sans-serif`;
     ctx.globalAlpha = 1 - k; ctx.fillStyle = '#000'; ctx.fillText(txt, px + 1, py - sz * (1.3 + k) + 1);

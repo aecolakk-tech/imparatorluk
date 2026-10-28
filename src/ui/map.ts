@@ -1,5 +1,6 @@
 import { season } from '../sim/realm';
-import { drawV2 } from './v2';
+import { drawV2, drawHeld, swingOf } from './v2';
+import { bestWeapon } from '../sim/arms';
 import type { Building, Person, World } from '../sim/types';
 import { MAP_H, MAP_W } from '../sim/constants';
 import { electionPhase } from '../sim/tick';
@@ -218,6 +219,10 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
     if (ride) { ctx.save(); ctx.beginPath(); ctx.rect(sx - sz, sy - sz - lift - 2, sz * 2, sz * 0.78); ctx.clip(); } // legs hidden behind the horse's flank
     { const ks = kidScale(yearsOf(w, q.p)); drawKid(ctx, fr[pf]!, sx, sy - lift, sz, ks, q.dir < 0); }
     if (ride) ctx.restore();
+    { // v2.0.2: the weapon in hand is visible (and swings on a strike); soldiers/bekçiler fighting in a raid/landing hold theirs too
+      const held = q.p.drawn ?? (w.combat?.assign[q.p.id] ? (bestWeapon(q.p) ?? 'kilic') : null);
+      if (held && kidScale(yearsOf(w, q.p)) >= 1) drawHeld(ctx, sx, sy - lift, sz, held, q.dir < 0 ? -1 : 1, swingOf(w, q.p.id, now));
+    }
     if (q.p.id === myPersonId) { ctx.fillStyle = '#7fd0ff'; ctx.beginPath(); ctx.moveTo(sx - 5, sy - sz - 10); ctx.lineTo(sx + 5, sy - sz - 10); ctx.lineTo(sx, sy - sz - 3); ctx.fill(); }
   }
   // children: drawn by age (D13) near home / at school during the day; tappable (name + age label)

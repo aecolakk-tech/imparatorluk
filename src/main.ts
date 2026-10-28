@@ -2,7 +2,7 @@ import { askConfirm, askText } from './ui/modal';
 import { oldWalk, ageText } from './sim/age';
 import { ek } from './sim/tr';
 import { buildControls, type SlotItem } from './ui/controls';
-import { foePos, liveFoes } from './sim/combatpos';
+import { foePos, liveFoes, MELEE_TILES, REACH_SLACK } from './sim/combatpos';
 import { weaponInHand, bestWeapon } from './sim/arms';
 import { hourMs } from './sim/tick';
 import './ui/style.css';
@@ -13,6 +13,9 @@ import { findPerson } from './sim/world';
 import { makeBackend } from './backend';
 import type { Backend } from './backend/api';
 import { MOCK_FOUNDER_EMAIL } from './backend/mock';
+import { aim, markSwing } from './ui/v2';
+import { tween, shownOr } from './ui/tween';
+import { BOW_MAX } from './sim/combat';
 import { buildStatic, drawFrame, hitTest, placePeople, T, tapFx, GOSTERGE, type Camera, type Placed } from './ui/map';
 import { gostergeModal } from './ui/gosterge';
 import type { PlacedAnimal } from './ui/animals';
@@ -355,7 +358,7 @@ function renderHud(): void {
   iconify(hudEl); if (!anyModal() && !lookOpen && !onbOpen) needAlerts(m);
 }
 function meterI(icon: string, v: number, color: string, tip: string, warn: boolean, key: string): HTMLElement {
-  return h('span', { class: `stat meter${warn ? ' warn' : ''}${flashKey === key && performance.now() < flashUntil ? ' flash' : ''}`, title: tip, 'data-k': key, onclick: () => toast(tip) }, ic(icon), bar(v, color));
+  return h('span', { class: `stat meter${warn ? ' warn' : ''}${flashKey === key && performance.now() < flashUntil ? ' flash' : ''}`, title: tip, 'data-k': key, 'data-v': String(v), onclick: () => toast(tip) }, ic(icon), bar(shownOr(`hud-${key}`, v), color, `hud-${key}`));
 }
 // v2.0.1: warnings for tokluk, su, sağlık below 30 and a nearly empty purse – one popup per crossing (re-armed above 40), never two at once
 let flashKey = ''; let flashUntil = 0; const alarmArmed: Record<string, boolean> = { hunger: true, thirst: true, health: true, money: true }; const alarmAt: Record<string, number> = { hunger: -1e9, thirst: -1e9, health: -1e9, money: -1e9 };
@@ -722,20 +725,45 @@ function nearestFoeAt(tx: number, ty: number): string | null {
   return best;
 }
 function myPlaced(): Placed | undefined { const m = me(); return m ? placed.find((q) => q.p.id === m.id) : undefined; }
-function foeRange(): number { const m = me(); return m && weaponInHand(m) === 'yay' ? 7 : 1.6; }
+function foeRange(): number { const m = me(); return m && weaponInHand(m) === 'yay' ? 7 : MELEE_TILES + REACH_SLACK; }
 function tapFoe(id: string): void {
   const w = world; const m = me(); const f = w?.combat?.foes.find((x) => x.id === id); if (!w || !m || !f) return;
   if (!weaponInHand(m)) { toast(bestWeapon(m) ? '⚔ Önce alttaki hızlı çubuktan silahınızı seçin (kınından çekin).' : '⚔ Silahınız yok – Demirci’den (Zanaat Atölyesi) alın ya da evinize kaçın.'); return; }
   const q = myPlaced(); const fp = foePos(f, gameNow());
+  if (q && weaponInHand(m) !== 'yay' && Math.hypot(q.x - fp.x, q.y - fp.y) > foeRange()) { markSwing(m.id); sfx('swing'); return; } // v2.0.2: a swing out of reach just misses
   if (q && Math.hypot(q.x - fp.x, q.y - fp.y) > foeRange() + 0.2) { toast(`🎯 Düşman menzil dışında (${Math.round(Math.hypot(q.x - fp.x, q.y - fp.y))} kare) – joystick ile yaklaşın, sonra Saldır.`); return; }
   void send({ t: 'attack', foeId: id } as never);
 }
+let lastAtkPress = 0; let aimStart = 0;
 function ctlAttack(): void {
   const w = world; const m = me(); if (!w || !m) return;
-  const live = w.combat ? liveFoes(w) : []; if (!live.length) { toast('Saldırılacak düşman yok. (Eşkıya baskını ya da savaş sırasında kullanılır.)'); return; }
-  const q = myPlaced(); if (!q) return; const now = gameNow();
-  const f = [...live].sort((a, b) => Math.hypot(foePos(a, now).x - q.x, foePos(a, now).y - q.y) - Math.hypot(foePos(b, now).x - q.x, foePos(b, now).y - q.y))[0]!;
-  tapFoe(f.id);
+  const q = myPlaced(); if (!q) return; const now = gameNow(); const wp = weaponInHand(m);
+  if (!wp) { toast(bestWeapon(m) ? '⚔ Önce alttaki hızlı çubuktan silahınızı seçin (kınından çekin).' : '⚔ Silahınız yok – Demirci’den (Zanaat Atölyesi) alın.'); return; }
+  const live = w.combat ? liveFoes(w).filter((f) => now >= f.walk.t0) : [];
+  if (wp === 'yay') { // v2.0.2: hold to draw the bow – the longer you hold, the farther the arrow; release to shoot
+    if (((m.arms as Record<string, number> | undefined)?.ok ?? 0) <= 0) { toast('🏹 Okunuz kalmadı – Demirci’den ok alın.'); return; }
+    aimStart = performance.now(); aim.on = true; aim.fx = q.x; aim.fy = q.y; updateAim(); return;
+  }
+  // v2.0.2: kılıç/hançer swing freely at any time; only a foe within reach (0.5 m between bodies) is struck, otherwise it is a visible whiff
+  if (performance.now() - lastAtkPress < 1000) return; lastAtkPress = performance.now(); // one swing per second (server rule: 1.1 s)
+  markSwing(m.id); sfx('swing');
+  const f = [...live].map((x) => ({ x, d: Math.hypot(foePos(x, now).x - q.x, foePos(x, now).y - q.y) })).sort((a, b) => a.d - b.d)[0];
+  if (f && f.d <= MELEE_TILES + REACH_SLACK) void send({ t: 'attack', foeId: f.x.id } as never);
+}
+/** Bow aim: direction = joystick (while aiming the joystick only turns the aim), else the nearest foe, else facing; distance grows with the hold. */
+function updateAim(): void {
+  if (!aim.on) return; const w = world; const q = myPlaced(); if (!w || !q) { aim.on = false; return; }
+  const now = gameNow(); const live = w.combat ? liveFoes(w).filter((f) => now >= f.walk.t0) : [];
+  let dx = joyVec.x, dy = joyVec.y;
+  if (!dx && !dy) { const f = [...live].sort((a, b) => Math.hypot(foePos(a, now).x - q.x, foePos(a, now).y - q.y) - Math.hypot(foePos(b, now).x - q.x, foePos(b, now).y - q.y))[0]; if (f) { const p = foePos(f, now); dx = p.x - q.x; dy = p.y - q.y; } else dx = q.dir < 0 ? -1 : 1; }
+  const n = Math.hypot(dx, dy) || 1; const dist = 1.5 + (BOW_MAX - 1.5) * Math.min(1, (performance.now() - aimStart) / 1600);
+  aim.fx = q.x; aim.fy = q.y; aim.x = q.x + dx / n * dist; aim.y = q.y + dy / n * dist;
+  aim.lock = live.some((f) => Math.hypot(foePos(f, now).x - aim.x, foePos(f, now).y - aim.y) <= aim.r);
+}
+function ctlAttackEnd(): void {
+  if (!aim.on) return; updateAim(); aim.on = false; const m = me(); if (!m) return;
+  if (performance.now() - aimStart < 120) { toast('🏹 Saldır’ı basılı tutun: nişan çizgisi uzar (menzil), bırakınca ok atılır. Yönü joystick ile çevirin.'); return; }
+  markSwing(m.id); sfx('bow'); void send({ t: 'attack', foeId: '', aimX: Math.round(aim.x * 100) / 100, aimY: Math.round(aim.y * 100) / 100 } as never);
 }
 function nearPeople(): Placed[] { const q = myPlaced(); const m = me(); if (!q || !m) return []; return placed.filter((x) => x.visible && x.p.id !== m.id && Math.hypot(x.x - q.x, x.y - q.y) <= PERSON_REACH); }
 function interactTarget(): { kind: 'person'; id: string; label: string } | { kind: 'building'; id: string; label: string } | { kind: 'none'; label: string } {
@@ -772,7 +800,7 @@ function useSlot(k: SlotItem): void {
   void send({ t: 'useItem', good: k } as never);
 }
 function ctlMove(dx: number, dy: number): void {
-  joyVec = { x: dx, y: dy };
+  joyVec = { x: dx, y: dy }; if (aim.on) { if (joyTimer) { clearInterval(joyTimer); joyTimer = null; } return; } // aiming: the stick turns the bow, no walking
   const stepMove = (): void => { const w = world; const m = me(); if (!w || !m) return; if (!joyVec.x && !joyVec.y) return; const p = myPos(w, m, gameNow()); walkTo({ x: Math.max(0.5, Math.min(MAP_W - 0.5, p.x + joyVec.x * 2.4)), y: Math.max(0.5, Math.min(MAP_H - 0.5, p.y + joyVec.y * 2.4)) }, true); pendingB = null; };
   if (dx || dy) { if (!joyTimer) { stepMove(); joyTimer = setInterval(stepMove, 220); } }
   else if (joyTimer) { clearInterval(joyTimer); joyTimer = null; const w = world; const m = me(); if (w && m) { const p = myPos(w, m, gameNow()); walkTo(p, true); } }
@@ -790,15 +818,22 @@ function frameExtras(): void {
     const q = placed.find((x) => x.p.id === selPerson); const r = canvas.getBoundingClientRect(); const k = cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1));
     const kid = q ? undefined : lastKids.find((x) => x.id === selPerson);
     const spr = k * SPRITE_SCALE; // adult sprite height in CSS px
-    if (q) { const kh = kidHeight(kidScale(yearsOf(w, q.p))); const tr = trait(q.p); const rk = q.p.npc === false || q.p.playerId ? rankLabel(w, q.p) : ''; if (!labelEl) { labelEl = h('div', { class: 'person-label' }); app.append(labelEl); } labelEl.replaceChildren(h('b', {}, displayName(w, q.p)), (tr || rk) ? h('div', { class: 'trait' }, [rk, tr].filter(Boolean).join(' · ')) : '', h('div', { class: 'hp' }, h('i', { style: `width:${Math.max(0, Math.min(100, q.p.health))}%` }))); labelEl.style.left = `${r.left + (q.x - cam.x) * k}px`; labelEl.style.top = `${r.top + (q.y - cam.y) * k - 34 + spr * (1 - kh)}px`; }
+    if (q) { const kh = kidHeight(kidScale(yearsOf(w, q.p))); const tr = trait(q.p); const rk = q.p.npc === false || q.p.playerId ? rankLabel(w, q.p) : ''; if (!labelEl) { labelEl = h('div', { class: 'person-label' }); app.append(labelEl); } labelEl.replaceChildren(h('b', {}, displayName(w, q.p)), (tr || rk) ? h('div', { class: 'trait' }, [rk, tr].filter(Boolean).join(' · ')) : '', h('div', { class: 'hp' }, h('i', { style: `width:${Math.max(0, Math.min(100, tween(`lbl-${q.p.id}`, q.p.health, 350)))}%` }))); labelEl.style.left = `${r.left + (q.x - cam.x) * k}px`; labelEl.style.top = `${r.top + (q.y - cam.y) * k - 34 + spr * (1 - kh)}px`; }
     else if (kid) { const kh = kidHeight(kid.s); if (!labelEl) { labelEl = h('div', { class: 'person-label' }); app.append(labelEl); } labelEl.replaceChildren(h('b', {}, kid.name), h('div', { class: 'trait' }, `${kid.years} yaşında${kid.sick ? ' · hasta' : ''}`)); labelEl.style.left = `${r.left + (kid.x - cam.x) * k}px`; labelEl.style.top = `${r.top + (kid.y - cam.y) * k - 34 + spr * (1 - kh)}px`; }
   } else if (labelEl) { labelEl.remove(); labelEl = null; }
   if (heldNpc && sheet && performance.now() % 30000 < 40) void be.act({ t: 'holdNpc', personId: heldNpc, on: true } as never);
-  ctl?.refresh();
+  updateAim(); ctl?.refresh(); hudBars();
+}
+/** v2.0.2: HUD meters glide every frame (HP after a hit, tokluk/su/enerji drifting between hourly updates). */
+function hudBars(): void {
+  for (const el of hudEl?.querySelectorAll<HTMLElement>('.meter[data-k]') ?? []) {
+    const k = el.dataset.k!; const v = Number(el.dataset.v); if (!Number.isFinite(v)) continue; const i = el.querySelector<HTMLElement>('.bar i'); if (!i) continue;
+    const s = tween(`hud-${k}`, v, k === 'hp' ? 450 : 900, k !== 'hp'); i.style.width = `${Math.max(0, Math.min(100, s))}%`;
+  }
 }
 function setupControls(): void {
-  ctl = buildControls(app, { me: () => me(), useSlot, move: ctlMove, attack: ctlAttack, interact: ctlInteract,
-    canAttack: () => { const w = world; const m = me(); const on = !!w?.combat && liveFoes(w).length > 0 && !!m && !!weaponInHand(m); return { on, label: on ? 'En yakın düşmana saldır' : 'Saldırı yalnız baskın/savaşta, silah seçiliyken' }; },
+  ctl = buildControls(app, { me: () => me(), useSlot, move: ctlMove, attack: ctlAttack, attackEnd: ctlAttackEnd, interact: ctlInteract,
+    canAttack: () => { const m = me(); const on = !!m && !!weaponInHand(m); return { on, label: on ? (m && weaponInHand(m) === 'yay' ? 'Basılı tut: nişan al, bırak: at' : 'Kılıcı/hançeri savur') : 'Önce hızlı çubuktan bir silah seçin' }; },
     canInteract: () => { const t = interactTarget(); return { on: t.kind !== 'none', label: t.label }; } });
 }
 // combat feedback + money / weapon notices (every state update)
@@ -807,8 +842,13 @@ function stateNotices(): void {
   const w = world; const m = me(); if (!w || !m) return; const now = gameNow();
   const hits = w.combat?.hits ?? []; const logEl = document.querySelector('.combat-log') ?? (() => { const e = h('div', { class: 'combat-log' }); app.append(e); return e; })();
   for (const hi of hits) { if (hi.at <= hitSeen) continue; if (now - hi.at > 15_000) continue;
-    if (hi.to === m.id) { const t = hi.k === 'rob' ? `💰 ${hi.by} kesenizden ${hi.dmg} D aldı!` : hi.k === 'block' ? `🛡 ${hi.by} size ${hi.w} ile vurdu – kalkan kısmen tuttu (−${hi.dmg})` : `🩸 ${hi.by} size ${hi.w} ile vurdu (−${hi.dmg})`; logEl.append(h('div', {}, t)); setTimeout(() => logEl.firstChild?.remove(), 3600); app.append(h('div', { class: 'hurt-flash' })); setTimeout(() => document.querySelector('.hurt-flash')?.remove(), 600); canvas.classList.remove('shake'); void canvas.offsetWidth; canvas.classList.add('shake'); sfx('error'); try { navigator.vibrate?.(120); } catch { /* */ } }
-    else if (hi.by === m.name && (hi.k === 'kill')) { logEl.append(h('div', {}, `⚔ ${hi.toName} yere serildi!`)); setTimeout(() => logEl.firstChild?.remove(), 3600); sfx('death'); }
+    if (hi.to === m.id) { const t = hi.k === 'rob' ? `💰 ${hi.by} kesenizden ${hi.dmg} D aldı!` : hi.k === 'block' ? `🛡 ${hi.by} size ${hi.w} ile vurdu – kalkan kısmen tuttu (−${hi.dmg})` : `🩸 ${hi.by} size ${hi.w} ile vurdu (−${hi.dmg})`; logEl.append(h('div', {}, t)); setTimeout(() => logEl.firstChild?.remove(), 3600); app.append(h('div', { class: 'hurt-flash' })); setTimeout(() => document.querySelector('.hurt-flash')?.remove(), 600); canvas.classList.remove('shake'); void canvas.offsetWidth; canvas.classList.add('shake'); sfx(hi.k === 'block' ? 'clang' : 'hit'); try { navigator.vibrate?.(120); } catch { /* */ } }
+    else if (hi.from === m.id || hi.by === m.name) { // v2.0.2: clear feedback for your own blows
+      const f = w.combat?.foes.find((x) => x.id === hi.to); const hp = f ? ` · düşman canı ${Math.max(0, f.hp)}/${f.max}` : '';
+      const t = hi.k === 'kill' ? `⚔ ${hi.toName} yere serildi! (+5 D ödül)` : hi.k === 'miss' ? `💨 ${hi.w} ıskaladı` : `💥 ${hi.w} ile vurdunuz: −${hi.dmg}${hp}`;
+      logEl.append(h('div', { class: hi.k === 'miss' ? 'miss' : 'mine' }, t)); setTimeout(() => logEl.firstChild?.remove(), 3600);
+      if (hi.k === 'kill') sfx('death'); else if (hi.k !== 'miss') { setTimeout(() => sfx('hit'), hi.arrow ? 380 : 0); canvas.classList.remove('shake-s'); void canvas.offsetWidth; canvas.classList.add('shake-s'); try { navigator.vibrate?.(40); } catch { /* */ } }
+    }
   }
   hitSeen = Math.max(hitSeen, ...hits.map((x) => x.at), 0);
   // every money loss gets a visible reason (unless it was the action you just did)
@@ -839,7 +879,7 @@ function statToasts(first: boolean): void {
   for (const g of new Set([...Object.keys(cur.inv), ...Object.keys(prev.inv)])) { const d = (cur.inv[g] ?? 0) - (prev.inv[g] ?? 0); if (d) items.push(`${d > 0 ? '+' : ''}${d} ${GOOD_LABEL[g as Good] ?? g}`); }
   const parts: string[] = []; const big = (k: string, lim: number): boolean => Math.abs(acc[k] ?? 0) >= lim;
   const flush = Date.now() - accAt > 45_000;
-  const why = (k: string, d: number): string => { if (k === 'health') return d < 0 ? (m.hunger > 85 ? 'açlık' : m.thirst > 85 ? 'susuzluk' : m.infected ? 'hastalık' : m.wounded ? 'yara' : 'yorgunluk') : 'dinlenip iyileştiniz'; if (k === 'energy') return d < 0 ? (m.walk ? 'yürüyüş' : 'çalışma ve zaman') : (m.sleeping ? 'uyku' : 'dinlenme'); return d > 0 ? 'zaman geçti' : 'yiyip içtiniz'; };
+  const why = (k: string, d: number): string => { if (k === 'health') return d < 0 ? ((world?.combat?.hits ?? []).some((x) => x.to === m.id && gameNow() - x.at < 15_000) ? 'savaşta yara aldınız' : m.hunger > 85 ? 'açlık' : m.thirst > 85 ? 'susuzluk' : m.infected ? 'hastalık' : m.wounded ? 'yara' : 'yorgunluk') : 'dinlenip iyileştiniz'; if (k === 'energy') return d < 0 ? (m.walk ? 'yürüyüş' : 'çalışma ve zaman') : (m.sleeping ? 'uyku' : 'dinlenme'); return d > 0 ? 'zaman geçti' : 'yiyip içtiniz'; };
   const lbl: Record<string, string> = { hunger: '🍞 Tokluk', thirst: '💧 Su', energy: '⚡ Enerji', health: '❤️ Sağlık' };
   for (const k of ['hunger', 'thirst', 'energy', 'health']) { if (!(big(k, k === 'health' ? 3 : 8) || (flush && big(k, 1)))) continue; const d = acc[k]!; const shown = k === 'hunger' || k === 'thirst' ? -d : d; parts.push(`${lbl[k]} ${shown > 0 ? '+' : ''}${Math.round(shown)} (${why(k, d)})`); acc[k] = 0; }
   if (items.length) parts.push(`🎒 Çanta ${items.join(', ')}`);
@@ -861,6 +901,11 @@ function openPlaces(): void {
     m?.home ? h('div', {}, h('h3', {}, 'Ev'), h('button', { onclick: () => { closeSheet(); goBuilding(m.home); } }, `🏠 Evim (${w.buildings.find((b) => b.id === m.home)?.name ?? m.home})`)) : ''); });
 }
 function frame(): void {
+  try { frameInner(); } catch (e) { frameErr(e); }
+  requestAnimationFrame(frame);
+}
+let frameErrN = 0; function frameErr(e: unknown): void { frameErrN += 1; if (frameErrN < 5) console.error('frame', e); }
+function frameInner(): void {
   // v1.9.3: no 30 fps cap in low-graphics mode (it halved smoothness); low mode = 1× pixels
   const prof0 = performance.now();
   if (world && stat) {
@@ -876,14 +921,15 @@ function frame(): void {
     frameExtras();
   }
   const pc = performance.now() - prof0; profAcc.n += 1; profAcc.sum += pc; if (pc > profAcc.max) profAcc.max = pc;
-  requestAnimationFrame(frame);
 }
 
-let ticking = false;
+let ticking = false; let tickAt = 0;
+/** v2.0.2: a heartbeat can never hang the client (the live battle froze when one request never returned: the world stopped updating). */
+const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('zaman aşımı')), ms))]);
 async function tick(): Promise<void> {
-  if (ticking || !be.session()) return; ticking = true;
+  if ((ticking && performance.now() - tickAt < 20_000) || !be.session()) return; ticking = true; tickAt = performance.now();
   try {
-    const r = await be.heartbeat(); ((window as unknown as { __hb?: number[] }).__hb ??= []).push(Math.round(performance.now()));
+    const r = await withTimeout(be.heartbeat(), 15_000); ((window as unknown as { __hb?: number[] }).__hb ??= []).push(Math.round(performance.now()));
     const first = !world; world = r.world;
     if (world.serverNow) { const ns = world.serverNow - Date.now(); skew = first || Math.abs(ns - skew) > 3000 ? ns : skew + (ns - skew) * 0.15; } // smooth clock: no jumps
     const mm = me(); if (localWalk && mm && mm.id === localWalk.id && gameNow() < walkEnd(localWalk.walk) + 15_000) mm.walk = localWalk.walk;

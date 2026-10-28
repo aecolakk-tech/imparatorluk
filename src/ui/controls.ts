@@ -18,7 +18,7 @@ export interface CtlApi {
   me: () => Person | null;
   useSlot: (k: SlotItem) => void;
   move: (dx: number, dy: number) => void; // joystick vector, |v| ≤ 1; (0,0) = stop
-  attack: () => void; interact: () => void;
+  attack: () => void; attackEnd?: () => void; interact: () => void;
   canAttack: () => { on: boolean; label: string }; canInteract: () => { on: boolean; label: string };
 }
 const key = (me: Person): string => `imp-hotbar-${me.id}`;
@@ -40,7 +40,8 @@ export function buildControls(root: HTMLElement, api: CtlApi): { refresh: () => 
   const acts = h('div', { class: 'act-btns' }, itr, atk);
   const el = h('div', { class: 'controls' }, joy, bar, acts); root.append(el);
   const press = (b: HTMLElement): void => { b.classList.add('pressed'); setTimeout(() => b.classList.remove('pressed'), 160); };
-  atk.addEventListener('pointerdown', (e) => { e.preventDefault(); press(atk); api.attack(); });
+  atk.addEventListener('pointerdown', (e) => { e.preventDefault(); try { atk.setPointerCapture(e.pointerId); } catch { /* */ } press(atk); api.attack(); });
+  const atkUp = (): void => api.attackEnd?.(); atk.addEventListener('pointerup', atkUp); atk.addEventListener('pointercancel', atkUp);
   itr.addEventListener('pointerdown', (e) => { e.preventDefault(); press(itr); api.interact(); });
   // joystick
   let jid: number | null = null; let cx = 0, cy = 0; const R = 42;
@@ -57,11 +58,11 @@ export function buildControls(root: HTMLElement, api: CtlApi): { refresh: () => 
     const t = e.target as HTMLElement; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
     const k = e.key.toLowerCase();
     if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) { if (!keys.has(k)) { keys.add(k); kv(); } e.preventDefault(); return; }
-    if (k === ' ' || k === 'f') { e.preventDefault(); press(atk); api.attack(); return; }
+    if (k === ' ' || k === 'f') { e.preventDefault(); if (e.repeat) return; press(atk); api.attack(); return; }
     if (k === 'e') { press(itr); api.interact(); return; }
     if (/^[1-8]$/.test(k)) { const m = api.me(); if (!m) return; const s = hotbarSlots(m)[+k - 1]; if (s) api.useSlot(s as SlotItem); }
   });
-  addEventListener('keyup', (e) => { const k = e.key.toLowerCase(); if (keys.delete(k)) kv(); });
+  addEventListener('keyup', (e) => { const k = e.key.toLowerCase(); if (k === ' ' || k === 'f') api.attackEnd?.(); if (keys.delete(k)) kv(); });
   addEventListener('blur', () => { if (keys.size) { keys.clear(); api.move(0, 0); } });
   let sig = '';
   const refresh = (): void => {

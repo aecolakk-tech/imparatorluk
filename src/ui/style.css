@@ -276,3 +276,10 @@ body.has-sheet .controls .hotbar { display:none; }
 .meclis-full .tabs { position: sticky; top: 0; z-index: 2; background: inherit; padding: 4px 0; gap: 4px; }
 .seats.hemicycle { display: flex; flex-wrap: wrap; justify-content: center; border-radius: 50% 50% 0 0 / 30% 30% 0 0; padding: 10px; }
 .meclis-full .bar { background: #333; border-radius: 4px; overflow: hidden; margin-top: 4px; }
+
+/* v2.0.2 combat feedback */
+.shake-s { animation:shakes .18s linear; } @keyframes shakes { 0%,100% { transform:translate(0,0) } 33% { transform:translate(-3px,1px) } 66% { transform:translate(3px,-1px) } }
+.combat-log div.mine { background:#3a2a06dd; border-color:#e0b030; color:#ffe9a0; font-weight:600; }
+.combat-log div.miss { background:#222c; border-color:#888; color:#ddd; }
+.bar i { transition: width .6s ease-out; }
+.hud .meter .bar i { transition: none; } /* HUD meters are eased per frame (tween.ts) */

@@ -15,13 +15,13 @@ import { die } from './family';
 import { arms, bestWeapon, isUniformed, weaponInHand, ARM_DMG, ARM_LABEL, SHIELD_BLOCK } from './arms';
 import { hourMs } from './tick';
 import { fightMul, robShare } from './profile';
-import { foePos, liveFoes, LIMAN_DOCK, SAIL_MS, type Combat, type Foe, type Hit } from './combatpos';
+import { MELEE_TILES, REACH_SLACK, berth, foePos, liveFoes, LIMAN_DOCK, SAIL_MS, shipCount, WAVE_MS, WAVE_SIZE, type Combat, type Foe, type Hit } from './combatpos';
 
 export const STEP_MS = 1000; const MAX_STEPS = 40;
 export const RAID_MAX_MS = 6 * 60_000; export const WAR_MAX_MS = 9 * 60_000;
 const FOE_HP = { eskiya: 100, macar: 100 } as const;
 const FOE_SPEED = { eskiya: 2.3, macar: 1.7 } as const;
-const MELEE = 1.6; const BOW_RANGE = 7;
+const MELEE = MELEE_TILES; const BOW_RANGE = 7; export const BOW_MAX = 9; const AIM_R = 1.3;
 // eşkıya walk in from beyond the map edge along the roads (outside point → edge → town)
 const ENTRY: [Pt, Pt][] = [[{ x: -4, y: 13.5 }, { x: 1.5, y: 13.5 }], [{ x: 104, y: 20.5 }, { x: 98, y: 20.5 }], [{ x: -4, y: 29.5 }, { x: 1.5, y: 29.5 }], [{ x: 104, y: 35.5 }, { x: 98, y: 35.5 }], [{ x: 6.5, y: -4 }, { x: 6.5, y: 1.5 }], [{ x: 92.5, y: -4 }, { x: 92.5, y: 1.5 }], [{ x: -4, y: 20.5 }, { x: 1.5, y: 20.5 }], [{ x: 104, y: 13.5 }, { x: 98, y: 13.5 }]];
 const MEYDAN: Pt = { x: 36, y: 30 };
@@ -63,11 +63,11 @@ function assignFighters(w: World, c: Combat, placed: Map<string, { x: number; y:
 }
 
 /** Damage to a person (soldier, bekçi or player). NPC fighters retreat wounded at ≤20 and can fall; players never die here. */
-function hurt(w: World, c: Combat, p: Person, dmg: number, by: string, wl: string, at: Pt, t: number): void {
+function hurt(w: World, c: Combat, p: Person, dmg: number, by: string, wl: string, at: Pt, t: number, src?: { id: string; x: number; y: number; arrow: boolean }): void {
   const shield = (arms(p).kalkan ?? 0) > 0; const d = Math.max(3, Math.round(dmg - (shield ? SHIELD_BLOCK * 0.6 : 0)));
   p.health = clamp(p.health - d); const player = !!p.playerId && !p.npc;
   if (player) { if (p.health < 5) p.health = 5; if (p.health <= 30) p.wounded = true; }
-  hit(c, { at: t, x: at.x, y: at.y, dmg: d, to: p.id, toName: p.name, by, w: wl, k: shield ? 'block' : 'hit' });
+  hit(c, { at: t, x: at.x, y: at.y, dmg: d, to: p.id, toName: p.name, by, w: wl, k: shield ? 'block' : 'hit', ...(src ? { from: src.id, fx: src.x, fy: src.y, arrow: src.arrow } : {}) });
   if (!player && p.health <= 20) {
     p.wounded = true; delete c.assign[p.id];
     if (p.health <= 6 && rand(w) < 0.5) { hit(c, { at: t, x: at.x, y: at.y, dmg: 0, to: p.id, toName: p.name, by, w: wl, k: 'down' }); (c as Combat & { fallen?: string[] }).fallen = [...((c as Combat & { fallen?: string[] }).fallen ?? []), p.name]; die(w, p, `${p.name} ${by} karşısında şehit düştü.`); }
@@ -81,22 +81,40 @@ function foeKilled(w: World, c: Combat, _f: Foe, by: Person | null): void {
   if (by) { by.xp += 3; by.rep = clamp(by.rep + 2, -100, 100); if (by.playerId && !by.npc && transfer(w, 'saray', by.id, 5, c.kind === 'raid' ? 'eşkıya ödülü' : 'düşman askeri ödülü')) personal(w, by.playerId, `⚔ ${c.kind === 'raid' ? 'Bir eşkıyayı' : 'Bir düşman askerini'} yere serdiniz! Ödül: 5 D (hazineden).`); }
 }
 
-/** One player attack on a foe (the 'attack' action). */
-export function attackFoe(w: World, me: Person, foeId: string, now: number): { ok: boolean; msg: string } {
-  const c = w.combat; const f = c?.foes.find((x) => x.id === foeId && x.hp > 0); if (!c || !f) return { ok: false, msg: 'Hedef yok (ölmüş ya da gitmiş).' };
+/** One player attack (the 'attack' action). Melee/hançer: the foe beside you. Yay: v2.0.2 aimed shot – the arrow flies to (aimX, aimY)
+ *  (hold Saldır = farther, up to BOW_MAX) and hits the foe nearest that point; without an aim point it is shot at foeId. */
+export function attackFoe(w: World, me: Person, foeId: string, now: number, aim?: { x: number; y: number } | null): { ok: boolean; msg: string } {
+  const c = w.combat; if (!c) return { ok: false, msg: 'Hedef yok (ölmüş ya da gitmiş).' };
   if (me.jailedDays > 0) return { ok: false, msg: 'Zindandasınız.' };
   if (me.health <= 10) return { ok: false, msg: 'Çok ağır yaralısınız; savaşamazsınız. Hekime gidin.' };
   const wp = weaponInHand(me); if (!wp) return { ok: false, msg: bestWeapon(me) ? 'Önce silahınızı seçin (alttaki hızlı çubuk) – kınında silahla vurulmaz.' : 'Silahınız yok. Demirci’den (Zanaat Atölyesi) kılıç, hançer ya da yay alın.' };
   if (now - (me.atkAt ?? 0) < 1100) return { ok: false, msg: '' };
-  const q = placePeople(w, now).find((x) => x.p.id === me.id); const fp = foePos(f, now);
-  const d = q ? Math.hypot(q.x - fp.x, q.y - fp.y) : 0; const range = wp === 'yay' ? BOW_RANGE : MELEE;
-  if (rules.reach && d > range + 0.3) return { ok: false, msg: wp === 'yay' ? `Menzil dışında (${d.toFixed(1)} kare; yay ${BOW_RANGE}).` : 'Çok uzak – yanına gidin (kılıç/hançer yakın dövüş).' };
+  const q = placePeople(w, now).find((x) => x.p.id === me.id); const from = q ? { x: q.x, y: q.y } : null;
+  const ashore = (x: Foe): boolean => x.hp > 0 && now >= x.walk.t0;
+  if (wp === 'yay' && aim && from) {
+    const a = arms(me); if ((a.ok ?? 0) <= 0) return { ok: false, msg: 'Okunuz kalmadı – Demirci’den ok alın.' };
+    let ax = aim.x, ay = aim.y; const dist = Math.hypot(ax - from.x, ay - from.y); if (dist > BOW_MAX) { ax = from.x + (ax - from.x) * BOW_MAX / dist; ay = from.y + (ay - from.y) * BOW_MAX / dist; }
+    me.atkAt = now; (c.fought ??= {})[me.id] ??= 0; a.ok = Math.max(0, (a.ok ?? 0) - 1);
+    const cand = c.foes.filter(ashore).map((x) => ({ f: x, d: Math.hypot(foePos(x, now).x - ax, foePos(x, now).y - ay) })).filter((x) => x.d <= AIM_R).sort((x, y) => x.d - y.d)[0];
+    const arrow = { from: me.id, fx: from.x, fy: from.y, arrow: true };
+    if (!cand || rand(w) > 0.9 - 0.3 * (cand.d / AIM_R)) { hit(c, { at: now, x: ax, y: ay, dmg: 0, to: cand?.f.id ?? '-', toName: 'boşluk', by: me.name, w: ARM_LABEL[wp], k: 'miss', ...arrow }); return { ok: true, msg: cand ? 'Ok ıskaladı!' : 'Ok boşa düştü – hedefin üstüne nişan alın.' }; }
+    const f = cand.f; const fp = foePos(f, now); const kind = f.kind === 'eskiya' ? 'eşkıya' : 'düşman askeri';
+    const dmg = Math.round(ARM_DMG[wp] * fightMul(me, w) * skillMul(me) * (0.85 + rand(w) * 0.3)); f.hp = Math.max(0, f.hp - dmg);
+    hit(c, { at: now, x: fp.x, y: fp.y, dmg, to: f.id, toName: kind, by: me.name, w: ARM_LABEL[wp], k: f.hp <= 0 ? 'kill' : 'hit', ...arrow });
+    if (f.hp <= 0) { foeKilled(w, c, f, me); return { ok: true, msg: `${kind[0]!.toUpperCase()}${kind.slice(1)} öldü!` }; }
+    return { ok: true, msg: `🏹 Ok isabet etti (−${dmg}).` };
+  }
+  const f = c.foes.find((x) => x.id === foeId && ashore(x)); if (!f) return { ok: false, msg: 'Hedef yok (ölmüş ya da gitmiş).' };
+  const fp = foePos(f, now);
+  const d = from ? Math.hypot(from.x - fp.x, from.y - fp.y) : 0; const range = wp === 'yay' ? BOW_RANGE : MELEE;
+  if (rules.reach && wp === 'yay' && d > range + 0.3) return { ok: false, msg: `Menzil dışında (${d.toFixed(1)} kare; yay ${BOW_RANGE}).` };
+  if (rules.reach && wp !== 'yay' && d > MELEE_TILES + REACH_SLACK) { me.atkAt = now; hit(c, { at: now, x: fp.x, y: fp.y, dmg: 0, to: f.id, toName: 'boşluk', by: me.name, w: ARM_LABEL[wp], k: 'miss', from: me.id, ...(from ? { fx: from.x, fy: from.y } : {}) }); return { ok: true, msg: '' }; } // v2.0.2: out of reach = a visible whiff, no error
   me.atkAt = now; (c.fought ??= {})[me.id] ??= 0;
   if (wp === 'yay') { const a = arms(me); a.ok = Math.max(0, (a.ok ?? 0) - 1); }
-  const kind = f.kind === 'eskiya' ? 'eşkıya' : 'düşman askeri';
-  if (rand(w) > (wp === 'yay' ? 0.7 : 0.85)) { hit(c, { at: now, x: fp.x, y: fp.y, dmg: 0, to: f.id, toName: kind, by: me.name, w: ARM_LABEL[wp], k: 'miss' }); return { ok: true, msg: 'Iska!' }; }
+  const kind = f.kind === 'eskiya' ? 'eşkıya' : 'düşman askeri'; const src = from ? { from: me.id, fx: from.x, fy: from.y, arrow: wp === 'yay' } : { from: me.id };
+  if (rand(w) > (wp === 'yay' ? 0.7 : 0.85)) { hit(c, { at: now, x: fp.x, y: fp.y, dmg: 0, to: f.id, toName: kind, by: me.name, w: ARM_LABEL[wp], k: 'miss', ...src }); return { ok: true, msg: 'Iska!' }; }
   const dmg = Math.round(ARM_DMG[wp] * fightMul(me, w) * skillMul(me) * (0.85 + rand(w) * 0.3)); f.hp = Math.max(0, f.hp - dmg);
-  hit(c, { at: now, x: fp.x, y: fp.y, dmg, to: f.id, toName: kind, by: me.name, w: ARM_LABEL[wp], k: f.hp <= 0 ? 'kill' : 'hit' });
+  hit(c, { at: now, x: fp.x, y: fp.y, dmg, to: f.id, toName: kind, by: me.name, w: ARM_LABEL[wp], k: f.hp <= 0 ? 'kill' : 'hit', ...src });
   if (f.hp <= 0) { foeKilled(w, c, f, me); return { ok: true, msg: `${kind[0]!.toUpperCase()}${kind.slice(1)} öldü!` }; }
   return { ok: true, msg: `${ARM_LABEL[wp]} ile vurdunuz (−${dmg}).` };
 }
@@ -111,7 +129,12 @@ function step(w: World, c: Combat, t: number, end: { raid?: boolean; war?: boole
   // landing: troops come ashore when the ships dock
   if (c.kind === 'war' && !c.spawned && t >= c.spawnAt) {
     c.spawned = true; const n = (c as Combat & { troops?: number }).troops ?? w.foreign?.troops ?? 12;
-    for (let i = 0; i < n; i++) c.foes.push({ id: `M${t % 100000}-${i}`, kind: 'macar', hp: FOE_HP.macar, max: FOE_HP.macar, bow: i % 3 === 0, walk: stand({ x: LIMAN_DOCK.x - 5 + (i % 10) * 1.1, y: LIMAN_DOCK.y - 0.4 - Math.floor(i / 10) * 0.8 }, t) });
+    const ships = shipCount(n);
+    for (let i = 0; i < n; i++) { // v2.0.2: they come down the gangplanks ship by ship, in waves (not all at once)
+      const b = berth(i % ships, ships); const t0 = t + Math.floor(i / WAVE_SIZE) * WAVE_MS + (i % WAVE_SIZE) * 700;
+      const shore = { x: Math.max(LIMAN_DOCK.x - 6, Math.min(LIMAN_DOCK.x + 6, b.x + ((i % 3) - 1) * 0.5)), y: LIMAN_DOCK.y - 0.4 - (i % 2) * 0.5 };
+      c.foes.push({ id: `M${t % 100000}-${i}`, kind: 'macar', hp: FOE_HP.macar, max: FOE_HP.macar, bow: i % 3 === 0, walk: { path: [{ x: b.x, y: b.y - 0.5 }, shore], t0, speed: 1.3 }, pathAt: t0 + 2500 });
+    }
     if (w.foreign) w.foreign.alive = n;
   }
   if (!c.spawned) return;
@@ -121,10 +144,10 @@ function step(w: World, c: Combat, t: number, end: { raid?: boolean; war?: boole
   // fighters who reached their foe strike
   for (const [id, a] of Object.entries(c.assign)) {
     const p = findPerson(w, id); const f = live.find((x) => x.id === a.foe); const q = placed.get(id); if (!p || !f || !q || f.hp <= 0) continue;
-    const fp = foePos(f, t); if (Math.hypot(q.x - fp.x, q.y - fp.y) > MELEE + 0.2) continue;
+    const fp = foePos(f, t); if (Math.hypot(q.x - fp.x, q.y - fp.y) > MELEE + REACH_SLACK) continue;
     if (rand(w) > (c.kind === 'raid' ? 0.028 : 0.045)) continue;
     const wp = bestWeapon(p) ?? 'kilic'; const dmg = Math.round(ARM_DMG[wp] * 0.5 * (0.8 + rand(w) * 0.4)); f.hp = Math.max(0, f.hp - dmg);
-    hit(c, { at: t, x: fp.x, y: fp.y, dmg, to: f.id, toName: f.kind === 'eskiya' ? 'eşkıya' : 'düşman', by: p.name, w: ARM_LABEL[wp], k: f.hp <= 0 ? 'kill' : 'hit' });
+    hit(c, { at: t, x: fp.x, y: fp.y, dmg, to: f.id, toName: f.kind === 'eskiya' ? 'eşkıya' : 'düşman', by: p.name, w: ARM_LABEL[wp], k: f.hp <= 0 ? 'kill' : 'hit', from: p.id, fx: q.x, fy: q.y, arrow: wp === 'yay' });
     if (f.hp <= 0) foeKilled(w, c, f, p);
   }
   // foes move and strike
@@ -139,7 +162,7 @@ function step(w: World, c: Combat, t: number, end: { raid?: boolean; war?: boole
       if (f.walk.path.length > 1) f.walk = stand(pos, t);
       if (rand(w) < (f.bow ? 0.08 : 0.1)) {
         const base = f.kind === 'eskiya' ? 13 : 14; const dmg = Math.round(base * (0.7 + rand(w) * 0.6));
-        hurt(w, c, tg.p, dmg, f.kind === 'eskiya' ? 'Eşkıya' : `${w.foreign?.name ?? 'Düşman'} askeri`, f.bow ? 'ok' : 'kılıç', { x: tg.x, y: tg.y }, t);
+        hurt(w, c, tg.p, dmg, f.kind === 'eskiya' ? 'Eşkıya' : `${w.foreign?.name ?? 'Düşman'} askeri`, f.bow ? 'ok' : 'kılıç', { x: tg.x, y: tg.y }, t, { id: f.id, x: pos.x, y: pos.y, arrow: f.bow });
         // eşkıya rob a beaten player once
         if (f.kind === 'eskiya' && tg.p.playerId && !tg.p.npc && tg.p.health <= 25 && !(f.robbed ?? []).includes(tg.p.id)) {
           f.robbed = [...(f.robbed ?? []), tg.p.id]; const take = Math.round(tg.p.money * robShare(tg.p) * 100) / 100;
