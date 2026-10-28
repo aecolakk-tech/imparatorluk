@@ -24,12 +24,14 @@ export function sarraf(w: World): Person | undefined {
 export function borrow(w: World, p: Person, amount: number): string {
   const s = sarraf(w); if (!s) return 'Sarraf yok.';
   if (w.loans.some((l) => l.debtor === p.id)) return 'Önce eski borcunuzu ödeyin.';
-  const max = Math.min(150, Math.max(20, s.money * 0.3));
+  // v2.0.2 N5: a pious sarraf trusts pious borrowers (more credit, lower interest) and is wary of meyhane regulars
+  const trust = s.din >= 60 && p.din >= 60 ? 1.3 : s.din >= 60 && p.din < 30 ? 0.7 : 1; const rate = trust > 1 ? 0.08 : LOAN_RATE;
+  const max = Math.min(150 * trust, Math.max(20, s.money * 0.3 * trust));
   if (amount > max) return `Sarraf ${s.name} size en fazla ${Math.round(max)} Dinar verir.`;
   if (!transfer(w, s.id, p.id, amount, 'sarraf borcu')) return 'Sarrafın kasası boş.';
-  const owed = Math.round(amount * (1 + LOAN_RATE) * 100) / 100;
+  const owed = Math.round(amount * (1 + rate) * 100) / 100;
   w.loans.push({ id: nextId(w, 'K'), debtor: p.id, lender: s.id, amount: owed, due: w.day + LOAN_DAYS, day: w.day });
-  return `${s.name} ${amount} Dinar verdi. ${w.day + LOAN_DAYS}. güne kadar ${owed} Dinar ödemelisiniz (%${LOAN_RATE * 100} faiz).`;
+  return `${s.name} ${amount} Dinar verdi. ${w.day + LOAN_DAYS}. güne kadar ${owed} Dinar ödemelisiniz (%${Math.round(rate * 100)} faiz${trust > 1 ? ', dindar olduğunuz için düşük faiz' : ''}).`;
 }
 export function repay(w: World, p: Person, id: string): string {
   const l = w.loans.find((x) => x.id === id && x.debtor === p.id); if (!l) return 'Borç yok.';

@@ -1,3 +1,4 @@
+import { yearsOf } from './age';
 import { campaignDay } from './propaganda';
 import { npcCareerDay, npcPietyDay, npcCampaignDay, npcPartyDay, naipPolicy } from './solo';
 import { genelgeDay } from './genelge';
@@ -19,7 +20,7 @@ import { chance, clamp, pick, rand } from './rng';
 import { findPerson } from './world';
 import { isOnline, kayzerPlayerId, log, personal } from './log';
 import { expirePetitions, naipPetitions, saraykorBonus } from './state';
-import { meclisDay, meclisElection, sandikHour } from './meclis';
+import { meclisDay, meclisElection, sandikHour, canRun, SEAT_COUNT, CAND_AGE } from './meclis';
 import { command, isyanHour, settleFate, startIsyan, strength, republicShare, REBEL_SHARE } from './isyan';
 import { actingHead, dethroneForJail, familyDay } from './family';
 import { endOfDayLife, lifeHour, rumor, autoNeed } from './life';
@@ -160,6 +161,7 @@ function projects(w: World, kOnline: boolean): void {
       const plot = w.buildings.find((b) => b.id === pr.plot);
       if (plot) { plot.kind = 'yapi'; plot.name = pr.name.replace(/ inşaatı$/i, ''); }
       for (const p of w.people) { p.mood = clamp(p.mood + 6); p.loyalty = clamp(p.loyalty + 3); }
+      if (/cami|mescit/i.test(pr.name)) { for (const p of w.people) if (p.din >= 60) { p.loyalty = clamp(p.loyalty + 4); p.din = clamp(p.din + 1); } log(w, '🕌 Yeni cami açıldı; dindar halk devlete minnettar.'); } // v2.0.2 N8
       const rest = pr.paid; if (rest > 0) transfer(w, `proje:${pr.id}`, 'saray', rest, 'proje artanı');
     }
     break; // one project worked at a time
@@ -179,7 +181,13 @@ function hamaliye(w: World): void {
 /** Meclis campaign: NPC candidacies in the aday window, speeches & posters during propaganda. */
 function campaign(w: World, now: number): void {
   const ph = electionPhase(w).phase; const e = w.election;
-  if (ph === 'aday') for (const p of w.people) if (fullAI(p) && p.ambition > 60 && p.jailedDays === 0 && p.prof !== 'naip' && p.prof !== 'asker' && p.prof !== 'bekci' && p.id !== w.kayzerId && !e.candidates.includes(p.id) && chance(w, 0.25) && e.candidates.length < 14) { e.candidates.push(p.id); log(w, `${p.name} Meclis'e aday oldu.`, p.id); }
+  if (ph === 'aday') { // v2.0.2 P10: sitting MPs re-run automatically unless they withdrew
+    const wd = new Set(e.withdrawn ?? []);
+    for (const s of w.meclis.seats) { const p = findPerson(w, s.holder); if (p && canRun(w, p) && !wd.has(p.id) && !e.candidates.includes(p.id)) e.candidates.push(p.id); }
+    // enough candidates for every seat: on the last candidacy day ambitious NPCs fill the list up to SEAT_COUNT + 4
+    if (w.day === electionDates(w).adayTo) for (const p of [...w.people].sort((a, b) => b.ambition - a.ambition)) { if (e.candidates.length >= SEAT_COUNT + 4) break; if (fullAI(p) && canRun(w, p) && !wd.has(p.id) && !e.candidates.includes(p.id) && yearsOf(w, p) >= CAND_AGE) { e.candidates.push(p.id); log(w, `${p.name} Meclis'e aday oldu.`, p.id); } }
+  }
+  if (ph === 'aday') for (const p of w.people) if (fullAI(p) && p.ambition > 60 && p.jailedDays === 0 && p.prof !== 'naip' && p.prof !== 'asker' && p.prof !== 'bekci' && p.id !== w.kayzerId && !e.candidates.includes(p.id) && chance(w, 0.25) && e.candidates.length < SEAT_COUNT + 8 && !(e.withdrawn ?? []).includes(p.id)) { e.candidates.push(p.id); log(w, `${p.name} Meclis'e aday oldu.`, p.id); }
   if (ph === 'propaganda') {
     e.posters = e.posters ?? {};
     for (const id of e.candidates) {

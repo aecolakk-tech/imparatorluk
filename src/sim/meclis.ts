@@ -628,7 +628,7 @@ function npcPropose(w: World, p: Person): void {
   const off = w.people.filter((x) => STATE_PROFS.includes(x.prof) && x.honesty < 40);
   let r: Bill | string = '';
   // v1.9.6: no duplicate agenda – skip a kind that is already on the agenda or was voted on in the last 5 days
-  const recent = (k: BillKind): boolean => w.meclis.bills.some((b) => b.kind === k && (['tartisma', 'oylama', 'onay'].includes(b.status) || w.day - b.day < 5));
+  const recent = (k: BillKind): boolean => w.meclis.bills.some((b) => b.kind === k && (['tartisma', 'oylama', 'onay'].includes(b.status) || w.day - b.day < 5 || (b.status === 'veto' && w.day - b.day < 20))); // v2.0.2: a vetoed item is not re-proposed every week
   const budgetRejected = w.meclis.bills.filter((b) => b.kind === 'butce' && b.status === 'ret').length;
   // v2.0.1: a Cumhuriyetçi MP brings the anayasa change only when he counts (close to) 14 conscience votes
   if (f === 'cumhuriyetci' && w.regime === 'imparatorluk' && !validateBill(w, 'cumhuriyet', 0, '') && members(w).filter((m) => anayasaStance(w, m, { proposerId: p.id } as Bill) > 0.2).length >= ANAYASA_YES - 1) { propose(w, p, 'cumhuriyet', 0, ''); return; }

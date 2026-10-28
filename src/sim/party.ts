@@ -205,7 +205,7 @@ export function audit(w: World): void {
   const inc = Object.entries(tot).filter(([k]) => k.startsWith('+')).reduce((a, [, v]) => a + v, 0); const out = Object.entries(tot).filter(([k]) => k.startsWith('-')).reduce((a, [, v]) => a + v, 0);
   const top = Object.entries(tot).filter(([k]) => k.startsWith('-')).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, v]) => `${k.slice(1)} ${Math.round(v)} D`).join(', ');
   const net = Math.round((inc - out) / Math.max(1, book.length));
-  const q = `Soru önergesi (${opp.name}): Hazine son ${book.length} günde günde ${net >= 0 ? '+' : ''}${net} D. Para nereye gidiyor?`;
+  const q = `Soru önergesi (${opp.name}): Hazine son ${book.length} günde günlük ortalama ${net >= 0 ? '+' : ''}${net} D. Para nereye gidiyor?`;
   const a = `Saray’ın cevabı: En büyük giderler ${top || '—'}. Hazinede ${Math.round(w.treasury)} D var${net < 0 ? '; harcamalar gözden geçirilecek' : ''}.`;
   (w.gnews ??= []).push({ day: w.day, text: `${q} ${a}` }); w.meclis.log.push({ day: w.day, text: `❓ ${q} — ${a}` });
 }

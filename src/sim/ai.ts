@@ -47,11 +47,16 @@ export function isPoor(w: World, p: Person, avgMoney?: number): boolean {
 export function feel(w: World, p: Person): void {
   if (p.prof === 'naip' || p.id === w.kayzerId) return;
   const hungry = p.hunger > 70 || p.thirst > 70; // v1.8: continuous bars
-  if (hungry) { p.mood -= 3; p.republic += 1.2; p.loyalty -= 1; } else { p.mood += 0.6; }
+  // v2.0.2 N4: sabır – in a kıtlık or salgın the devout lose mood more slowly (din 100 → half the loss)
+  const crisis = w.nature?.kind === 'salgin' || (w.disaster?.kind === 'kitlik' && w.day - w.disaster.day < 5);
+  const sabr = crisis ? 1 - Math.max(0, p.din - 50) / 100 : 1;
+  if (hungry) { p.mood -= 3 * sabr; p.republic += 1.2; p.loyalty -= 1; } else { p.mood += 0.6; }
+  if (crisis) p.mood -= 1.5 * sabr;
   // religiosity colours politics: the devout lean to the throne, the secular to the republic
   if (p.din > 70 && w.regime === 'imparatorluk') { p.loyalty += 0.2; p.republic -= 0.2; }
   if (p.din < 25) p.republic += 0.15;
   if (w.bans.includes('icki') && p.din < 35) p.loyalty -= 0.4;
+  if (w.bans.includes('icki') && p.din > 65) p.loyalty += 0.3; // v2.0.2 N8: the pious welcome an içki ban
   const avgMoney = w.people.reduce((s, x) => s + x.money, 0) / w.people.length;
   const poor = isPoor(w, p, avgMoney);
   if (poor) { p.mood -= 1.2; p.republic += 0.9; }

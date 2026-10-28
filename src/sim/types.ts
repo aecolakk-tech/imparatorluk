@@ -336,6 +336,7 @@ export type Action =
   | { t: 'bribe'; personId: string; amount: number }
   | { t: 'give'; personId: string; amount: number }
   | { t: 'runForMeclis' }
+  | { t: 'withdrawCandidacy' }
   | { t: 'vote'; candidateId: string }
   | { t: 'dilekceAc'; kind: BillKind; value?: number; target?: string; title?: string }
   | { t: 'dilekceImza'; id: string }

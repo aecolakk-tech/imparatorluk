@@ -111,7 +111,8 @@ function endG(w: World, g: ActiveG): void {
   }
   const good = d.better === 'down' ? after < g.before : after > g.before; const same = Math.abs(after - g.before) < 0.005;
   const verb = same ? 'değişmedi' : after < g.before ? 'indi' : 'çıktı';
-  const text = same ? `Genelge “${d.label}” bitti: ${d.what} ${fmtN(after)} ${d.unit} ile değişmedi.` : `Genelge “${d.label}” bitti: ${good ? 'genelge sayesinde' : 'genelgeye rağmen'} ${d.what} ${fmtN(g.before)} ${d.unit}’den ${fmtN(after)} ${d.unit}’ye ${verb}.`;
+  const q = (n: number): string => (d.unit === '%' ? `%${fmtN(n)}` : `${fmtN(n)} ${d.unit}`); // v2.0.2: before → after, Turkish % prefix
+  const text = same ? `Genelge “${d.label}” bitti: ${d.what} ${q(after)}, değişmedi.` : `Genelge “${d.label}” bitti: ${d.what} ${q(g.before)} → ${q(after)} (${verb}; ${good ? 'genelge işe yaradı' : 'genelgeye rağmen'}).`;
   log(w, `📜 ${text}`); (w.gnews ??= []).push({ day: w.day, text });
   g.result = same ? 0 : good ? 1 : -1;
   partyOnGenelge(w, g);

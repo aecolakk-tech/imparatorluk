@@ -10,7 +10,7 @@ import { answerForeign, recruit, ransom, RECRUIT_MAX } from './events2';
 import { callWitness } from './alibi';
 import { ek } from './tr';
 import { moveIn, goInside, leaveHome, atHomeSafe } from './housing';
-import { kayzerBill, foundFaction, members } from './meclis';
+import { kayzerBill, foundFaction, members, CAND_FEE, CAND_ITIBAR, CAND_AGE } from './meclis';
 import { buildBarn, feedAnimals, collectFarm, hasHorse, drinkMilk, eatEgg, buyFarm, buyAnimal, slaughter, grantTitle, stripTitle, orgFound, orgJoin, orgLeave, orgMeet, orgRole, orgAct, assignSpy, issueWarrant, searchHouse, raidOrg } from './realm';
 import { setGoal, missionCreate, missionClaim, missionPay } from './goals';
 import type { Action, ActionResult, Person, Profession, World } from './types';
@@ -40,6 +40,7 @@ import { produce } from './economy';
 import { nearestOwnAnimal, ANIMAL_REACH } from './herdpos';
 import { actionNeed, distToBuilding, PERSON_REACH, REACH, rules } from './move';
 import { placeOf } from './place';
+import { itibarOf } from './career';
 import { askJob, becomeTalebe, discharge, enlist, hire, hoursText, itibar, postJob, quitJob, readLesson, seferberlik, setShift, talim, teach } from './career';
 import { asevi, ate, din, namaz, sadaka, sifa } from './piety';
 import { addDefense, finishTrial, myPos, reportCorpse, startWalk } from './v16';
@@ -348,7 +349,13 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       return ok(`Başkan adayısınız. Seçim ${w.election.baskanNextDay}. gün.`);
     }
     case 'voteBaskan': { if (w.regime !== 'cumhuriyet' || !findPerson(w, a.candidateId)) return no('Geçersiz.'); w.election.baskanVotes[me.id] = a.candidateId; return ok('Oyunuz sandıkta.'); }
-    case 'runForMeclis': { if (me.id === w.kayzerId && w.regime === 'imparatorluk') return no('Kayzer aday olamaz.'); if (me.prof === 'asker' || me.prof === 'bekci') return no('Askerler ve bekçiler Meclis’e aday olamaz.'); if (electionPhase(w).phase !== 'aday') return no(`Adaylık dönemi değil. ${electionPhase(w).label}.`); if (!w.election.candidates.includes(me.id)) w.election.candidates.push(me.id); return ok(`Adaysınız. Seçim ${w.election.nextDay}. gün.`); }
+    case 'runForMeclis': { if (me.id === w.kayzerId && w.regime === 'imparatorluk') return no('Kayzer aday olamaz.'); if (me.prof === 'asker' || me.prof === 'bekci') return no('Askerler ve bekçiler Meclis’e aday olamaz.'); if (electionPhase(w).phase !== 'aday') return no(`Adaylık dönemi değil. ${electionPhase(w).label}.`); if (w.election.candidates.includes(me.id)) return ok('Zaten adaysınız.');
+      // v2.0.2 P10: candidacy rules – age, itibar and a fee to the hazine
+      if (yearsOf(w, me) < CAND_AGE) return no(`Aday olmak için en az ${CAND_AGE} yaşında olmalısınız.`);
+      if (itibarOf(me) < CAND_ITIBAR) return no(`Aday olmak için itibarınız en az ${CAND_ITIBAR} olmalı (şu an ${Math.round(itibarOf(me))}).`);
+      if (!transfer(w, me.id, 'saray', CAND_FEE, 'adaylık harcı')) return no(`Adaylık harcı ${CAND_FEE} Dinar – paranız yetmiyor.`);
+      w.election.withdrawn = (w.election.withdrawn ?? []).filter((x) => x !== me.id); w.election.candidates.push(me.id); log(w, `${me.name} Meclis'e aday oldu.`, me.id); return ok(`Adaysınız (harç ${CAND_FEE} D). Seçim ${w.election.nextDay}. gün.`); }
+    case 'withdrawCandidacy': { const e = w.election; if (!e.candidates.includes(me.id) && !me.meclis) return no('Aday değilsiniz.'); if (electionPhase(w).phase === 'oylama') return no('Oylama günü adaylıktan çekilemezsiniz.'); e.candidates = e.candidates.filter((x) => x !== me.id); e.withdrawn = [...new Set([...(e.withdrawn ?? []), me.id])]; log(w, `${me.name} adaylıktan çekildi.`, me.id); return ok('Adaylıktan çekildiniz.'); }
     case 'vote': { // v2.0.1 gerçek sandık: only on election day, at the Meclis; secret ballot
       if (!w.election.candidates.includes(a.candidateId)) return no('Bu kişi aday değil.');
       if (electionPhase(w).phase !== 'oylama') return no(`Sandık seçim günü açılır. ${electionPhase(w).label}.`);

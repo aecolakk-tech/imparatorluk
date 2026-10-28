@@ -1,6 +1,6 @@
 import { GENELGE, GKINDS, type GKind } from '../sim/genelge';
 import { rulerName } from '../sim/log';
-import { PROPOSE_FEE } from '../sim/meclis';
+import { PROPOSE_FEE, CAND_FEE, CAND_ITIBAR, CAND_AGE } from '../sim/meclis';
 import { partiesTab, campaignTab } from './campaign';
 import { shelf, isPanayir } from '../sim/market2';
 import { groupOf } from '../sim/economy';
@@ -279,7 +279,7 @@ export function electionCard(c: Ctx): HTMLElement {
   box.append(h('b', {}, ph.label));
   const isCand = !!me && w.election.candidates.includes(me.id);
   const eligible = !!me && me.prof !== 'asker' && me.prof !== 'bekci' && me.id !== w.kayzerId && me.jailedDays === 0;
-  if (ph.phase === 'aday' && me) box.append(isCand ? h('span', { class: 'pill' }, 'Adaysınız') : eligible ? h('button', { class: 'primary', onclick: () => c.act({ t: 'runForMeclis' }) }, 'Aday ol') : h('div', { class: 'muted' }, 'Askerler, bekçiler ve Kayzer aday olamaz.'));
+  if (ph.phase === 'aday' && me) box.append(isCand ? h('div', { class: 'row' }, h('span', { class: 'pill' }, 'Adaysınız'), h('button', { onclick: () => c.act({ t: 'withdrawCandidacy' } as never) }, 'Adaylıktan çekil')) : eligible ? h('div', { class: 'stack' }, h('button', { class: 'primary', onclick: () => c.act({ t: 'runForMeclis' }) }, `Aday ol (harç ${CAND_FEE} D)`), h('div', { class: 'muted' }, `Şartlar: ${CAND_AGE}+ yaş, itibar ≥ ${CAND_ITIBAR}, ${CAND_FEE} Dinar harç. Milletvekilleri çekilmedikçe otomatik yeniden aday olur.`)) : h('div', { class: 'muted' }, 'Askerler, bekçiler ve Kayzer aday olamaz.'));
   if (ph.phase === 'propaganda' && isCand) box.append(h('button', { onclick: () => c.act({ t: 'poster' } as never) }, 'Afiş as (propaganda)'));
   const cands = w.election.candidates.map((id) => findPerson(w, id)).filter((p): p is NonNullable<typeof p> => !!p);
   if (cands.length) box.append(h('div', { class: 'chips' }, ...cands.map((p) => h('span', { class: 'chip' }, `${p.name} · afiş ${w.election.posters?.[p.id] ?? 0}`, ph.phase === 'oylama' && me && !w.election.votes[me.id] ? h('button', { class: 'sm', title: 'Meclis binasındaki sandıkta', onclick: () => c.act({ t: 'vote', candidateId: p.id }) }, '🗳 Oy ver') : ''))));
