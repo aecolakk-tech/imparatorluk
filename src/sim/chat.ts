@@ -15,10 +15,6 @@ const say = (w: World, from: Person, to: string | null, text: string, at: number
   w.chatOut.push({ fromPersonId: from.id, fromName: from.name, toPersonId: to, text: text.slice(0, 280), at });
   if (w.chatOut.length > 60) w.chatOut.splice(0, w.chatOut.length - 60);
 };
-const talk = (w: World, a: Person, b: Person, text: string): void => {
-  w.talks.push({ a: a.id, b: b.id, text: text.slice(0, 60), day: w.day, hour: w.hour });
-  if (w.talks.length > 30) w.talks.shift();
-};
 
 /** What is on this person's mind, as one sentence. */
 export function opinion(w: World, p: Person): string {
@@ -47,44 +43,79 @@ export function opinion(w: World, p: Person): string {
 }
 
 const GREET = ['Selamünaleyküm', 'Merhaba', 'Hayırlı günler', 'Ooo, hoş geldin'];
-/** Reply to a player's message (DM or Meydan mention). Pure rules on keywords + the NPC's state & relation. */
+/** How an NPC addresses the speaker: İmparatorum / Başkanım / efendim / usta / first name. */
+export function addressOf(w: World, from: Person): string {
+  if (from.id === w.kayzerId) return w.regime === 'cumhuriyet' ? 'Başkanım' : 'İmparatorum';
+  if (from.soylu) return 'efendim';
+  if (['hakim', 'savci'].includes(from.prof)) return `${PROF_LABEL[from.prof]} efendi`;
+  if (['bekci', 'asker', 'memur', 'tahsildar'].includes(from.prof)) return `${PROF_LABEL[from.prof].toLocaleLowerCase('tr')} efendi`;
+  const first = from.name.split(' ').find((x) => !Object.values(PROF_LABEL).includes(x)) ?? from.name.split(' ')[0]!;
+  return first;
+}
+function moodLine(p: Person): string {
+  if (p.health < 40) return 'hastayım, halim yok';
+  if (p.meals < 2) return 'karnım aç, idare ediyoruz';
+  if (p.mood > 70) return 'çok şükür, keyfim yerinde';
+  if (p.mood > 45) return 'iyidir, idare ediyoruz';
+  return 'pek iyi değilim, işler kötü';
+}
+function gossipLine(w: World, npc: Person): string | null {
+  const r = [...(w.rumors ?? [])].reverse().find((x) => x.about !== npc.id && w.day - x.day <= 4);
+  if (r) return `Duydun mu? ${r.text}`;
+  const e = [...w.events].reverse().find((x) => /evlendi|soyuldu|CİNAYET|yakaladı|doğdu|rüşvet|aday|kervan/.test(x.text) && w.day - x.day <= 2);
+  return e ? `Duydun mu? ${e.text}` : null;
+}
+/** Reply to a player's message (DM or Meydan mention) – rule-based, used when no LLM is configured or it fails. Always returns a line. */
 export function replyTo(w: World, npc: Person, from: Person, text: string): string {
   const t = text.toLocaleLowerCase('tr'); const r = npc.relations[from.id] ?? 0;
-  const cold = r < -30; const warm = r > 30;
-  if (/\*{3,}/.test(text) || /aptal|salak|şerefsiz|defol/.test(t)) { relate(npc, from, -12, 'bana hakaret etti'); return pick(w, ['Ağzını topla!', 'Sana yakışmadı bu söz.', 'Bunu unutmayacağım.']); }
+  const cold = r < -30; const warm = r > 30; const ad = addressOf(w, from); const ruler = from.id === w.kayzerId;
+  if (/\*{3,}/.test(text) || /aptal|salak|şerefsiz|defol|gerizekal|mal mısın/.test(t)) { relate(npc, from, ruler ? -4 : -12, 'bana hakaret etti'); return ruler ? pick(w, [`Estağfurullah ${ad}, kalbimi kırdınız…`, `Haddim değil ${ad}, ama bu söz ağır oldu.`]) : pick(w, ['Ağzını topla!', 'Sana yakışmadı bu söz.', 'Bunu unutmayacağım.']); }
   relate(npc, from, 2, 'sohbet ettik');
-  if (/merhaba|selam|günaydın|iyi akşam/.test(t)) return `${pick(w, GREET)} ${from.name.split(' ')[0]}! ${cold ? 'Ne istiyorsun?' : opinion(w, npc)}`;
-  if (/nasılsın|naber|ne haber|keyif/.test(t)) return npc.mood > 60 ? `İyiyim, şükür. ${opinion(w, npc)}` : npc.mood > 35 ? `İdare ediyoruz. ${opinion(w, npc)}` : `Hiç iyi değilim… ${opinion(w, npc)}`;
+  const parts: string[] = [];
+  const greet = /merhaba|selam|^sa\b|\bsa\b|günaydın|iyi akşam|iyi günler|hayırlı/.test(t);
+  const how = /nasılsın|naber|ne haber|nabıyon|napıyon|naptın|ne yapıyorsun|ne yapıyon|nasıl gidiyor|keyif|iyi misin|ne var ne yok/.test(t);
+  if (greet) parts.push(cold ? 'Selam.' : `${pick(w, GREET)} ${ad}!`);
+  if (how) parts.push(cold ? 'İdare ediyoruz, sana ne?' : `${moodLine(npc).replace(/^./, (c) => c.toLocaleUpperCase('tr'))} ${ad}. ${npc.lastAction && npc.lastAction !== '-' ? `Bugün ${npc.lastAction.replace(/^fazla mesai · /, '')}.` : `${PROF_LABEL[npc.prof]}lık yapıyorum.`}`);
   const g = (Object.keys(GOOD_LABEL) as Good[]).find((x) => t.includes(GOOD_LABEL[x].toLocaleLowerCase('tr')));
-  if (g || /fiyat|kaç para|pahalı|ucuz/.test(t)) { const gg = g ?? 'ekmek'; const mine = PRODUCES[npc.prof]?.good === gg; return `${GOOD_LABEL[gg]} şimdi ${marketPrice(w, gg).toFixed(2)} Dinar.${mine ? ` Ben de satıyorum; ${warm ? 'sana biraz indirim yaparım.' : 'tezgâhıma bak.'}` : ''}`; }
-  if (/vergi|kayzer|saray|başkan|cumhuriyet|meclis|seçim|siyaset/.test(t)) return npc.republic > 60 ? 'Açık konuşayım: bu saltanat böyle gitmez. Meclis halkın sesi olmalı.' : npc.loyalty > 70 ? 'Devletimize laf ettirmem; Kayzer ne yaparsa doğru yapar.' : `Vergi %${w.taxRate}. ${w.taxRate > 14 ? 'Fazla bence.' : 'Fena değil.'} ${opinion(w, npc)}`;
-  if (/namaz|cami|din|allah|hoca|vaaz/.test(t)) return npc.din > 60 ? 'Elhamdülillah. Öğle namazında camide buluşalım.' : npc.din < 30 ? 'Ben pek camiye gitmem, kusura bakma.' : 'Cumaları giderim, inşallah.';
-  if (/içki|meyhane|bar|şarap|rakı/.test(t)) return npc.din > 60 ? 'Tövbe! Ben içki içmem.' : 'Akşam meyhanede görüşelim, bir kadeh benden!';
-  if (/borç|para ver|yardım|ödünç/.test(t)) { if (warm && npc.money > 60) return 'Sen iyi adamsın; bana yaz, 10 Dinar verebilirim.'; return npc.money < 20 ? 'Kendi kesem boş, kusura bakma.' : 'Para işine karışmam, sarrafa git.'; }
-  if (/iş|çalış/.test(t)) return npc.prof === 'insaatci' || npc.prof === 'hamal' ? 'Şantiyede iş var mı bakıyorum ben de.' : `${PROF_LABEL[npc.prof]}lık yapıyorum. ${PRODUCES[npc.prof] ? 'Ham madde bulmak zor.' : 'Maaş az ama geçiniyoruz.'}`;
-  if (/teşekkür|sağ ol|eyvallah/.test(t)) { relate(npc, from, 3, 'kibar biri'); return 'Rica ederim, her zaman.'; }
-  if (/evlen|sevgili|aşk/.test(t)) return npc.spouse ? 'Ben evliyim, haddini bil!' : warm ? 'Hmm… Ailemle konuşman lazım.' : 'Seni pek tanımıyorum.';
-  return cold ? 'Seninle konuşacak bir şeyim yok.' : opinion(w, npc);
+  if (g || /fiyat|kaç para|pahalı|ucuz|kaça/.test(t)) { const gg = g ?? 'ekmek'; const mine = PRODUCES[npc.prof]?.good === gg; const pr = marketPrice(w, gg); parts.push(`${GOOD_LABEL[gg]} şimdi ${pr.toFixed(2)} Dinar${pr > BASE_PRICE[gg] * 1.4 ? ', çok pahalandı' : pr < BASE_PRICE[gg] * 0.8 ? ', ucuz sayılır' : ''}.${mine ? ` Ben de satıyorum; ${warm ? 'sana indirim yaparım.' : 'tezgâhıma bak.'}` : ''}`); }
+  if (/sağlık|hasta|hekim|yaralı|ağrı/.test(t)) parts.push(npc.health > 70 ? 'Sağlığım yerinde, çok şükür.' : npc.health > 40 ? 'Biraz halsizim ama ayaktayım.' : 'Çok hastayım, hekime param yetmiyor.');
+  if (/\biş\b|işler|çalış|kazan|para/.test(t) && !/para ver|ödünç/.test(t)) parts.push(PRODUCES[npc.prof] ? `${PROF_LABEL[npc.prof]}lıktan bugün ${Math.round(npc.incomeToday)} Dinar kazandım. ${npc.money < 20 ? 'Kesem boş sayılır.' : 'Fena değil.'}` : `${PROF_LABEL[npc.prof]} olarak çalışıyorum. ${npc.money < 20 ? 'Maaş az, geçinmek zor.' : 'Geçinip gidiyoruz.'}`);
+  if (/dedikodu|ne oldu|haber var|duydun|olay/.test(t)) parts.push(gossipLine(w, npc) ?? 'Valla bugün ortalık sakin, bir şey duymadım.');
+  if (/vergi|kayzer|imparator|saray|başkan|cumhuriyet|meclis|seçim|siyaset|devlet|hükümet/.test(t)) {
+    if (ruler) parts.push(npc.loyalty > 60 ? `Allah sizi başımızdan eksik etmesin ${ad}. Vergi %${w.taxRate}; ${w.taxRate > 14 ? 'biraz ağır geliyor halka.' : 'halk memnun.'}` : `Açık konuşayım mı ${ad}? Halk dertli; ${w.taxRate > 12 ? 'vergiler ağır,' : ''} ${marketPrice(w, 'ekmek') > BASE_PRICE.ekmek * 1.3 ? 'ekmek pahalı.' : 'saraydan ilgi bekliyor.'}`);
+    else parts.push(npc.republic > 60 ? 'Açık konuşayım: bu saltanat böyle gitmez. Meclis halkın sesi olmalı.' : npc.loyalty > 70 ? 'Devletimize laf ettirmem; Kayzer ne yaparsa doğru yapar.' : `Vergi %${w.taxRate}. ${w.taxRate > 14 ? 'Fazla bence.' : 'Fena değil.'}`);
+  }
+  if (/namaz|cami|din|allah|hoca|vaaz|dua/.test(t)) parts.push(npc.din > 60 ? 'Elhamdülillah. Öğle namazında camide buluşalım.' : npc.din < 30 ? 'Ben pek camiye gitmem, kusura bakma.' : 'Cumaları giderim, inşallah.');
+  if (/içki|meyhane|bar|şarap|rakı|içelim/.test(t)) parts.push(npc.din > 60 ? 'Tövbe! Ben içki içmem.' : 'Akşam meyhanede görüşelim, bir kadeh benden!');
+  if (/borç|para ver|yardım|ödünç/.test(t)) parts.push(ruler ? `Estağfurullah ${ad}, benim size vereceğim ne olabilir? Hazine sizin.` : warm && npc.money > 60 ? 'Sen iyi adamsın; 10 Dinar verebilirim, sonra konuşuruz.' : npc.money < 20 ? 'Kendi kesem boş, kusura bakma.' : 'Para işine karışmam, sarrafa git.');
+  if (/teşekkür|sağ ol|eyvallah|sağol/.test(t)) { relate(npc, from, 3, 'kibar biri'); parts.push(`Rica ederim ${ad}, her zaman.`); }
+  if (/evlen|sevgili|aşk|güzelsin|yakışıklı/.test(t)) parts.push(npc.spouse ? 'Ben evliyim, haddini bil!' : npc.female === from.female ? 'Hayırdır? Öyle şeylerden anlamam.' : warm ? 'Hmm… Ailemle konuşman lazım.' : 'Seni pek tanımıyorum.');
+  if (/adın|kimsin|tanış/.test(t)) parts.push(`Ben ${npc.name}, ${PROF_LABEL[npc.prof].toLocaleLowerCase('tr')}. ${findPerson(w, npc.spouse) ? `Eşim ${findPerson(w, npc.spouse)!.name}.` : 'Bekârım.'}`);
+  if (/hava|yağmur|kurak|sıcak/.test(t)) parts.push(w.nature?.kind === 'kuraklik' ? 'Kuraklık var, tarlalar kurudu.' : w.nature?.kind === 'sel' ? 'Sel suları evleri bastı.' : 'Hava güzel, şükür.');
+  if (/yemek|aç|karnın|ekmek/.test(t) && !g) parts.push(npc.meals >= 2 ? 'Bugün karnım tok.' : 'Bugün doğru dürüst yemedim.');
+  if (/görüşürüz|hoşça|allaha ısmarladık|bay bay|iyi geceler/.test(t)) parts.push(`Güle güle ${ad}, yolun açık olsun.`);
+  if (/\?$/.test(text.trim()) && parts.length <= (greet ? 1 : 0)) parts.push(pick(w, ['Vallahi bilemedim.', 'Onu bir düşüneyim.', 'Bunu sarayda sormak lazım.']) + ' ' + opinion(w, npc));
+  if (!parts.length) return cold ? 'Seninle konuşacak bir şeyim yok.' : `${opinion(w, npc)}`;
+  if (parts.length === 1 && greet && !cold) parts.push(opinion(w, npc));
+  return parts.join(' ').slice(0, 280);
 }
 
-/** Hourly chatter: NPC↔NPC talk on the map + Meydan, and NPCs approaching (online) players. */
+/** Hourly chatter: NPC↔NPC talk on the map (they walk up and speak), Meydan gossip, NPCs approaching (online) players. */
 export function chatHour(w: World, now: number, online: (p: Person) => boolean): void {
   if (w.hour < 7 || w.hour > 22) return;
   const awake = w.people.filter((p) => fullAI(p) && p.jailedDays === 0 && p.exiledDays === 0 && p.prof !== 'naip');
-  // map conversations among colleagues / neighbours
-  for (let i = 0; i < 6 && awake.length > 1; i += 1) {
+  w.talks = (w.talks ?? []).filter((x) => !x.at || now - x.at < 120_000 || w.day - x.day < 1).slice(-24);
+  for (let i = 0; i < 4 && awake.length > 1; i += 1) {
     const a = pick(w, awake); const near = awake.filter((b) => b !== a && (b.work === a.work || b.home === a.home));
     const b = near.length ? pick(w, near) : pick(w, awake); if (a === b) continue;
-    const line = opinion(w, a); talk(w, a, b, line);
+    const line = opinion(w, a);
     const agree = Math.abs(a.republic - b.republic) < 25 && Math.abs(a.din - b.din) < 30;
+    const answer = agree ? `${pick(w, ['Haklısın.', 'Aynen öyle.', 'Doğru söylersin.'])} ${opinion(w, b)}` : `${pick(w, ['Katılmıyorum.', 'Abartma bence.', 'Öyle deme.'])} ${opinion(w, b)}`;
+    w.talks.push({ a: a.id, b: b.id, text: line.slice(0, 80), lines: [line, answer], day: w.day, hour: w.hour, at: now + i * 9000 });
     relate(a, b, agree ? 2 : -1, agree ? 'sohbetimiz tatlı' : 'fikirlerimiz uyuşmuyor'); relate(b, a, agree ? 2 : -1, agree ? 'sohbetimiz tatlı' : 'fikirlerimiz uyuşmuyor');
   }
-  // Meydan: an NPC posts, another may answer
-  if (chance(w, 0.5)) {
-    const a = pick(w, awake); const line = opinion(w, a); say(w, a, null, line, now);
-    if (chance(w, 0.6)) { const b = pick(w, awake); if (b !== a) say(w, b, null, `@${a.name.split(' ')[0]} ${Math.abs(a.republic - b.republic) < 25 ? pick(w, ['Haklısın.', 'Aynen öyle.', 'Ben de öyle düşünüyorum.']) : pick(w, ['Katılmıyorum.', 'Abartma bence.', 'Öyle deme.'])} ${opinion(w, b)}`, now + 1500); }
-  }
-  // NPCs approach online players
+  // Meydan: only public gossip / news NPCs want everybody to hear
+  if (chance(w, 0.35)) { const a = pick(w, awake); const gsp = gossipLine(w, a); if (gsp) say(w, a, null, `🗣 ${gsp.replace(/^Duydun mu\? /, pick(w, ['Duydunuz mu? ', 'Ahali, haberiniz var mı? ', 'Kulağıma geldi: ']))}`, now); }
   for (const p of w.people.filter((x) => x.playerId && online(x))) {
     if (!chance(w, 0.12)) continue;
     const friends = awake.filter((x) => (x.relations[p.id] ?? 0) > 10); const n = friends.length && chance(w, 0.6) ? pick(w, friends) : pick(w, awake);
@@ -113,11 +144,22 @@ function approach(w: World, n: Person, p: Person, now: number): void {
   void clamp;
 }
 
-/** A player wrote something: NPC replies (DM → the addressee; Meydan → mentioned names or a couple of bystanders). */
-export function playerSaid(w: World, from: Person, text: string, toPersonId: string | null, now: number): void {
-  if (toPersonId) { const npc = findPerson(w, toPersonId); if (npc && fullAI(npc) && npc.prof !== 'naip') say(w, npc, from.id, replyTo(w, npc, from, text), now + 1200); if (npc?.prof === 'naip') say(w, npc, from.id, 'Efendim, devlet işlerinde size yardımcı olmak görevimdir. Dilekçelerinizi Saray’a yazın; ben de Kayzer yokken küçük işleri görürüm.', now + 1200); return; }
+/** A player wrote something: NPC replies (DM → the addressee; Meydan → mentioned names or a bystander). Returns the replying NPCs. */
+export function playerSaid(w: World, from: Person, text: string, toPersonId: string | null, now: number, defer = false): { npc: Person; fallback: string }[] {
+  const out: { npc: Person; fallback: string }[] = [];
+  const emit = (npc: Person, to: string | null, line: string, delay: number): void => { out.push({ npc, fallback: line }); if (!defer) say(w, npc, to, line, now + delay); };
+  if (toPersonId) {
+    const npc = findPerson(w, toPersonId); if (!npc || npc.playerId) return out;
+    if (npc.prof === 'naip') emit(npc, from.id, from.id === w.kayzerId ? `${/nab|nası|naber|merhaba|selam/i.test(text) ? 'İyiyim ' + addressOf(w, from) + ', sağ olun. ' : ''}Buyurun ${addressOf(w, from)}, emrinizdeyim. Devlet işleri yolunda; dilekçeler Saray’da bekliyor.` : 'Devlet işlerinde size yardımcı olmak görevimdir. Dilekçelerinizi Saray’a yazın.', 1200);
+    else if (npc.jailedDays > 0) emit(npc, from.id, `Zindandayım ${addressOf(w, from)}… ${replyTo(w, npc, from, text)}`, 1200);
+    else emit(npc, from.id, replyTo(w, npc, from, text), 1200);
+    return out;
+  }
   const t = text.toLocaleLowerCase('tr');
-  const named = w.people.filter((p) => fullAI(p) && p.name.split(' ').some((x) => x.length > 2 && t.includes(x.toLocaleLowerCase('tr'))));
-  const responders = named.length ? named.slice(0, 2) : w.people.filter((p) => fullAI(p) && p.jailedDays === 0 && chance(w, 0.03)).slice(0, 2);
-  responders.forEach((npc, i) => say(w, npc, null, `@${from.name.split(' ')[0]} ${replyTo(w, npc, from, text)}`, now + 1500 * (i + 1)));
+  const named = w.people.filter((p) => !p.playerId && p.prof !== 'naip' && p.name.split(' ').some((x) => x.length > 2 && t.includes(x.toLocaleLowerCase('tr'))));
+  const bystanders = w.people.filter((p) => fullAI(p) && p.jailedDays === 0 && p.prof !== 'naip');
+  const responders = named.length ? named.slice(0, 2) : chance(w, 0.8) && bystanders.length ? [pick(w, bystanders)] : [];
+  responders.forEach((npc, i) => emit(npc, null, `@${from.name.split(' ').slice(-1)[0]} ${replyTo(w, npc, from, text)}`, 1500 * (i + 1)));
+  return out;
 }
+export { say as npcSay };

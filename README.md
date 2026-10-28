@@ -87,3 +87,13 @@ Bilinen sınırlar için rapordaki "Eksikler" bölümüne bakın: dünya durumu 
 - Cinsiyet herkes için; evlilik sadece kadın-erkek. Seçimde adaylık → propaganda (afiş, konuşma) → oylama.
 - Kuraklık her 180 günde 14 gün; salgın, sel, bereket. Daha büyük harita (100×60), arsalara inşaat.
 - Kayıtlı dünyalar `migrateWorld` ile şema 2’ye taşınır (kimse silinmez).
+
+## v1.6
+- Gerçek yürüyüş: haritaya dokun → karakter A* ile yürür; bina/kişi etkileşimleri sadece yakındayken.
+- Sade arayüz: tek "☰ Menü", sade bina pencereleri, her zaman görünen kompakt HUD; büyük sprite'lar.
+- NPC'lerle yapay zekâ sohbeti (Gemini flash-lite, sunucu sırrı `NPC_LLM_API_KEY`; dakika/gün limiti, önbellek, kurallı yedek cevap).
+- NPC'ler birbirine yürüyüp konuşuyor; Meydan sadece dedikodu.
+- Web Audio sesleri (kuşlar, cırcır böcekleri, tıklama, ölüm, para, kapı, çan, kalabalık, davul, zindan kapısı) + sessiz düğmesi.
+- Cinayet akışı: ceset (5 dk) → ihbar → bekçi → savcı → canlı duruşma (YZ kadı) → karar → zindana götürme / para cezası.
+- İsyan tetikleyicisi düzeltildi (çoğunluk cumhuriyetçi ise 3 günde isyan); seçimler 40 günde bir, Meydan'da tabela, aşama pencereleri; asker/bekçi aday olamaz.
+- Denge: kuraklıkta ekmek pahalanır, hasta NPC'ler hekime gider, zanaat fiyatlarına taban, kanun önizlemesi 1. günde de sayı verir.

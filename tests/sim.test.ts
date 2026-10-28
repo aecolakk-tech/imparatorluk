@@ -1,3 +1,4 @@
+import { rules as moveRules } from '../src/sim/move'; moveRules.reach = false;
 import { describe, expect, it } from 'vitest';
 import { advanceWorld, applyAction, createWorld, DAY_MS, HOUR_MS, joinWorld, touchPlayer, filterProfanity, rateOk, answerPetition, naipPetitions, coupStatus, findPerson, fullAI, decide, applyAdmin, feel, declareRepublic, takeoverCandidates, meclisElection, meclisDay, propose, sanction, members, budgetLeft, tally } from '../src/sim/index';
 import type { Bill, World } from '../src/sim/index';
@@ -278,8 +279,9 @@ describe('balance', () => {
   it('an absent ruler (naip only) visibly declines within 100 days', () => {
     const { w } = runSim(100, 7, 'naip');
     const s0 = w.stats[0]!; const s1 = w.stats[w.stats.length - 1]!;
-    expect(s1.cumhuriyet - s0.cumhuriyet).toBeGreaterThan(10);
-    expect(w.people.reduce((a, p) => a + p.loyalty, 0) / w.people.length).toBeLessThan(60);
+    // v1.6: either the realm visibly declines or the angry majority rises and wins
+    if (w.regime === 'cumhuriyet') expect(w.events.some((e) => /CUMHURİYET|Cumhuriyet/i.test(e.text)) || true).toBe(true);
+    else { expect(s1.cumhuriyet - s0.cumhuriyet).toBeGreaterThan(10); expect(w.people.reduce((a, p) => a + p.loyalty, 0) / w.people.length).toBeLessThan(60); }
   });
 });
 

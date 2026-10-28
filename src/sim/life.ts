@@ -1,3 +1,4 @@
+import { makeCorpse } from './v16';
 /**
  * Daily life: needs (3 meals + 5 water), health & doctors, religiosity (cami / meyhane / vaaz / devlet yönlendirmesi),
  * crafts that matter (elbise, mobilya, alet, odun), nature (kuraklık every 180 days, salgın, sel, bereket),
@@ -133,6 +134,7 @@ export function lifeHour(w: World): void {
   if (h === 13) for (const p of w.people) if (fullAI(p) && active(p) && p.din > 55 && chance(w, 0.4)) pray(w, p);
   if (h === 13 && w.day % 7 === 5) { const imam = w.people.find((x) => (x.prof === 'imam' || x.prof === 'hoca') && active(x) && fullAI(x)); if (imam) sermon(w, imam, pick(w, ['namaz', 'icki', 'sabir'] as const)); }
   if (h === 14) for (const p of w.people) if (fullAI(p) || p.npc) { if (needsHelp(p) && active(p)) seeDoctor(w, p, true); }
+  if (h === 14) for (const p of w.people) if (p.npc && !needsHelp(p) && p.health < 58 && p.money > DOCTOR_FEE * 2.5 && active(p)) seeDoctor(w, p, false); // v1.6: don't live sick for weeks
   if (h === 14) for (const p of w.people) if (!fullAI(p) && needsHelp(p) && p.money > DOCTOR_FEE * 2) seeDoctor(w, p, false); // offline players: conservative AI still sees the doctor
   if (h === 15) collectTaxes(w);
   if (h === 18) for (const p of w.people) if (fullAI(p) && active(p)) shop(w, p);
@@ -371,10 +373,10 @@ export function assault(w: World, a: Person, v: Person): string {
 export function murder(w: World, a: Person, v: Person): string {
   if (isProtected(w, v)) return `${v.name}'a dokunulmaz.`;
   if (v.playerId || v.prof === 'asker' && chance(w, 0.7)) { v.health = 5; v.wounded = true; log(w, `${a.name}, ${v.name}'ı öldürmeye kalktı; ağır yaralı kurtuldu!`, v.id); arrest(w, a, 'cinayet', v.id, 0); return `${v.name} ağır yaralı kurtuldu.`; }
-  for (const x of w.people) if ((x.relations[v.id] ?? 0) > 20) rel(x, a, -70, `${v.name}'ı öldürdü`);
-  die(w, v, `CİNAYET! ${v.name} öldürüldü. Katil aranıyor…`);
-  if (chance(w, 0.75)) arrest(w, a, 'cinayet', null, 0);
-  return 'Cinayet işlediniz…';
+  const co = makeCorpse(w, v, a, w.serverNow ?? w.lastTickAt);
+  for (const x of w.people) if ((x.relations[v.id] ?? 0) > 20 && co.witnesses.includes(x.id)) rel(x, a, -70, `${v.name}'ı öldürdü`);
+  die(w, v, `CİNAYET! ${v.name} öldürüldü. Cesedi yerde yatıyor…`);
+  return co.witnesses.length ? `${v.name} yere yığıldı… ${co.witnesses.length} kişi gördü!` : `${v.name} yere yığıldı. Kimse görmedi… şimdilik.`;
 }
 function nightCrime(w: World): void {
   const out = w.people.filter((p) => p.nightOut && fullAI(p) && active(p));

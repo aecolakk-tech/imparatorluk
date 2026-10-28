@@ -1,11 +1,10 @@
 import type { Building, Person, World } from '../sim/types';
 import { MAP_H, MAP_W } from '../sim/constants';
-import { hourMs, electionPhase } from '../sim/tick';
+import { electionPhase } from '../sim/tick';
 import { ROADS_X, ROADS_Y } from '../sim/world';
 import { shade, spriteFor } from './sprites';
 
 export const T = 16;
-interface Pt { x: number; y: number }
 
 const ROOF: Record<string, string> = {
   saray: '#7b2d8b', meclis: '#2d5b8b', mahkeme: '#5a4636', zindan: '#3c3c3c', kisla: '#8b2d2d', cami: '#3a8a6a', okul: '#b5652b',
@@ -132,99 +131,28 @@ function drawBuilding(g: CanvasRenderingContext2D, b: Building): void {
   if (b.kind === 'firin') { g.fillStyle = '#7a7a7a'; g.fillRect(X + W - 14, Y - 12, 8, 14); g.fillStyle = 'rgba(220,220,220,0.7)'; g.fillRect(X + W - 16, Y - 22, 10, 6); }
 }
 
-// ---------- people movement (client-side, deterministic from game time) ----------
-export function nearestRoad(y: number): number { return ROADS_Y.reduce((a, r) => (Math.abs(r - y) < Math.abs(a - y) ? r : a), ROADS_Y[0]!); }
-
-function route(a: Pt, b: Pt): Pt[] {
-  const ry = nearestRoad(a.y);
-  const ry2 = nearestRoad(b.y);
-  const rx = ROADS_X.reduce((acc, r) => (Math.abs(r - b.x) < Math.abs(acc - b.x) ? r : acc), ROADS_X[0]!);
-  if (ry === ry2) return [a, { x: a.x, y: ry }, { x: b.x, y: ry }, b];
-  return [a, { x: a.x, y: ry }, { x: rx, y: ry }, { x: rx, y: ry2 }, { x: b.x, y: ry2 }, b];
-}
-function along(path: Pt[], f: number): Pt {
-  let total = 0; const seg: number[] = [];
-  for (let i = 1; i < path.length; i += 1) { const d = Math.abs(path[i]!.x - path[i - 1]!.x) + Math.abs(path[i]!.y - path[i - 1]!.y); seg.push(d); total += d; }
-  let t = f * total;
-  for (let i = 1; i < path.length; i += 1) {
-    const d = seg[i - 1]!; if (t <= d || i === path.length - 1) { const k = d ? Math.min(1, t / d) : 1; const p0 = path[i - 1]!, p1 = path[i]!; return { x: p0.x + (p1.x - p0.x) * k, y: p0.y + (p1.y - p0.y) * k }; }
-    t -= d;
-  }
-  return path[path.length - 1]!;
-}
-
-const MARKETS = ['pazar', 'gida', 'zanaat', 'yeni', 'kahve'];
+export { nearestRoad, placePeople, type Placed } from '../sim/place';
+import { TALK_MS, type Placed } from '../sim/place';
+import type { Corpse } from '../sim/types';
 const findPersonLite = (w: World, id: string | undefined): Person | undefined => (id ? w.people.find((p) => p.id === id) : undefined);
-export interface Placed { p: Person; x: number; y: number; moving: boolean; visible: boolean; dir: number }
-
-export function placePeople(w: World, now: number): Placed[] {
-  const frac = w.frozen ? 0 : Math.max(0, Math.min(0.999, (now - w.lastTickAt) / hourMs(w)));
-  const t = w.hour + frac;
-  const B = new Map(w.buildings.map((b) => [b.id, b]));
-  const night = t < 6 || t >= 21.5;
-  const door = (id: string, p: Person, spread = 1.6): Pt => {
-    const b = B.get(id) ?? B.get('pazar')!; const h = hash(p.id + id);
-    const isBig = ['pazar', 'kahve', 'santiye', 'kisla', 'liman', 'ciftlik', 'festival', 'arsa', 'yapi'].includes(b.kind);
-    if (b.kind === 'ciftlik' || b.kind === 'arsa' || b.kind === 'festival') return { x: b.x + 0.8 + (h % 100) / 100 * (b.w - 1.6), y: b.y + 1 + ((h >> 8) % 100) / 100 * (b.h - 1.2) };
-    if (isBig) return { x: b.x + 0.5 + (h % 100) / 100 * (b.w - 1), y: b.y + b.h + 0.3 + ((h >> 8) % 100) / 100 * spread };
-    return { x: b.door.x + ((h % 100) / 100 - 0.5) * spread * 2, y: b.door.y + 0.4 + ((h >> 8) % 100) / 100 * spread * 0.6 };
-  };
-  const zindan = B.get('zindan');
-  const jailed = w.people.filter((p) => p.jailedDays > 0);
-  const site = w.projects.find((x) => !x.done && x.plot && x.paid >= 6)?.plot;
-  const festOpen = (w.festivalUntil ?? 0) >= w.day;
-  return w.people.map((p): Placed => {
-    const h = hash(p.id);
-    const market = p.prof === 'memur' || p.prof === 'tahsildar' ? 'kahve' : MARKETS[h % 4]!;
-    let work = p.work;
-    if (p.prof === 'insaatci' && site) work = site;
-    if (festOpen && t >= 12 && t < 20 && h % 3 === 0) work = 'festival';
-    const home = p.home;
-    const off = (h % 60) / 60; // personal schedule offset in hours
-    const s1 = 5.5 + off, s2 = 7.5 + off, s3 = 17 + off, s4 = 18 + off, s5 = 20.5 + off, s6 = 22 + off;
-    let pos: Pt; let moving = false; let visible = true;
-    // gentle personal wandering around the workplace so nobody stands frozen
-    const wanderX = Math.sin(now / 2300 + h) * 0.9 + Math.sin(now / 5100 + h * 3) * 0.6;
-    const wanderY = Math.cos(now / 3100 + h * 2) * 0.35;
-    const walking = Math.abs(Math.cos(now / 2300 + h)) > 0.35;
-    if (p.jailedDays > 0 && zindan) { // inside the Zindan behind bars
-      const i = jailed.indexOf(p); const cols = Math.max(1, zindan.w - 1);
-      pos = { x: zindan.x + 0.8 + (i % cols), y: zindan.y + zindan.h - 0.6 - Math.floor(i / cols) * 0.5 };
-      return { p, x: pos.x, y: pos.y, moving: false, visible: true, dir: 1 };
-    }
-    if (p.prof === 'asker' && night) { // night patrol around the kışla & saray
-      const k = (now / 40000 + (h % 10) / 10) % 1; pos = along([{ x: 57, y: 13 }, { x: 30, y: 13 }, { x: 30, y: 20 }, { x: 56, y: 20 }, { x: 57, y: 13 }], k); moving = true;
-    } else if (p.prof === 'bekci' && night) {
-      const k = (now / 50000 + (h % 10) / 10) % 1; pos = along([{ x: 6, y: 29 }, { x: 80, y: 29 }, { x: 80, y: 35 }, { x: 6, y: 35 }, { x: 6, y: 29 }], k); moving = true;
-    } else if (p.nightOut && night) { // the rare night owl: wanders between the bar and the streets
-      const k = (now / 60000 + (h % 10) / 10) % 1; const bb = B.get('bar')!; pos = along([{ x: bb.door.x, y: bb.door.y + 0.5 }, { x: bb.door.x, y: 20 }, { x: 44, y: 20 }, { x: 44, y: 29 }, { x: bb.door.x, y: 29 }, { x: bb.door.x, y: bb.door.y + 0.5 }], k); moving = true;
-    }
-    else if (t >= s1 && t < s2) { pos = along(route(door(home, p), door(work, p)), (t - s1) / (s2 - s1)); moving = true; }
-    else if (t >= s2 && t < s3) { pos = door(work, p); pos.x += wanderX; pos.y += wanderY; moving = walking; }
-    else if (t >= s3 && t < s4) { pos = along(route(door(work, p), door(market, p)), (t - s3) / (s4 - s3)); moving = true; }
-    else if (t >= s4 && t < s5) { pos = door(market, p); pos.x += wanderX; pos.y += wanderY; moving = walking; }
-    else if (t >= s5 && t < s6) { pos = along(route(door(market, p), door(home, p)), (t - s5) / (s6 - s5)); moving = true; }
-    else { pos = door(home, p, 0.6); visible = false; } // indoors at night
-    if (p.id === w.kayzerId || p.prof === 'naip' || (p.soylu && p.home === 'saray')) { pos = door('saray', p, 2); pos.x += wanderX * 0.7; moving = walking; visible = !night || !!p.nightOut; }
-    if (p.exiledDays > 0) visible = false;
-    if (w.isyan) {
-      if (w.isyan.rebels.includes(p.id)) { const at = w.isyan.occupied[w.isyan.occupied.length - 1] ?? 'pazar'; pos = door(at, p, 3); pos.x += wanderX * 2; visible = true; moving = true; }
-      else if (p.prof === 'asker') { pos = door('saray', p, 3); pos.y += 1; visible = true; moving = false; }
-    }
-    return { p, x: pos.x, y: pos.y, moving, visible, dir: 1 };
-  });
-}
+export const SPRITE_SCALE = 1.4;
+/** The Meydan election notice board (tile coords). */
+export const SIGN = { x: 28.6, y: 21.2 };
 
 export interface Camera { x: number; y: number; z: number }
 
-export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement, w: World, cam: Camera, placed: Placed[], now: number, selected: string | null, myPersonId: string | null, dark: number): void {
+export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement, w: World, cam: Camera, placed: Placed[], now: number, selected: string | null, myPersonId: string | null, dark: number, target: { x: number; y: number } | null = null): void {
   const cw = ctx.canvas.width, ch = ctx.canvas.height; const z = cam.z * T;
   ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = '#2f6fa8'; ctx.fillRect(0, 0, cw, ch);
+  ctx.fillStyle = '#5a9238'; ctx.fillRect(0, 0, cw, ch);
   ctx.drawImage(stat, Math.round(-cam.x * z), Math.round(-cam.y * z), Math.round(stat.width * cam.z), Math.round(stat.height * cam.z));
+  const sz = Math.round(T * cam.z * SPRITE_SCALE);
+  drawSign(ctx, w, cam, z, now);
+  // corpses: blood pool + body lying on the ground
+  for (const co of w.corpses ?? []) drawCorpse(ctx, co, cam, z, sz, now);
+  if (target) { const tx = (target.x - cam.x) * z, ty = (target.y - cam.y) * z; ctx.strokeStyle = 'rgba(255,240,120,0.9)'; ctx.lineWidth = 2; const r0 = sz * (0.25 + 0.08 * Math.sin(now / 150)); ctx.beginPath(); ctx.ellipse(tx, ty, r0, r0 * 0.45, 0, 0, Math.PI * 2); ctx.stroke(); }
   // people sorted by y
   const vis = placed.filter((q) => q.visible).sort((a, b) => a.y - b.y);
-  const sz = Math.round(T * cam.z * 1.15);
   for (const q of vis) {
     const sx = (q.x - cam.x) * z, sy = (q.y - cam.y) * z;
     if (sx < -sz || sy < -sz * 2 || sx > cw + sz || sy > ch + sz) continue;
@@ -233,7 +161,9 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
       ctx.fillStyle = q.p.id === selected ? 'rgba(255,230,80,0.55)' : 'rgba(120,200,255,0.5)';
       ctx.beginPath(); ctx.ellipse(sx, sy, sz * 0.45, sz * 0.18, 0, 0, Math.PI * 2); ctx.fill();
     }
-    ctx.drawImage(fr[f]!, Math.round(sx - sz / 2), Math.round(sy - sz), sz, sz);
+    if (q.dir < 0) { ctx.save(); ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); ctx.drawImage(fr[f]!, Math.round(-sz / 2), Math.round(sy - sz), sz, sz); ctx.restore(); }
+    else ctx.drawImage(fr[f]!, Math.round(sx - sz / 2), Math.round(sy - sz), sz, sz);
+    if (q.p.id === myPersonId) { ctx.fillStyle = '#7fd0ff'; ctx.beginPath(); ctx.moveTo(sx - 5, sy - sz - 10); ctx.lineTo(sx + 5, sy - sz - 10); ctx.lineTo(sx, sy - sz - 3); ctx.fill(); }
   }
   // children: small sprites near home during the day
   if (w.hour >= 8 && w.hour < 20) {
@@ -268,7 +198,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
     ctx.fillStyle = b.market ? '#ffd76a' : '#ffffff'; ctx.fillText(label, sx, sy);
   }
   // thought bubbles: selected + a rotating few
-  const showN = cam.z >= 2 ? 4 : 0; const rot = Math.floor(now / 6000);
+  const showN = 0; const rot = Math.floor(now / 6000);
   const bubbles = vis.filter((q, i) => q.p.id === selected || (q.p.thought && (i + rot) % Math.max(1, Math.floor(vis.length / Math.max(1, showN))) === 0)).slice(0, showN + 1);
   ctx.font = `${Math.max(10, fs - 2)}px system-ui, sans-serif`;
   for (const q of bubbles) {
@@ -280,17 +210,14 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
     ctx.beginPath(); ctx.roundRect(sx - tw / 2, sy - 22, tw, 20, 6); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#222'; ctx.fillText(text, sx, sy - 12);
   }
-  // conversations: speech bubbles for this hour's talks
+  // conversations: they walk up to each other, then speak in turns
   const byId = new Map(vis.map((q) => [q.p.id, q]));
   ctx.font = `${Math.max(10, fs - 2)}px system-ui, sans-serif`;
-  if (cam.z >= 1.6) for (const tk of (w.talks ?? []).filter((x) => x.day === w.day && w.hour - x.hour <= 1).slice(-8)) {
-    const q = byId.get(tk.a); if (!q) continue;
-    const sx = (q.x - cam.x) * z, sy = (q.y - cam.y) * z - sz - 30;
-    const text = tk.text.length > 38 ? tk.text.slice(0, 37) + '…' : tk.text; const tw = ctx.measureText(text).width + 12;
-    ctx.fillStyle = 'rgba(255,248,220,0.97)'; ctx.strokeStyle = '#6a4a1a'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.roundRect(sx - tw / 2, sy - 22, tw, 20, 8); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(sx - 4, sy - 2); ctx.lineTo(sx, sy + 6); ctx.lineTo(sx + 4, sy - 2); ctx.fill();
-    ctx.fillStyle = '#3a2a10'; ctx.fillText(text, sx, sy - 12);
+  if (cam.z >= 1.4) for (const tk of (w.talks ?? [])) {
+    if (!tk.at || now < tk.at + 5000 || now > tk.at + TALK_MS) continue;
+    const lines = tk.lines?.length ? tk.lines : [tk.text]; const k = Math.floor((now - tk.at - 5000) / 9000); if (k >= lines.length * 2) continue;
+    const li = k % lines.length; const q = byId.get(li % 2 === 0 ? tk.a : tk.b); if (!q) continue;
+    bubble(ctx, (q.x - cam.x) * z, (q.y - cam.y) * z - sz - 8, lines[li]!, cw);
   }
   // festival flags, campaign posters, construction at a plot
   const fb = w.buildings.find((x) => x.id === 'festival');
@@ -306,8 +233,40 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
   }
 }
 
-export function hitTest(w: World, placed: Placed[], cam: Camera, sx: number, sy: number): { person?: Person; building?: Building } {
-  const z = cam.z * T; const sz = T * cam.z * 1.15;
+function bubble(ctx: CanvasRenderingContext2D, sx: number, sy: number, raw: string, cw: number): void {
+  const words = raw.split(' '); const rows: string[] = []; let cur = '';
+  for (const wd of words) { if ((cur + ' ' + wd).trim().length > 30 && cur) { rows.push(cur); cur = wd; } else cur = (cur + ' ' + wd).trim(); }
+  if (cur) rows.push(cur); const lines = rows.slice(0, 3); if (rows.length > 3) lines[2] = lines[2]!.slice(0, 28) + '…';
+  const lh = 15; const tw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14; const bh = lines.length * lh + 8;
+  const x = Math.max(4, Math.min(cw - tw - 4, sx - tw / 2));
+  ctx.fillStyle = 'rgba(255,250,232,0.97)'; ctx.strokeStyle = '#6a4a1a'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.roundRect(x, sy - bh, tw, bh, 8); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(sx - 5, sy - 1); ctx.lineTo(sx, sy + 7); ctx.lineTo(sx + 5, sy - 1); ctx.fill();
+  ctx.fillStyle = '#3a2a10'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; lines.forEach((l, i) => ctx.fillText(l, x + 7, sy - bh + 4 + lh / 2 + i * lh)); ctx.textAlign = 'center';
+}
+function drawCorpse(ctx: CanvasRenderingContext2D, co: Corpse, cam: Camera, z: number, sz: number, now: number): void {
+  const sx = (co.x - cam.x) * z, sy = (co.y - cam.y) * z; const grow = Math.min(1, (now - co.at) / 4000);
+  ctx.fillStyle = 'rgba(140,10,10,0.75)'; ctx.beginPath(); ctx.ellipse(sx, sy - sz * 0.1, sz * (0.35 + 0.35 * grow), sz * (0.15 + 0.15 * grow), 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(90,0,0,0.8)'; ctx.beginPath(); ctx.ellipse(sx + sz * 0.15, sy - sz * 0.05, sz * 0.18 * grow, sz * 0.08 * grow, 0.4, 0, Math.PI * 2); ctx.fill();
+  const pseudo = { id: co.personId, ...co.look } as unknown as Person;
+  ctx.save(); ctx.translate(sx, sy - sz * 0.2); ctx.rotate(Math.PI / 2); ctx.drawImage(spriteFor(pseudo)[0]!, -sz / 2, -sz / 2, sz, sz); ctx.restore();
+  ctx.font = `${Math.round(sz * 0.45)}px system-ui`; ctx.textAlign = 'center'; ctx.fillText(co.stage === 'yerde' ? '💀' : '🚨', sx, sy - sz * 0.75 + Math.sin(now / 250) * 2);
+}
+function drawSign(ctx: CanvasRenderingContext2D, w: World, cam: Camera, z: number, now: number): void {
+  const sx = (SIGN.x - cam.x) * z, sy = (SIGN.y - cam.y) * z; const s = z / 16;
+  ctx.fillStyle = '#5a3a1a'; ctx.fillRect(sx - 2 * s, sy, 4 * s, 18 * s); ctx.fillRect(sx + 26 * s, sy, 4 * s, 18 * s);
+  ctx.fillStyle = '#b8894a'; ctx.fillRect(sx - 6 * s, sy - 20 * s, 40 * s, 22 * s); ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 2 * s; ctx.strokeRect(sx - 6 * s, sy - 20 * s, 40 * s, 22 * s);
+  ctx.fillStyle = '#f4ecd8'; ctx.fillRect(sx - 3 * s, sy - 17 * s, 34 * s, 16 * s);
+  ctx.fillStyle = '#3a2a10'; ctx.font = `bold ${Math.max(7, 5 * s)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const ph = electionPhase(w).phase; ctx.fillText('🗳 SEÇİM', sx + 14 * s, sy - 12 * s); ctx.font = `${Math.max(6, 4 * s)}px system-ui`;
+  ctx.fillText(ph === 'bekleme' ? `${w.election.nextDay}. gün` : ph === 'aday' ? 'ADAYLIK' : ph === 'propaganda' ? 'PROPAGANDA' : 'BUGÜN!', sx + 14 * s, sy - 5 * s);
+  if (ph !== 'bekleme') { ctx.fillStyle = 'rgba(255,220,80,0.9)'; ctx.beginPath(); ctx.arc(sx + 32 * s, sy - 20 * s, (3 + Math.sin(now / 200)) * s, 0, Math.PI * 2); ctx.fill(); }
+}
+
+export function hitTest(w: World, placed: Placed[], cam: Camera, sx: number, sy: number): { person?: Person; building?: Building; corpse?: Corpse; sign?: boolean } {
+  const z = cam.z * T; const sz = T * cam.z * SPRITE_SCALE;
+  for (const co of w.corpses ?? []) { const px = (co.x - cam.x) * z, py = (co.y - cam.y) * z - sz * 0.2; if (Math.hypot(px - sx, py - sy) < Math.max(22, sz * 0.6)) return { corpse: co }; }
+  { const px = (SIGN.x - cam.x) * z, py = (SIGN.y - cam.y) * z; const s = z / 16; if (sx >= px - 6 * s && sx <= px + 34 * s && sy >= py - 20 * s && sy <= py + 18 * s) return { sign: true }; }
   const r = Math.max(22, sz * 0.7);
   let best: Placed | undefined; let bd = Infinity;
   for (const q of placed) {

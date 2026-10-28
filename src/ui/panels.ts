@@ -13,6 +13,8 @@ import { age, ancestorsOf, canHaveChild, canRule, childrenOf, findChild, heirOf,
 import { FATE_LABEL, strength, TARGETS } from '../sim/isyan';
 import type { Child, Fate } from '../sim/types';
 import { lawBuilder } from './ruler';
+import { myPos } from '../sim/v16';
+import { distToBuilding, REACH } from '../sim/move';
 import { buildingExtras, caseRoles, electionBlock, personActions, personExtras, sarayExtras } from './life';
 
 export interface Ctx {
@@ -85,30 +87,31 @@ export function personCard(c: Ctx, p: Person): HTMLElement {
 function marketPanel(c: Ctx, b: Building): HTMLElement {
   const w = c.w; const box = h('div', {});
   const here = w.listings.filter((l) => l.market === b.id || b.id === 'pazar');
-  const goods = GOODS.filter((g) => here.some((l) => l.good === g) || b.id === 'pazar');
-  box.append(h('div', { class: 'muted' }, b.id === 'pazar' ? 'Büyük Pazar: bütün tezgâhlar burada görünür.' : 'Bu çarşının tezgâhları. Fiyatlar arz ve talebe göre her gün değişir.'));
-  const t = h('table', {}, h('tr', {}, h('th', {}, 'Mal'), h('th', {}, 'En ucuz'), h('th', {}, 'Stok'), h('th', {}, '')));
+  const goods = GOODS.filter((g) => here.some((l) => l.good === g && l.qty > 0));
+  let qty = 1;
+  const qsel = h('div', { class: 'row' }, 'Kaç tane:', ...[1, 3, 5].map((n) => h('button', { class: n === 1 ? 'primary qty' : 'qty', onclick: (e: Event) => { qty = n; (e.target as HTMLElement).parentElement!.querySelectorAll('.qty').forEach((x) => x.classList.remove('primary')); (e.target as HTMLElement).classList.add('primary'); } }, String(n))));
+  if (c.me) box.append(qsel);
+  const t = h('table', {}, h('tr', {}, h('th', {}, 'Mal'), h('th', {}, 'Fiyat'), h('th', {}, 'Elinizde'), h('th', {}, '')));
   for (const g of goods) {
     const ls = here.filter((l) => l.good === g).sort((a, x) => a.price - x.price);
-    const stock = ls.reduce((s, l) => s + l.qty, 0);
-    t.append(h('tr', {}, h('td', {}, GOOD_LABEL[g]), h('td', {}, ls[0] ? `${ls[0].price.toFixed(2)} D` : '—'), h('td', {}, String(stock)),
-      h('td', {}, h('button', { disabled: !c.me || !stock, onclick: () => c.act({ t: 'buy', good: g, qty: 1 }) }, 'Al 1'), ' ', h('button', { disabled: !c.me || stock < 5, onclick: () => c.act({ t: 'buy', good: g, qty: 5 }) }, 'Al 5'))));
+    const stock = ls.reduce((s2, l) => s2 + l.qty, 0);
+    t.append(h('tr', {}, h('td', {}, GOOD_LABEL[g]), h('td', {}, `${ls[0]!.price.toFixed(2)} D`), h('td', {}, c.me ? String(c.me.inv[g]) : ''),
+      h('td', {}, h('button', { class: 'primary', disabled: !c.me || !stock, onclick: () => c.act({ t: 'buy', good: g, qty: Math.min(qty, stock) }) }, '🛒 Al'))));
   }
-  box.append(t);
+  box.append(goods.length ? t : h('div', { class: 'muted' }, 'Tezgâhlar boş. Sabah 8’de esnaf yeni mal koyar.'));
   if (c.me) {
-    const g = select(GOODS.map((x): [string, string] => [x, `${GOOD_LABEL[x]} (elde ${c.me!.inv[x]})`]));
-    const q = numIn(1, 1, 500); const pr = numIn(Math.round(w.prices.ekmek * 100) / 100, 0.1, 1000, 0.1);
+    const g = select(GOODS.filter((x) => c.me!.inv[x] > 0).map((x): [string, string] => [x, `${GOOD_LABEL[x]} (elde ${c.me!.inv[x]})`]));
+    const q = numIn(1, 1, 500); const pr = numIn(Math.round(w.prices[(g.value || 'ekmek') as Good] * 100) / 100, 0.1, 1000, 0.1);
     g.addEventListener('change', () => { pr.value = String(w.prices[g.value as Good]); });
-    box.append(h('h3', {}, 'Tezgâha mal koy'), h('div', { class: 'row' }, g, 'adet', q, 'fiyat', pr, h('button', { onclick: () => c.act({ t: 'sell', good: g.value as Good, qty: Number(q.value), price: Number(pr.value) }) }, 'Sat')));
     const mine = w.listings.filter((l) => l.sellerId === c.me!.id);
-    if (mine.length) box.append(h('div', { class: 'muted' }, 'Tezgâhınız: ' + mine.map((l) => `${GOOD_LABEL[l.good]} ${l.qty}×${l.price.toFixed(2)}`).join(', ')));
+    box.append(more('💰 Mal sat', g.options.length ? h('div', { class: 'row' }, g, 'adet', q, 'fiyat', pr, h('button', { onclick: () => c.act({ t: 'sell', good: g.value as Good, qty: Number(q.value), price: Number(pr.value) }) }, 'Tezgâha koy')) : h('div', { class: 'muted' }, 'Satacak malınız yok.'),
+      mine.length ? h('div', { class: 'muted' }, 'Tezgâhınız: ' + mine.map((l) => `${GOOD_LABEL[l.good]} ${l.qty}×${l.price.toFixed(2)}`).join(', ')) : ''));
   }
-  if (b.id === 'kahve') {
-    box.append(h('h3', {}, '☕ Kahvehane dedikodusu'));
-    for (const e of w.events.slice(-8).reverse()) box.append(h('div', { class: 'msg' }, `Gün ${e.day} ${String(e.hour).padStart(2, '0')}:00 — ${e.text}`));
-  }
+  if (b.id === 'kahve') box.append(more('☕ Kahvehane dedikodusu', ...w.events.slice(-8).reverse().map((e) => h('div', { class: 'msg' }, `Gün ${e.day} ${String(e.hour).padStart(2, '0')}:00 — ${e.text}`))));
   return box;
 }
+/** Collapsible "more" section to keep panels short. */
+export function more(title: string, ...kids: (Node | string)[]): HTMLElement { return h('details', {}, h('summary', {}, title), ...kids); }
 
 function sarayPanel(c: Ctx): HTMLElement {
   const w = c.w; const box = h('div', {});
@@ -125,9 +128,10 @@ function sarayPanel(c: Ctx): HTMLElement {
     }
     const ps = pendingSanctions(c);
     box.append(h('h3', {}, `🏛 Meclis kararları (${ps.length})`), ...(ps.length ? ps : [h('div', { class: 'muted' }, 'Onay bekleyen karar yok.')]));
-    box.append(h('div', { class: 'card' }, `💼 Bütçe: ${w.budget.approved ? 'Meclis onaylı' : 'geçici (onaysız)'} · kalan ${fmt(budgetLeft(w))} / ${fmt(w.budget.limit)} Dinar · ${w.budget.until}. güne kadar. Bayram, bağış, inşaat ödeneği ve büyük yardımlar bütçeden düşer.`));
+    const rest = h('div', {}); box.append(more('📜 Fermanlar, maaşlar, kanunlar, veraset… (ayrıntılar Divan’da)', rest));
+    rest.append(h('div', { class: 'card' }, `💼 Bütçe: ${w.budget.approved ? 'Meclis onaylı' : 'geçici (onaysız)'} · kalan ${fmt(budgetLeft(w))} / ${fmt(w.budget.limit)} Dinar · ${w.budget.until}. güne kadar. Bayram, bağış, inşaat ödeneği ve büyük yardımlar bütçeden düşer.`));
     const tax = numIn(w.taxRate, 0, 40); const head = numIn(w.headTax, 0, 10, 0.5);
-    box.append(h('h3', {}, '⚖️ Fermanlar'),
+    rest.append(h('h3', {}, '⚖️ Fermanlar'),
       h('div', { class: 'row' }, 'Satış vergisi %', tax, h('button', { onclick: () => c.act({ t: 'setTax', rate: Number(tax.value) }) }, 'Uygula')),
       h('div', { class: 'row' }, 'Baş vergisi (Dinar/gün)', head, h('button', { onclick: () => c.act({ t: 'setHeadTax', amount: Number(head.value) }) }, 'Uygula')),
       h('div', { class: 'muted' }, `Bugün şimdiye kadar: gelir ${fmt(w.dailyIncome)}, gider ${fmt(w.dailyExpense)} Dinar. Son günlerin hazinesi: ${w.stats.slice(-5).map((s) => fmt(s.treasury)).join(' → ') || '—'}`));
@@ -136,25 +140,25 @@ function sarayPanel(c: Ctx): HTMLElement {
       const n = numIn(w.salaries[pr] ?? 0, 0, 60);
       sal.append(h('tr', {}, h('td', {}, PROF_LABEL[pr]), h('td', {}, String(w.people.filter((p) => p.prof === pr).length)), h('td', {}, n, h('button', { onclick: () => c.act({ t: 'setSalary', prof: pr, amount: Number(n.value) }) }, '✓'))));
     }
-    box.append(h('h3', {}, '💰 Maaşlar (günlük)'), sal);
-    box.append(h('h3', {}, '📚 Kanunlar'));
+    rest.append(h('h3', {}, '💰 Maaşlar (günlük)'), sal);
+    rest.append(h('h3', {}, '📚 Kanunlar'));
     for (const l of w.laws) {
       const p = l.param !== undefined ? numIn(l.param, 0, 100) : null;
-      box.append(h('div', { class: 'card' }, h('b', {}, `${l.active ? '🟢' : '⚪'} ${l.name}`), h('div', { class: 'muted' }, l.desc),
+      rest.append(h('div', { class: 'card' }, h('b', {}, `${l.active ? '🟢' : '⚪'} ${l.name}`), h('div', { class: 'muted' }, l.desc),
         h('div', { class: 'row' }, p ? l.paramLabel ?? '' : '', p ?? '', h('button', { onclick: () => c.act({ t: 'toggleLaw', lawId: l.id, active: !l.active, param: p ? Number(p.value) : undefined }) }, l.active ? 'Kaldır' : 'Yürürlüğe koy'),
           p ? h('button', { onclick: () => c.act({ t: 'toggleLaw', lawId: l.id, active: l.active, param: Number(p.value) }) }, 'Değeri kaydet') : '')));
     }
     if (k && c.me && k.id === c.me.id && w.regime === 'imparatorluk') {
       const kids = childrenOf(w, k.id); const heir = heirOf(w, k);
       const sel = select([['', 'En büyük çocuk (varsayılan)'], ...kids.map((x): [string, string] => [x.id, `${nameOf(w, x.id)}${x.adult ? '' : ' (reşit değil)'}`])], w.veliaht ?? '');
-      box.append(h('h3', {}, '👑 Veraset'),
+      rest.append(h('h3', {}, '👑 Veraset'),
         h('div', { class: 'muted' }, `Varis: ${heir ? nameOf(w, heir.id) + (heir.adult ? '' : ' (reşit olana dek eşiniz naip)') : findPerson(w, k.spouse) ? `eşiniz ${findPerson(w, k.spouse)!.name}` : 'yok'}.`),
         h('div', { class: 'row' }, 'Veliaht:', sel, h('button', { onclick: () => c.act({ t: 'veliaht', childId: sel.value || null }) }, 'Belirle')),
         h('button', { class: 'danger', onclick: () => { if (confirm('Tahttan feragat edilsin mi? Hanedan hakkınız sürer.')) c.act({ t: 'abdicate' }); } }, '🏳 Tahttan feragat et'));
     }
-    box.append(sarayExtras(c));
+    rest.append(sarayExtras(c));
     const fest = numIn(150, 50, 5000);
-    box.append(h('h3', {}, '🎉 Bayram'), h('div', { class: 'row' }, fest, 'Dinar', h('button', { onclick: () => c.act({ t: 'festival', cost: Number(fest.value) }) }, 'Bayram ilan et')),
+    rest.append(h('h3', {}, '🎉 Bayram'), h('div', { class: 'row' }, fest, 'Dinar', h('button', { onclick: () => c.act({ t: 'festival', cost: Number(fest.value) }) }, 'Bayram ilan et')),
       h('div', { class: 'muted' }, 'Hazineden herkese harçlık dağıtılır; memnuniyet artar, cumhuriyet isteği azalır. (Festival Alanı ayrı: yukarıda.)'));
   } else if (c.me) {
     const kind = select([['yardim', 'Yardım isteği'], ['is', 'İş isteği'], ['vergi', 'Vergi şikâyeti'], ['sikayet', 'Şikâyet'], ['kanun', 'Kanun teklifi'], ['gorev', 'Devlet görevi isteği']]);
@@ -307,7 +311,9 @@ const INFO: Record<string, string> = {
 
 export function buildingPanel(c: Ctx, b: Building): HTMLElement {
   const w = c.w;
-  const box = h('div', {}, h('h2', {}, b.name));
+  let where = '';
+  if (c.me) { const pos = myPos(w, c.me, Date.now()); const d = distToBuilding(b, pos); where = d <= REACH ? '📍 Buradasınız.' : `🚶 ${Math.round(d)} adım uzakta – bir şey seçerseniz karakteriniz önce buraya yürür.`; }
+  const box = h('div', {}, h('h2', {}, b.name), where ? h('div', { class: 'where' }, where) : '');
   if (b.market) { const ex = buildingExtras(c, b); if (ex) box.append(ex); box.append(marketPanel(c, b)); }
   else if (b.id === 'saray') box.append(sarayPanel(c));
   else if (b.id === 'mahkeme') box.append(courtPanel(c));
@@ -320,10 +326,7 @@ export function buildingPanel(c: Ctx, b: Building): HTMLElement {
     if (b.id === 'firin' && c.me) { const q = numIn(3, 1, 20); box.append(h('div', { class: 'row' }, q, h('button', { onclick: () => c.act({ t: 'askida', qty: Number(q.value) }) }, '🥖 Askıda ekmek bırak'))); }
   }
   const people = w.people.filter((p) => (b.id === 'zindan' ? p.jailedDays > 0 : b.kind === 'ev' ? p.home === b.id : p.work === b.id && p.jailedDays === 0));
-  if (people.length && b.id !== 'kisla') {
-    box.append(h('h3', {}, b.kind === 'ev' ? 'Oturanlar' : b.id === 'zindan' ? 'Mahkûmlar' : `Burada çalışanlar (${people.length})`));
-    for (const p of people.slice(0, 30)) box.append(personLine(c, p));
-  }
+  if (people.length && b.id !== 'kisla') box.append(more(b.kind === 'ev' ? `Oturanlar (${people.length})` : b.id === 'zindan' ? `Mahkûmlar (${people.length})` : `Burada çalışanlar (${people.length})`, ...people.slice(0, 30).map((p) => personLine(c, p))));
   return box;
 }
 

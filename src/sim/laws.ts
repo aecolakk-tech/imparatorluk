@@ -51,13 +51,14 @@ export function lawTitle(s: LawSpec): string {
 }
 
 const adults = (w: World): Person[] => w.people.filter((p) => p.prof !== 'naip' && p.id !== w.kayzerId && p.jailedDays === 0);
-const sold = (w: World, g: Good): number => Math.max(w.market.sold[g], 1);
+// v1.6: on day 1 nothing is sold yet – estimate from yesterday's prices and population
+const sold = (w: World, g: Good): number => w.market.sold[g] >= 3 ? w.market.sold[g] : Math.max(1, Math.round(w.people.length * ({ ekmek: 2, su: 2, bugday: 1.5 } as Partial<Record<Good, number>>)[g]! || w.people.length * 0.15));
 
 /** Predicted effects with numbers, computed from the current market. */
 export function previewLaw(w: World, s: LawSpec): string {
   const err = validateLaw(s); if (err) return `⚠️ ${err}`;
   const g = s.good; const n = adults(w).length; const out: string[] = [];
-  const allSales = Object.entries(w.market.sold).reduce((a, [k, v]) => a + v * w.prices[k as Good], 0);
+  const allSales = (Object.keys(w.market.sold) as Good[]).reduce((a, k) => a + sold(w, k) * w.prices[k], 0);
   switch (s.kind) {
     case 'satisVergisi': { const d = s.value - w.taxRate; out.push(`Vergi geliri günde ≈ ${d >= 0 ? '+' : ''}${Math.round(allSales * d / 100)} D.`, d > 0 ? `Memnuniyet günde ≈ −${((d) * 0.12).toFixed(1)}; esnaf ve fakirler kızar.` : 'Halk rahatlar, memnuniyet artar.'); if (s.value > 18) out.push('⚠️ %18 üstü: cumhuriyetçiler güçlenir.'); break; }
     case 'basVergisi': { const d = s.value - w.headTax; out.push(`Hazineye günde ≈ ${d >= 0 ? '+' : ''}${Math.round(d * n)} D (${n} kişi).`, d > 0 ? 'Fakirler en çok etkilenir; açlık riski.' : 'Fakirler rahatlar.'); break; }

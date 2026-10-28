@@ -15,7 +15,7 @@ export const TARGETS = ['pazar', 'kahve', 'meclis', 'mahkeme', 'kisla', 'saray']
 export const FATE_LABEL: Record<Fate, string> = { surgun: 'Sürgün', zindan: 'Zindan', af: 'Af (sıradan vatandaşlık)' };
 const ilog = (w: World, text: string, pid?: string): void => { if (w.isyan) { w.isyan.log.push(`Gün ${w.day} ${String(w.hour).padStart(2, '0')}:00 – ${text}`); if (w.isyan.log.length > 40) w.isyan.log.shift(); } log(w, `İSYAN: ${text}`, pid); };
 
-const discontent = (w: World, p: Person): boolean => p.prof !== 'naip' && p.id !== w.kayzerId && p.jailedDays === 0 && p.exiledDays === 0 && !p.soylu && (p.republic > 50 || p.plotting === 'revolution' || (p.mood < 25 && p.loyalty < 40));
+const discontent = (w: World, p: Person): boolean => p.prof !== 'naip' && p.id !== w.kayzerId && p.jailedDays === 0 && p.exiledDays === 0 && !p.soylu && (p.republic > 50 || p.plotting === 'revolution' || p.loyalty < 22 || (p.mood < 25 && p.loyalty < 40));
 export const loyalSoldiers = (w: World): Person[] => w.people.filter((p) => p.prof === 'asker' && p.jailedDays === 0 && !(w.isyan?.rebels.includes(p.id)));
 
 export function strength(w: World): { rebels: number; loyal: number } {

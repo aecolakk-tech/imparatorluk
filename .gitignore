@@ -5,3 +5,4 @@ smoke-*.png
 .env.local
 supabase/.temp
 supabase/.branches
+shots16/

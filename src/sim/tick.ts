@@ -1,4 +1,5 @@
 import type { Person, World } from './types';
+import { startTrial } from './v16';
 import { GOODS } from './types';
 import { HOUR_MS, INACTIVE_TO_NPC_MS, MAX_CATCHUP_HOURS, ONLINE_WINDOW_MS, PRODUCES } from './constants';
 import { addListing, balance, buy, lawOn, lawParam, produce, resetMarketDay, settleMarket, transfer } from './economy';
@@ -16,12 +17,18 @@ import { loansDay } from './extras';
 
 /** Real ms per game hour at the world's speed (0.5x slower, 2x faster; Kayzer only). */
 export const hourMs = (w: World): number => HOUR_MS / (w.speed > 0 ? w.speed : 1);
+export const ELECTION_EVERY = 40;
+/** Election calendar: candidacy 5 days, propaganda 6 days, then voting day. */
+export function electionDates(w: World): { adayFrom: number; adayTo: number; propFrom: number; propTo: number; vote: number } {
+  const n = w.election.nextDay; return { adayFrom: n - 11, adayTo: n - 7, propFrom: n - 6, propTo: n - 1, vote: n };
+}
 export function electionPhase(w: World): { phase: 'bekleme' | 'aday' | 'propaganda' | 'oylama'; label: string } {
   const n = w.election.nextDay; const d = w.day;
-  if (d >= n - 6 && d <= n - 4) return { phase: 'aday', label: `Meclis: adaylık açık (${n - 4}. güne kadar), seçim ${n}. gün` };
-  if (d >= n - 3 && d <= n - 1) return { phase: 'propaganda', label: `Meclis: propaganda dönemi, seçim ${n}. gün` };
+  const s = electionDates(w);
+  if (d >= s.adayFrom && d <= s.adayTo) return { phase: 'aday', label: `Meclis: adaylık açık (${s.adayTo}. güne kadar), seçim ${n}. gün` };
+  if (d >= s.propFrom && d <= s.propTo) return { phase: 'propaganda', label: `Meclis: propaganda dönemi (${s.propTo}. güne kadar), seçim ${n}. gün` };
   if (d === n) return { phase: 'oylama', label: 'Meclis: BUGÜN SEÇİM — oy verin!' };
-  return { phase: 'bekleme', label: `Meclis seçimi ${n}. gün (adaylık ${n - 6}. gün açılır)` };
+  return { phase: 'bekleme', label: `Meclis seçimi ${n}. gün (adaylık ${s.adayFrom}. gün açılır)` };
 }
 
 /** How the AI/naip handles an uprising when no player ruler is commanding. Tests/sims may override. */
@@ -154,7 +161,7 @@ function hamaliye(w: World): void {
 /** Meclis campaign: NPC candidacies in the aday window, speeches & posters during propaganda. */
 function campaign(w: World, now: number): void {
   const ph = electionPhase(w).phase; const e = w.election;
-  if (ph === 'aday') for (const p of w.people) if (fullAI(p) && p.ambition > 60 && p.jailedDays === 0 && p.prof !== 'naip' && p.id !== w.kayzerId && !e.candidates.includes(p.id) && chance(w, 0.25) && e.candidates.length < 14) { e.candidates.push(p.id); log(w, `${p.name} Meclis'e aday oldu.`, p.id); }
+  if (ph === 'aday') for (const p of w.people) if (fullAI(p) && p.ambition > 60 && p.jailedDays === 0 && p.prof !== 'naip' && p.prof !== 'asker' && p.prof !== 'bekci' && p.id !== w.kayzerId && !e.candidates.includes(p.id) && chance(w, 0.25) && e.candidates.length < 14) { e.candidates.push(p.id); log(w, `${p.name} Meclis'e aday oldu.`, p.id); }
   if (ph === 'propaganda') {
     e.posters = e.posters ?? {};
     for (const id of e.candidates) {
@@ -212,6 +219,7 @@ function court(w: World, now: number): void {
       if (c.evidence >= 35) { c.stage = 'hakim'; c.deadline = w.day + 1; log(w, `${savci?.name ?? 'Savcı'}, ${a.name} hakkında ${CRIME_LABEL[c.crime].toLowerCase()} davası açtı.`, a.id); }
       else { c.stage = 'kapandi'; c.verdict = 'dusuruldu'; a.jailedDays = 0; }
     } else if (c.stage === 'hakim') {
+      if (!fullAI(a) && !(hakim?.playerId && !hakim.npc)) { if (!c.trial) startTrial(w, c, now); continue; } // a player defendant gets a real hearing
       const guilty = rand(w) * 100 < c.evidence * ((hakim?.honesty ?? 70) / 80);
       verdict(w, c.id, guilty, now);
     }
@@ -268,11 +276,13 @@ function endOfDay(w: World, now: number): void {
 }
 
 function revolution(w: World, armyLoyalty: number): void {
-  const hot = w.cumhuriyet >= 80 || (w.cumhuriyet >= 50 && armyLoyalty < 25); // a disloyal army will not stand between the palace and an angry people
+  // v1.6: look at the people, not only the average – a majority of committed republicans (or a hated throne) is enough
+  const adults = w.people.filter((p) => p.prof !== 'naip' && p.prof !== 'kayzer' && !p.soylu);
+  const share = adults.filter((p) => p.republic >= 70).length / Math.max(1, adults.length);
+  const loy = adults.reduce((s, p) => s + p.loyalty, 0) / Math.max(1, adults.length);
+  const hot = w.cumhuriyet >= 75 || share >= 0.5 || loy < 22 || (w.cumhuriyet >= 50 && armyLoyalty < 25);
   if (hot) w.cumhuriyetDays += 1; else w.cumhuriyetDays = Math.max(0, w.cumhuriyetDays - 1);
-  // the people rise: a real-time isyan on the map (republic only if the rebels win)
-  if (w.cumhuriyetDays >= 5 && w.kayzerId && w.regime === 'imparatorluk' && !w.isyan) { w.cumhuriyetDays = 0; startIsyan(w); }
-  void armyLoyalty;
+  if (w.cumhuriyetDays >= 3 && w.kayzerId && w.regime === 'imparatorluk' && !w.isyan) { w.cumhuriyetDays = 0; startIsyan(w); }
 }
 
 function election(w: World): void {
@@ -280,7 +290,7 @@ function election(w: World): void {
   const e = w.election;
   if (w.day < e.nextDay) return;
   meclisElection(w, e.candidates, e.votes, fullAI);
-  w.election = { ...e, nextDay: w.day + 20, candidates: [], votes: {}, posters: {} };
+  w.election = { ...e, nextDay: w.day + ELECTION_EVERY, candidates: [], votes: {}, posters: {} };
 }
 
 export function declareRepublic(w: World): void {

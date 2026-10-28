@@ -12,6 +12,46 @@ const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 const chatTimes = new Map<string, number[]>(); // per-instance; DB check below is the real limit
 
+// ---------- NPC language model (optional; rule-based replies are the fallback) ----------
+const LLM_KEY = Deno.env.get('NPC_LLM_API_KEY') ?? '';
+const PROVIDER = (Deno.env.get('NPC_LLM_PROVIDER') ?? 'gemini').toLowerCase(); // 'gemini' | 'openai' (any OpenAI-compatible endpoint: Groq, OpenRouter…)
+const MODEL = Deno.env.get('NPC_LLM_MODEL') ?? (PROVIDER === 'gemini' ? 'gemini-3.5-flash-lite' : 'llama-3.1-8b-instant');
+const BASE = Deno.env.get('NPC_LLM_BASE_URL') ?? 'https://api.groq.com/openai/v1';
+const PER_MIN = Number(Deno.env.get('NPC_LLM_PER_MIN') ?? 12); const PER_DAY = Number(Deno.env.get('NPC_LLM_PER_DAY') ?? 900);
+const minuteCalls: number[] = []; const cache = new Map<string, { t: number; v: string }>(); let backoffUntil = 0;
+const today = (): string => new Date().toISOString().slice(0, 10);
+async function llm(p: { system: string; user: string }, json = false, maxTokens = 160): Promise<string | null> {
+  if (!LLM_KEY) return null;
+  const now = Date.now(); if (now < backoffUntil) return null;
+  while (minuteCalls.length && now - minuteCalls[0]! > 60_000) minuteCalls.shift();
+  if (minuteCalls.length >= PER_MIN) return null;
+  const key = `${json}|${p.system.slice(0, 120)}|${p.user}`; const hit = cache.get(key); if (hit && now - hit.t < 600_000) return hit.v;
+  minuteCalls.push(now);
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    let text = '';
+    if (PROVIDER === 'gemini') {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, { method: 'POST', signal: ctl.signal, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': LLM_KEY },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: p.system }] }, contents: [{ role: 'user', parts: [{ text: p.user }] }], generationConfig: { maxOutputTokens: maxTokens, temperature: 0.9, ...(json ? { responseMimeType: 'application/json' } : {}) } }) });
+      if (r.status === 429 || r.status >= 500) { backoffUntil = Date.now() + 60_000; return null; }
+      if (!r.ok) return null;
+      const d = await r.json(); text = (d.candidates?.[0]?.content?.parts ?? []).filter((x: any) => x.text && !x.thought).map((x: any) => x.text).join('').trim();
+    } else {
+      const r = await fetch(`${BASE}/chat/completions`, { method: 'POST', signal: ctl.signal, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${LLM_KEY}` },
+        body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, temperature: 0.9, messages: [{ role: 'system', content: p.system }, { role: 'user', content: p.user }], ...(json ? { response_format: { type: 'json_object' } } : {}) }) });
+      if (r.status === 429 || r.status >= 500) { backoffUntil = Date.now() + 60_000; return null; }
+      if (!r.ok) return null;
+      const d = await r.json(); text = String(d.choices?.[0]?.message?.content ?? '').trim();
+    }
+    if (!text) return null;
+    if (!json) text = text.replace(/^["“]|["”]$/g, '').replace(/\s+/g, ' ').slice(0, 280);
+    cache.set(key, { t: Date.now(), v: text }); if (cache.size > 300) cache.delete(cache.keys().next().value!);
+    return text;
+  } catch { return null; } finally { clearTimeout(timer); }
+}
+const parseJson = (s: string | null): any => { if (!s) return null; try { return JSON.parse(s.replace(/^```(json)?|```$/g, '').trim()); } catch { return null; } };
+const background = (p: Promise<unknown>): void => { const er = (globalThis as any).EdgeRuntime; if (er?.waitUntil) er.waitUntil(p); else void p; };
+
 async function loadWorld(): Promise<{ state: any; version: number }> {
   const { data } = await db.from('world_state').select('state, version').eq('id', 1).maybeSingle();
   if (data) return { state: core.migrateWorld(data.state), version: data.version };
@@ -40,6 +80,9 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
     const now = Date.now();
+    if (body.op === 'llmtest') { // founder-free health check: does the model answer? (no key is ever returned)
+      const r = await llm({ system: 'Kısa cevap ver.', user: 'Bir fırıncı olarak "merhaba" de.' }); return json({ provider: PROVIDER, model: MODEL, configured: !!LLM_KEY, ok: !!r });
+    }
     if (body.op === 'candidates') {
       const { data: okAccess } = await db.rpc('check_access', { pw: String(body.access ?? '') });
       if (!okAccess) return json({ error: 'Giriş şifresi yanlış.' });
@@ -72,21 +115,49 @@ Deno.serve(async (req) => {
     switch (body.op) {
       case 'me': return json({ playerId: uid, founder: pl.is_founder });
       case 'heartbeat': {
-        let due = false;
-        const out = await mutate((w) => { const r = core.heartbeat(w, uid, now); due = r.snapshotDue; return { world: w, summary: r.summary }; });
+        let due = false; let batch: { idx: number[]; prompt: { system: string; user: string } } | null = null;
+        const out = await mutate((w) => {
+          const r = core.heartbeat(w, uid, now); due = r.snapshotDue; batch = null;
+          if (LLM_KEY && now - (w.llm?.talkAt ?? 0) > 75_000 && core.llmBudget(w, today(), PER_DAY)) { const b = core.talkBatch(w, now); if (b) { batch = b; w.llm!.talkAt = now; core.llmSpend(w, today()); } }
+          return { world: w, summary: r.summary };
+        });
         if (due) await db.rpc('snapshot_world', { force: false });
+        const bt = batch as { idx: number[]; prompt: { system: string; user: string } } | null;
+        if (bt) background((async () => { const o = parseJson(await llm(bt.prompt, true, 400)); if (o) await mutate((w) => core.applyTalks(w, bt.idx, o, Date.now())); })().catch(() => {}));
         return json(out);
       }
-      case 'act': return json(await mutate((w) => core.act(w, uid, body.action, now)));
+      case 'act': {
+        if (body.action?.t === 'defense' && LLM_KEY) {
+          let prompt: { system: string; user: string } | null = null;
+          const r = await mutate((w) => { const x = core.act(w, uid, body.action, now, true); prompt = x.ok ? core.judgeRequest(w, String(body.action.caseId)) : null; if (prompt) core.llmSpend(w, today()); return x; });
+          if (prompt) { const o = parseJson(await llm(prompt, true, 220)); await mutate((w) => core.judgeReply(w, String(body.action.caseId), o, Date.now())); }
+          return json(r);
+        }
+        return json(await mutate((w) => core.act(w, uid, body.action, now)));
+      }
       case 'chat': {
         const since = new Date(now - 30_000).toISOString();
         const { count } = await db.from('messages').select('id', { count: 'exact', head: true }).eq('from_user', uid).gte('created_at', since);
         if ((count ?? 0) >= 5) return json({ error: 'Çok hızlı yazıyorsunuz; biraz bekleyin.' });
         const times = chatTimes.get(uid) ?? []; chatTimes.set(uid, times);
-        const m = await mutate((state) => core.makeChat(state, uid, String(body.text ?? ''), body.to ?? null, times, now));
+        const to = body.to ? String(body.to) : null;
+        let history: { from: string; text: string }[] = [];
+        if (to && LLM_KEY) {
+          const { data: hist } = await db.from('messages').select('from_name, text, from_person, to_person').or(`and(from_person.eq.${pl.person_id},to_person.eq.${to}),and(from_person.eq.${to},to_person.eq.${pl.person_id})`).order('id', { ascending: false }).limit(6);
+          history = (hist ?? []).reverse().map((x: any) => ({ from: x.from_name, text: x.text }));
+        }
+        let allowed = false;
+        const m = await mutate((state) => { const r = core.makeChat(state, uid, String(body.text ?? ''), to, times, now, !!LLM_KEY, history); allowed = false; if (typeof r !== 'string' && r.replies?.length && core.llmBudget(state, today(), PER_DAY)) { allowed = true; core.llmSpend(state, today(), r.replies.length); } return r; });
         if (typeof m === 'string') return json({ error: m });
         await db.from('messages').insert({ from_user: uid, from_person: m.fromPersonId, from_name: m.fromName, to_person: m.toPersonId, text: m.text });
-        return json({});
+        const out: string[] = [];
+        for (const [i, rp] of (m.replies ?? []).entries()) {
+          const ai = allowed ? await llm(rp.prompt) : null;
+          const text = (rp.to ? '' : `@${m.fromName.split(' ').slice(-1)[0]} `) + (ai ?? rp.fallback.replace(/^@\S+ /, ''));
+          out.push(text);
+          await db.from('messages').insert({ from_user: null, from_person: rp.npcId, from_name: rp.npcName, to_person: rp.to, text: text.slice(0, 280), created_at: new Date(Date.now() + 500 * (i + 1)).toISOString() });
+        }
+        return json({ replies: out, ai: allowed && !!LLM_KEY });
       }
       case 'snapshots': {
         if (!pl.is_founder) return json([]);

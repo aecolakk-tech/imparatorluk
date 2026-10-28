@@ -19,6 +19,10 @@ import { enactLaw, repealLaw, validateLaw } from './laws';
 import { inspectPerson } from './hoard';
 import { electionPhase, hourMs } from './tick';
 import { produce } from './economy';
+import { actionNeed, distToBuilding, PERSON_REACH, REACH, rules } from './move';
+import { placeOf } from './place';
+import { addDefense, finishTrial, myPos, reportCorpse, startWalk } from './v16';
+import { MAP_H, MAP_W } from './constants';
 
 const ok = (msg: string): ActionResult => ({ ok: true, msg });
 const no = (msg: string): ActionResult => ({ ok: false, msg });
@@ -88,10 +92,19 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
   const pl = w.players[playerId]; if (!pl || pl.banned) return no('Hesap bulunamadı.');
   const me = findPerson(w, pl.personId); if (!me) return no('Karakter bulunamadı.');
   const isKayzer = (ww: World, p: Person): boolean => canRule(ww, p, now, ONLINE_WINDOW_MS);
-  const jailedOk: Action['t'][] = ['petition', 'eat', 'divorce', 'answerProposal'];
+  const jailedOk: Action['t'][] = ['petition', 'eat', 'divorce', 'answerProposal', 'defense', 'restCase'];
   if (me.jailedDays > 0 && !jailedOk.includes(a.t)) return no('Zindandasınız; şimdilik sadece dilekçe yazabilirsiniz.');
   const exileOk: Action['t'][] = [...jailedOk, 'restore', 'buy', 'sell', 'marry', 'haveChild', 'school', 'cure'];
   if (me.exiledDays > 0 && !exileOk.includes(a.t)) return no(`Sürgündesiniz (${me.exiledDays} gün kaldı).`);
+  const need = rules.reach ? actionNeed(w, me, a) : null;
+  if (need) {
+    const pos = myPos(w, me, now);
+    if (need.kind === 'building' && need.ids.length && !need.ids.some((id) => { const b = w.buildings.find((x) => x.id === id); return b && distToBuilding(b, pos) <= REACH + 0.6; })) return no(`Bunun için önce ${need.label} yürümelisiniz.`);
+    if (need.kind === 'person') {
+      const tp = need.id.startsWith('corpse:') ? w.corpses?.find((c) => `corpse:${c.id}` === need.id) : placeOf(w, need.id, now);
+      if (tp && Math.hypot(tp.x - pos.x, tp.y - pos.y) > PERSON_REACH + 0.8) return no('Önce yanına yürümelisiniz (çok uzaktasınız).');
+    }
+  }
   const decides = (p: Person): boolean => !fullAI(p);
   const num = (v: unknown, lo: number, hi: number): number | null => (typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi ? v : null);
   switch (a.t) {
@@ -251,7 +264,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       return ok(`Başkan adayısınız. Seçim ${w.election.baskanNextDay}. gün.`);
     }
     case 'voteBaskan': { if (w.regime !== 'cumhuriyet' || !findPerson(w, a.candidateId)) return no('Geçersiz.'); w.election.baskanVotes[me.id] = a.candidateId; return ok('Oyunuz sandıkta.'); }
-    case 'runForMeclis': { if (me.id === w.kayzerId && w.regime === 'imparatorluk') return no('Kayzer aday olamaz.'); if (electionPhase(w).phase !== 'aday') return no(`Adaylık dönemi değil. ${electionPhase(w).label}.`); if (!w.election.candidates.includes(me.id)) w.election.candidates.push(me.id); return ok(`Adaysınız. Seçim ${w.election.nextDay}. gün.`); }
+    case 'runForMeclis': { if (me.id === w.kayzerId && w.regime === 'imparatorluk') return no('Kayzer aday olamaz.'); if (me.prof === 'asker' || me.prof === 'bekci') return no('Askerler ve bekçiler Meclis’e aday olamaz.'); if (electionPhase(w).phase !== 'aday') return no(`Adaylık dönemi değil. ${electionPhase(w).label}.`); if (!w.election.candidates.includes(me.id)) w.election.candidates.push(me.id); return ok(`Adaysınız. Seçim ${w.election.nextDay}. gün.`); }
     case 'vote': { if (!w.election.candidates.includes(a.candidateId)) return no('Bu kişi aday değil.'); if (electionPhase(w).phase === 'bekleme' || electionPhase(w).phase === 'aday') return no(`Oy verme zamanı değil. ${electionPhase(w).label}.`); w.election.votes[me.id] = a.candidateId; return ok('Oyunuz sandıkta.'); }
     case 'plot': {
       if (me.id === w.kayzerId) return no(`Zaten ${headTitle(w)}siniz.`);
@@ -316,7 +329,15 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       return no('İş yok.');
     }
     case 'nightOut': { me.nightOut = a.on; return ok(a.on ? 'Gece dışarıdasınız; dikkat, gece suç çok.' : 'Eve girdiniz.'); }
-    case 'chatWith': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); const line = opinion(w, t); relate(t, me, 3, 'sohbet ettik'); relate(me, t, 3, 'sohbet ettik'); w.talks.push({ a: t.id, b: me.id, text: line.slice(0, 60), day: w.day, hour: w.hour }); return ok(`${t.name}: “${line}”`); }
+    case 'chatWith': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); void opinion; return ok(`${t.name} ile konuşmak için ✉️ Mesaj yazın.`); }
+    case 'move': {
+      const x = num(a.x, -1, MAP_W + 1), y = num(a.y, -1, MAP_H + 1); if (x === null || y === null) return no('Geçersiz yer.');
+      if (me.jailedDays > 0) return no('Zindandasınız.');
+      startWalk(w, me, { x, y }, now); return { ok: true, msg: '' };
+    }
+    case 'report': { const co = w.corpses?.find((c) => c.id === a.corpseId); if (!co) return no('Ceset kaldırılmış.'); if (co.killerId === me.id) { me.honesty = clamp(me.honesty + 2); } return ok(reportCorpse(w, co, me, now)); }
+    case 'defense': { const c = w.cases.find((x) => x.id === a.caseId); if (!c) return no('Dava yok.'); const text = filterProfanity(String(a.text ?? '')).slice(0, 300); if (text.length < 2) return no('Bir şey yazın.'); const e = addDefense(w, c, me, text, now); return e ? no(e) : ok(''); }
+    case 'restCase': { const c = w.cases.find((x) => x.id === a.caseId && x.accusedId === me.id && x.trial && !x.trial.done); if (!c) return no('Görülen davanız yok.'); finishTrial(w, c, now); return ok(c.trial!.verdictText ?? 'Karar verildi.'); }
     case 'insult': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); relate(t, me, -25, 'bana hakaret etti'); me.rep = clamp(me.rep - 2, -100, 100); return ok(`${t.name} size küstü.`); }
     case 'assault': { const t = findPerson(w, a.personId); if (!t || t.id === me.id || t.prof === 'naip') return no('Geçersiz.'); me.honesty = clamp(me.honesty - 15); return ok(assault(w, me, t)); }
     case 'kill': { const t = findPerson(w, a.personId); if (!t || t.id === me.id || t.prof === 'naip' || t.id === w.kayzerId) return no('Geçersiz.'); me.honesty = clamp(me.honesty - 40); return ok(murder(w, me, t)); }

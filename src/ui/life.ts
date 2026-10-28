@@ -2,7 +2,7 @@ import type { Building, Good, Person, World } from '../sim/types';
 import { GOODS } from '../sim/types';
 import { BASE_PRICE, GOOD_LABEL, PROF_LABEL } from '../sim/constants';
 import { findPerson } from '../sim/world';
-import { electionPhase } from '../sim/tick';
+import { electionDates, electionPhase } from '../sim/tick';
 import { rankOf } from '../sim/economy';
 import { QUESTS, armyPower } from '../sim/life';
 import { lawPreview } from '../sim/extras';
@@ -122,7 +122,7 @@ export function personExtras(c: Ctx, p: Person): HTMLElement {
 }
 export function personActions(c: Ctx, p: Person): HTMLElement {
   const row = h('div', { class: 'row' },
-    h('button', { title: 'Yüz yüze konuşun: dostluk +3, ne düşündüğünü söyler.', onclick: () => c.act({ t: 'chatWith', personId: p.id }) }, '🗨 Sohbet et'),
+    h('button', { class: 'primary', title: 'Ona yazın; kendi aklıyla cevap verir.', onclick: () => c.dm(p.id) }, '💬 Konuş'),
     c.me && ['bekci', 'asker'].includes(c.me.prof) && c.me.id !== p.id ? h('button', { title: 'İstifçilik araması: fazla stok varsa el konur (günde 1).', onclick: () => c.act({ t: 'inspect', personId: p.id }) }, '🔍 Ara') : '',
     h('button', { title: 'Düşmanlık −25, itibarınız düşer.', onclick: () => c.act({ t: 'insult', personId: p.id }) }, '😤 Hakaret et'),
     h('button', { class: 'danger', title: 'Suç: yaralar; yakalanırsanız 5 gün zindan.', onclick: () => { if (confirm('Saldırı suçtur. Emin misiniz?')) c.act({ t: 'assault', personId: p.id }); } }, '👊 Saldır'),
@@ -198,9 +198,9 @@ export function caseRoles(c: Ctx, caseId: string, accusedId: string): HTMLElemen
 
 /** Meclis election phases block. */
 export function electionBlock(c: Ctx): HTMLElement {
-  const w = c.w; const ph = electionPhase(w); const n = w.election.nextDay;
+  const w = c.w; const ph = electionPhase(w); const n = w.election.nextDay; const d = electionDates(w);
   const step = (k: string, label: string, days: string): HTMLElement => h('div', { class: `phase ${ph.phase === k ? 'on' : ''}` }, h('b', {}, label), h('div', { class: 'muted' }, days));
-  const box = h('div', { class: 'card' }, h('b', {}, '🗳 Seçim takvimi'), h('div', { class: 'row' }, step('aday', '1. Adaylık', `${n - 6}–${n - 4}. gün`), step('propaganda', '2. Propaganda', `${n - 3}–${n - 1}. gün`), step('oylama', '3. Oylama', `${n}. gün`)), h('div', { class: 'muted' }, ph.label));
+  const box = h('div', { class: 'card' }, h('b', {}, '🗳 Seçim takvimi'), h('div', { class: 'row' }, step('aday', '1. Adaylık', `${d.adayFrom}–${d.adayTo}. gün`), step('propaganda', '2. Propaganda', `${d.propFrom}–${d.propTo}. gün`), step('oylama', '3. Oylama', `${n}. gün`)), h('div', { class: 'muted' }, ph.label));
   if (c.me && w.election.candidates.includes(c.me.id) && (ph.phase === 'propaganda' || ph.phase === 'aday')) {
     const sp = h('input', { placeholder: 'Seçim konuşması…', maxlength: '160', style: 'flex:1' });
     box.append(h('div', { class: 'row' }, h('button', { onclick: () => c.act({ t: 'poster' }) }, '📜 Afiş as (5 D)'), sp, h('button', { onclick: () => c.act({ t: 'campaign', text: sp.value }) }, '🎤 Konuş')));

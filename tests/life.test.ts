@@ -1,3 +1,4 @@
+import { rules as moveRules } from '../src/sim/move'; moveRules.reach = false;
 import { describe, expect, it } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { advanceWorld, applyAction, createWorld, DAY_MS, joinWorld, touchPlayer, findPerson, totalMoney, produce, BASE_PRICE, GOODS } from '../src/sim/index';
@@ -146,7 +147,7 @@ describe('migration', () => {
   it.skipIf(!existsSync(path))('the live day-3 world migrates and keeps running', () => {
     const raw = JSON.parse(readFileSync(path, 'utf8')); const w: World = (Array.isArray(raw) ? raw[0] : raw).state;
     const ids = w.people.map((p) => p.id); migrateWorld(w);
-    expect(w.schema).toBe(3); expect(w.people.map((p) => p.id)).toEqual(ids);
+    expect(w.schema).toBe(4); expect(w.people.map((p) => p.id)).toEqual(ids);
     for (const p of w.people) if (p.spouse) { const s = findPerson(w, p.spouse); if (s) expect(s.female).not.toBe(p.female); }
     const m0 = totalMoney(w); let now = w.lastTickAt;
     for (let i = 0; i < 24 * 10; i++) { now += DAY_MS / 24; advanceWorld(w, now); }

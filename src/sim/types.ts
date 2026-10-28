@@ -71,10 +71,16 @@ export interface Person {
   taxDue: number; smuggle: boolean;
   nightOut: boolean;
   bought?: Partial<Record<Good, number>>; // bought today – cannot be resold the same day
+  walk?: import('./move').Walk; // player characters: current walk (real-time path)
 }
 
 export interface Arrest { id: string; criminalId: string; catcherId: string; crime: CrimeKind; victimId: string | null; amount: number; day: number; hour: number; offer: number; status: 'bekliyor' | 'kabul' | 'ret'; }
 export type CrimeKind = 'hirsizlik' | 'rusvet' | 'zimmet' | 'isyan' | 'saldiri' | 'cinayet' | 'kacakcilik';
+export interface Talk { a: string; b: string; text: string; day: number; hour: number; at?: number; lines?: string[]; ai?: boolean }
+export interface Corpse { id: string; personId: string; name: string; look: { hairColor: number; skin: number; shirt: number; female: boolean; prof: Profession }; x: number; y: number; at: number; killerId: string | null; witnesses: string[]; stage: 'yerde' | 'ihbar' | 'inceleme' | 'kapandi'; reportedBy?: string; reportedAt?: number; bekciId?: string; bekciFrom?: { x: number; y: number }; note?: string }
+export interface Escort { personId: string; bekciId: string; from: { x: number; y: number }; at: number }
+export interface TrialMsg { who: 'hakim' | 'savci' | 'sanik'; name: string; text: string; at: number }
+export interface Trial { at: number; until: number; judgeId: string | null; prosecutorId: string | null; msgs: TrialMsg[]; persuasion: number; done: boolean; verdictText?: string; pending?: boolean }
 export interface NpcMsg { fromPersonId: string; fromName: string; toPersonId: string | null; text: string; at: number }
 export interface Offer { id: string; from: string; to: string; kind: 'mal' | 'borc' | 'is' | 'rusvet'; good?: Good; qty?: number; price?: number; amount?: number; arrestId?: string; day: number; text: string }
 export interface Nature { kind: 'kuraklik' | 'salgin' | 'sel' | 'bereket' | 'balik'; start: number; until: number }
@@ -109,7 +115,7 @@ export type CaseStage = 'savci' | 'hakim' | 'kapandi';
 export interface CourtCase {
   id: string; accusedId: string; crime: CrimeKind; victimId: string | null;
   amount: number; evidence: number; stage: CaseStage; day: number; deadline: number;
-  verdict?: 'suclu' | 'beraat' | 'dusuruldu' | 'af'; sentence?: string; bribed?: boolean; defenders?: string[]; witnesses?: { id: string; against: boolean }[];
+  verdict?: 'suclu' | 'beraat' | 'dusuruldu' | 'af'; sentence?: string; trial?: Trial; bribed?: boolean; defenders?: string[]; witnesses?: { id: string; against: boolean }[];
 }
 
 export interface Law { id: string; name: string; desc: string; active: boolean; param?: number; paramLabel?: string; }
@@ -193,7 +199,9 @@ export interface World {
   priceCaps: Partial<Record<Good, number>>;
   arrests: Arrest[];
   chatOut: NpcMsg[];
-  talks: { a: string; b: string; text: string; day: number; hour: number }[];
+  talks: Talk[];
+  corpses?: Corpse[]; escorts?: Escort[];
+  llm?: { day: string; n: number; talkAt: number };
   offers: Offer[];
   rumors: { day: number; text: string; about: string }[];
   caravan: Caravan | null; threat: Threat | null;
@@ -279,6 +287,7 @@ export type Action =
   | { t: 'defend'; caseId: string } | { t: 'witness'; caseId: string; against: boolean }
   | { t: 'smuggle'; on: boolean }
   | { t: 'borrow'; amount: number } | { t: 'repay'; loanId: string } | { t: 'festivalOpen'; cost: number } | { t: 'buildAt'; plotId: string; kind: string }
+  | { t: 'move'; x: number; y: number } | { t: 'report'; corpseId: string } | { t: 'defense'; caseId: string; text: string } | { t: 'restCase'; caseId: string }
   | { t: 'tribute'; pay: boolean } | { t: 'caravanBuy'; good: Good; qty: number };
 
 export interface ActionResult { ok: boolean; msg: string; }
