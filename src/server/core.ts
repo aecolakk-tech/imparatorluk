@@ -18,8 +18,9 @@ import { realtime, judgeRule, judgeAnswer, dmPrompt, talksPrompt, judgePrompt } 
 import { findPerson } from '../sim/world';
 export { migrateWorld };
 /** NPC chat lines produced by the simulation; the server stores them as messages and clears the outbox. */
-export function drainChat(w: World): NpcMsg[] { const out = w.chatOut ?? []; w.chatOut = []; return out; }
+export function drainChat(w: World): NpcMsg[] { const out = (w.chatOut ?? []).map((m) => ({ ...m, text: tidy(m.text) })); w.chatOut = []; return out; }
 
+import { tidy } from '../sim/tr';
 export { createWorld, filterProfanity, rateOk, personOf };
 export type { AdminOp };
 

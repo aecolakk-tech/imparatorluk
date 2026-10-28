@@ -207,6 +207,19 @@ Deploy only when every item is ✅ (or ❌ with a reason the user accepted).
 ## ST. Staging / copy world for Test Botu
 | ST1 | A separate copy world (staging save) for Test Botu's idle test that never touches the live world; how to start/reset it documented | ⬜ | |
 
+## AA. Owner requests after the live Macar battle (2026-10-28, v2.0.2)
+| # | Item | Status | Verified by |
+|---|------|--------|-------------|
+| AA1 | Macar troops disembark from the ships in staggered waves (3 per wave, 5 s apart), not all at once | ✅ | tests/v202 “waves”; play-v202-combat.mjs (3 ashore/15 aboard → 9/9); waves-1/2.png |
+| AA2 | Clear hit feedback: damage numbers, white hit flash, foe HP bars with damage trail, hit/clang/whoosh sounds, small shake + vibration, “💥 … vurdunuz −N · düşman canı x/100” log line | ✅ | play-v202-combat.mjs combat-log + sfx; code review |
+| AA3 | Kılıç/hançer/yay visible in the hand of every character holding one; swing animation on Saldır (own press shows at once) | ✅ | drawHeld/swingOf; swing.png, bow-aim.png |
+| AA4 | Yay: hold Saldır to aim (line + target circle + distance; longer hold = farther, up to 9 kare; joystick turns the aim), release to shoot; arrow flight animation for players, soldiers and enemy archers | ✅ | tests/v202 “aimed bow”; play-v202 (my hits incl. arrow) ; bow-aim.png |
+| AA5 | Macar soldiers visibly hold swords/bows and swing/shoot when they damage you | ✅ | figure() + Hit.from; waves-2.png |
+| AA6 | Post-battle freeze: client heartbeat could hang forever (ticking flag) → world stopped updating; now 15 s timeout + self-heal, render loop can’t die on an exception, busy world still answers heartbeats; live state day 65 replays cleanly (war ends, speed 1) | ✅ | /tmp repro with live snapshot (read-only); tests/v202 “war ends cleanly” |
+| AA7 | Every bar animates smoothly (HUD HP/tokluk/su/enerji eased per frame; tokluk/su/enerji drift between hourly updates; panel bars slide; canvas HP bars tween) | ✅ | tween.ts, dom.bar(); play-v202 run |
+| AA8 | Free swing: with kılıç/hançer Saldır works any time (animation + whoosh), no blocking message | ✅ | play-v202 “after free swing” (no toast) |
+| AA9 | Melee reach 0.5 m between bodies; scale 1 kare = 1.2 m (body Ø 0.5 m → 0.83 kare centre-to-centre, +0.1 kare lag slack) on the server; out-of-reach swings are visible misses | ✅ | combatpos.ts constants; tests/v202 “melee reach” |
+
 ## v2.0.2 BACKLOG (do NOT build in v2.0.1)
 - Bütçe oylaması (yıllık bütçe kalemleri)
 - Devamsızlık: ödenek kesintisi ve vekâlet

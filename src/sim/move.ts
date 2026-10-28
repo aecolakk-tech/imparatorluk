@@ -102,6 +102,8 @@ export function actionNeed(w: World, me: Person, a: Action): Need {
     case 'fulfillOrder': return B(MARKET_IDS(w), 'Pazar’a (ilan tahtası)');
     case 'jobApply': case 'jobPost': return B(MARKET_IDS(w), 'Pazar’a (İş İlanı Tahtası)');
     case 'askJob': return { kind: 'person', id: a.personId };
+    case 'canvass': case 'ikram': return { kind: 'person', id: a.personId };
+    case 'ocak': return B(['pazar'], 'Pazar’daki parti ocağına');
     case 'kisla': return B(['kisla'], 'Kışla’ya');
     case 'sadaka': case 'asevi': case 'sifa': return B(['cami'], 'Cami’ye');
     case 'talebe': case 'oku': case 'dersVer': return B(['okul', 'cami'], 'Okul’a ya da Cami’ye');

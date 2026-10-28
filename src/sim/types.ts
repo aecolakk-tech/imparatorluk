@@ -353,6 +353,10 @@ export type Action =
   | { t: 'seize' }
   | { t: 'restore' }
   | { t: 'festival'; cost: number }
+  // v2.0.2 player campaign + party actions (S/U)
+  | { t: 'vaat'; kinds: string[] } | { t: 'canvass'; personId: string } | { t: 'miting'; text?: string } | { t: 'ikram'; personId: string; kind: 'pilav' | 'serbet' | 'para'; amount?: number }
+  | { t: 'partyPoster' } | { t: 'endorse'; personId: string } | { t: 'smear'; personId: string } | { t: 'joinParty'; factionId: string } | { t: 'resignParty' }
+  | { t: 'foundParty'; name: string; ideology: Ideology } | { t: 'donate'; amount: number } | { t: 'ocak' }
   | { t: 'marry'; personId: string }
   | { t: 'answerProposal'; proposalId: string; accept: boolean }
   | { t: 'divorce' }

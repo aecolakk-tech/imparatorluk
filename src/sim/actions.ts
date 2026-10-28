@@ -2,6 +2,8 @@ import { shelf, fulfillOrder, granaryDistribute } from './market2';
 import { groupOf } from './economy';
 import { cleanLook, lookFromSeeds, TERZI_PRICE, BERBER_PRICE } from './look';
 import { attackFoe } from './combat';
+import { setVaat, canvass, miting, ikram, partyPoster, endorse, smear, MEYDAN, MITING_R } from './propaganda';
+import { joinParty, resignParty, foundParty, donate, meeting } from './party';
 import { rebuild, nameEmpire } from './events3';
 import { buyArm, kislaKit, draw, stash, searchPerson, armsLine, ARM_LABEL } from './arms';
 import { answerForeign, recruit, ransom, RECRUIT_MAX } from './events2';
@@ -327,10 +329,19 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       const b = w.meclis.bills.find((x) => x.id === a.billId); if (!b) return no('Karar yok.');
       const r = sanction(w, b, a.approve); return { ok: r.startsWith('Onay') || r.startsWith('Veto'), msg: r };
     }
-    case 'joinFaction': {
-      if (!w.meclis.factions.some((f) => f.id === a.factionId)) return no('Böyle bir parti yok.');
-      me.faction = a.factionId; return ok(`${w.meclis.factions.find((f) => f.id === a.factionId)!.name} üyesisiniz.`);
-    }
+    case 'joinFaction': case 'joinParty': { const e = joinParty(w, me, a.factionId); return e ? no(e) : ok(`${w.meclis.factions.find((f) => f.id === a.factionId)!.name} üyesisiniz. Günlük aidat 1 D parti kasasına gider.`); }
+    // v2.0.2 campaign + party (player side of the S/U packages; NPCs already used them)
+    case 'vaat': { const e = setVaat(w, me, Array.isArray(a.kinds) ? a.kinds.map(String) : []); return e ? no(e) : ok('Vaatleriniz ilan edildi. Seçmenler ihtiyaçlarına göre tartar; seçilip önermezseniz itibar ve oy kaybedersiniz.'); }
+    case 'canvass': { const v = findPerson(w, a.personId); if (!v || v.id === me.id) return no('Kişi yok.'); const r = canvass(w, me, v); return r.ok ? ok(r.msg) : no(r.msg); }
+    case 'miting': { const q = placeOf(w, me.id, now); if (rules.reach && q && Math.hypot(q.x - MEYDAN.x, q.y - MEYDAN.y) > MITING_R) return no('Miting Meydan’da yapılır – önce Meydan’a yürüyün.'); const r = miting(w, me, now, filterProfanity(String(a.text ?? '')).slice(0, 160)); return r.ok ? ok(r.msg) : no(r.msg); }
+    case 'ikram': { const v = findPerson(w, a.personId); if (!v || v.id === me.id) return no('Kişi yok.'); const k = a.kind === 'para' || a.kind === 'serbet' ? a.kind : 'pilav'; const r = ikram(w, me, v, k, num(a.amount, 1, 100) ?? 5); return r.ok ? ok(r.msg) : no(r.msg); }
+    case 'partyPoster': { const e = partyPoster(w, me); return e ? no(e) : ok('Parti afişi asıldı (bütün parti adaylarına yarar).'); }
+    case 'endorse': { const v = findPerson(w, a.personId); if (!v) return no('Kişi yok.'); const e = endorse(w, me, v); return e ? no(e) : ok(`${v.name} adaylığını açıkça desteklediniz.`); }
+    case 'smear': { const v = findPerson(w, a.personId); if (!v || v.id === me.id) return no('Kişi yok.'); const r = smear(w, me, v); return r.ok ? ok(r.msg) : no(r.msg); }
+    case 'resignParty': { const e = resignParty(w, me); return e ? no(e) : ok('Partinizden istifa ettiniz.'); }
+    case 'foundParty': { const id = (['saltanatci', 'cumhuriyetci', 'esnaf', 'halkci'] as const).includes(a.ideology) ? a.ideology : 'halkci'; const e = foundParty(w, me, filterProfanity(String(a.name ?? '')), id); return e ? no(e) : ok('Partiniz kuruldu; genel başkan sizsiniz.'); }
+    case 'donate': { const e = donate(w, me, num(a.amount, 1, 10000) ?? 0); return e ? no(e) : ok('Bağışınız parti kasasına geçti.'); }
+    case 'ocak': { const e = meeting(w, me); return e ? no(e) : ok('Ocak toplantısına katıldınız (+parti itibarı, +1 itibar).'); }
     case 'runForBaskan': {
       if (w.regime !== 'cumhuriyet') return no('Başkanlık seçimi sadece cumhuriyette yapılır.');
       if (!w.election.baskanCandidates.includes(me.id)) w.election.baskanCandidates.push(me.id);

@@ -1,6 +1,7 @@
 import { askConfirm, askText } from './ui/modal';
 import { oldWalk, ageText } from './sim/age';
 import { ek } from './sim/tr';
+import { rulerName } from './sim/log';
 import { buildControls, type SlotItem } from './ui/controls';
 import { foePos, liveFoes, MELEE_TILES, REACH_SLACK } from './sim/combatpos';
 import { weaponInHand, bestWeapon } from './sim/arms';
@@ -344,7 +345,7 @@ function renderHud(): void {
       ] : []),
       ruler ? chip('castle', fmt(w.treasury), 'Hazine') : '',
       ruler && w.regime === 'imparatorluk' ? chip('banner', String(Math.round(w.cumhuriyet)), 'Cumhuriyet isteği', w.cumhuriyet > 50 ? 'warn' : '') : '',
-      !ruler ? chip('crown', w.regime === 'cumhuriyet' ? (k?.name ?? 'seçim') : (k?.name ?? 'Naip'), 'Devletin başı') : '',
+      !ruler ? chip('crown', w.regime === 'cumhuriyet' && !k ? 'seçim' : rulerName(w), 'Devletin başı') : '',
       m?.infected ? h('span', { class: 'stat warn pulse', title: 'Salgına yakalandınız', onclick: () => { toast('🦠 Hastasınız! Her saat can kaybediyorsunuz ve yakınınızdakilere bulaştırırsınız. Hekimhane’ye gidip tedavi olun.'); const b = world?.buildings.find((x) => x.id === 'hekimhane'); if (b) { walkTo(doorSpot(b)); openSheet(() => bPanel(b)); } } }, '🦠 Hastasınız → Hekim') : '',
       m?.drawn ? h('span', { class: 'stat warn', title: 'Çekili silah', onclick: () => void send({ t: 'drawWeapon', kind: null }) }, `⚔ ${({ hancer: 'Hançer', kilic: 'Kılıç', yay: 'Yay' } as Record<string, string>)[m.drawn]} çekili (kınına koy)`) : '',
       w.empireName ? chip('crown', w.empireName, 'Devletin adı') : '',
@@ -769,11 +770,11 @@ function nearPeople(): Placed[] { const q = myPlaced(); const m = me(); if (!q |
 function interactTarget(): { kind: 'person'; id: string; label: string } | { kind: 'building'; id: string; label: string } | { kind: 'none'; label: string } {
   const w0 = world; const q0 = myPlaced(); const sb = selB && w0 ? w0.buildings.find((x) => x.id === selB) : undefined;
   if (nearGosterge()) return { kind: 'building', id: '__gosterge', label: 'Şehir Göstergesi' };
-  if (sb && q0 && distToBuilding(sb, q0) <= REACH + 1) return { kind: 'building', id: sb.id, label: sb.name }; // a tapped (selected) building wins when in reach
+  if (sb && q0 && distToBuilding(sb, q0) <= REACH + 1) return { kind: 'building', id: sb.id, label: `Gir: ${sb.name}` }; // a tapped (selected) building wins when in reach
   const near = nearPeople();
   if (near.length === 1) return { kind: 'person', id: near[0]!.p.id, label: near[0]!.p.name.split(' ')[0]! };
   if (near.length > 1) { const s = near.find((x) => x.p.id === selPerson); return s ? { kind: 'person', id: s.p.id, label: s.p.name.split(' ')[0]! } : { kind: 'none', label: 'Kişiye dokunun' }; }
-  const w = world; const q = myPlaced(); if (w && q) { const b = w.buildings.filter((x) => distToBuilding(x, q) <= 1.2).sort((a, c) => distToBuilding(a, q) - distToBuilding(c, q))[0]; if (b) return { kind: 'building', id: b.id, label: b.name }; }
+  const w = world; const q = myPlaced(); if (w && q) { const b = w.buildings.filter((x) => distToBuilding(x, q) <= 1.2).sort((a, c) => distToBuilding(a, q) - distToBuilding(c, q))[0]; if (b) return { kind: 'building', id: b.id, label: `Gir: ${b.name}` }; }
   return { kind: 'none', label: 'Yakında kimse yok' };
 }
 /** v2.0.1 Şehir Göstergesi: open when standing within ~1 m of the board next to the Saray. */
@@ -905,6 +906,17 @@ function frame(): void {
   requestAnimationFrame(frame);
 }
 let frameErrN = 0; function frameErr(e: unknown): void { frameErrN += 1; if (frameErrN < 5) console.error('frame', e); }
+/** v2.0.2 F4: 'Yer bul' / auto-walk shows a dotted trail to the destination and an arrow at the screen edge when it is off-screen. */
+function drawTrail(now: number): void {
+  const w = world; const m = me(); if (!w || !m || !walkTarget || !m.walk) return; const z = cam.z * T; const c = ctx2d;
+  const P = (x: number, y: number): [number, number] => [(x - cam.x) * z, (y - cam.y) * z];
+  const here = myPos(w, m, now); const pts = [here, ...m.walk.path.filter((q, i, a) => i > 0 && Math.hypot(q.x - here.x, q.y - here.y) > 0.3 || i === a.length - 1)];
+  c.save(); c.setLineDash([4, 6]); c.lineDashOffset = -now / 60; c.strokeStyle = 'rgba(255,236,140,0.85)'; c.lineWidth = 3; c.beginPath();
+  pts.forEach((q, i) => { const [x, y] = P(q.x, q.y); if (i) c.lineTo(x, y); else c.moveTo(x, y); }); c.stroke(); c.restore();
+  const [tx, ty] = P(walkTarget.x, walkTarget.y); const W = canvas.width, H = canvas.height;
+  if (tx < 0 || ty < 0 || tx > W || ty > H) { const cx = W / 2, cy = H / 2; const a = Math.atan2(ty - cy, tx - cx); const r = Math.min(W, H) / 2 - 40; const ax = cx + Math.cos(a) * r, ay = cy + Math.sin(a) * r;
+    c.save(); c.translate(ax, ay); c.rotate(a); c.fillStyle = '#ffd36a'; c.strokeStyle = '#000a'; c.lineWidth = 2; c.beginPath(); c.moveTo(18, 0); c.lineTo(-10, -12); c.lineTo(-4, 0); c.lineTo(-10, 12); c.closePath(); c.fill(); c.stroke(); c.restore(); }
+}
 function frameInner(): void {
   // v1.9.3: no 30 fps cap in low-graphics mode (it halved smoothness); low mode = 1× pixels
   const prof0 = performance.now();
@@ -915,6 +927,7 @@ function frameInner(): void {
     const dt = Math.min(0.1, (performance.now() - lastFrame) / 1000); lastFrame = performance.now();
     if (mq && followCam && !dragStart) { const vw = canvas.width / (cam.z * T), vh = canvas.height / (cam.z * T); const tx = mq.x - vw / 2, ty = mq.y - vh / 2 - 0.5; const k = Math.min(1, dt * 6); cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; clampCam(); }
     drawFrame(ctx2d, stat, world, cam, placed, now, selected, me()?.id ?? null, lowGfx ? 0 : darkness(world), walkTarget);
+    drawTrail(now);
     pendingStep();
     if (walkTarget) { const m = me(); if (m?.walk && now > walkEnd(m.walk) + 300 && !pending) walkTarget = null; }
     if (now - lastHud > 1000) { lastHud = now; renderHud(); soundscape(); insideBanner(); }

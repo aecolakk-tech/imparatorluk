@@ -22,3 +22,16 @@ export function numA(n: number): string {
   const [back, vow] = d ? ([[false, false], [false, false], [false, true], [false, false], [false, false], [false, false], [true, true], [false, true], [false, false], [true, false]] as const)[d]! : t ? ([[false, false], [true, false], [false, true], [true, false], [true, false], [false, true], [true, false], [false, false], [false, false], [true, false]] as const)[t / 10]! : k === 0 ? [true, false] as const : [false, false] as const;
   return `${Math.round(n)}’${vow ? 'y' : ''}${back ? 'a' : 'e'}`;
 }
+
+/** v2.0.2 (P8) text tidy for every log/notice/chat line: doubled titles ("Bekçi Bekçi Ali"), doubled speaker prefixes
+ *  ("Barcı Feride: Barcı Feride: …"), "!." / "?." endings, empty names ("Muhbir :"), repeated spaces. */
+export function tidy(t: string): string {
+  let s = String(t ?? '');
+  s = s.replace(/(?<!\p{L})(\p{Lu}\p{L}+) \1(?!\p{L})/gu, '$1'); // Bekçi Bekçi → Bekçi
+  s = s.replace(/^([^:]{2,40}): \1:\s*/u, '$1: '); // "X: X: text" → "X: text"
+  s = s.replace(/([!?])\.(?=\s|$)/g, '$1').replace(/\.{2}(?=\s|$)/g, '.');
+  s = s.replace(/^(Muhbir|Bekçi|Asker)\s*:/u, '$1 (adı bilinmiyor):'); // empty name after a title
+  return s.replace(/ {2,}/g, ' ').trim();
+}
+/** Display name without a duplicated title word. */
+export const cleanName = (n: string): string => tidy(n);

@@ -1,3 +1,4 @@
+import { campaignButtons } from './campaign';
 import { PRODUCES } from '../sim/constants';
 /** v2.0 UI: inventory & chest, weapon shop, event popups, empire name, “Neler yeni?”, map overlays. */
 import type { Building, Good, Person, World } from '../sim/types';
@@ -75,6 +76,7 @@ export function personExtras(c: Ctx, p: Person): HTMLElement | null {
   if (m.prof === 'bekci' && m.jailedDays === 0) out.append(h('button', { onclick: () => c.act({ t: 'searchPerson', personId: p.id }) }, '🔎 Üstünü ara'));
   if (!p.playerId && PRODUCES[p.prof]) out.append(h('button', { class: 'primary', title: 'Esnaf itibarınıza ve rütbenize bakar; uygunsa sizi çırak alır.', onclick: () => c.act({ t: 'askJob', personId: p.id }) }, '💼 Bir iş var mı?'));
   for (const d of (c.w.meclis.dilekceler ?? []).filter((x) => x.status === 'acik' && x.by === m.id && !x.signers.includes(p.id)).slice(0, 2)) out.append(h('button', { title: `${d.signers.length}/20 imza`, onclick: () => c.act({ t: 'dilekceIste', id: d.id, personId: p.id }) }, `✍ Dilekçemi imzalat (${d.signers.length}/20)`));
+  out.append(...campaignButtons(c, p)); // v2.0.2 kapı kapı, ikram, destek, kara propaganda
   return out.childNodes.length ? out : null;
 }
 
@@ -196,6 +198,8 @@ export function drawV2(ctx: CanvasRenderingContext2D, w: World, cam: Cam, z: num
     if (cv.ship) { const [x, y] = P(100 - (100 - LIMAN.x) * t, LIMAN.y + 1.6); ship(ctx, x, y, sz * 1.1, '#c8102e'); }
     else for (let i = 0; i < 6; i++) { const sx = 101 - (101 - PAZAR.x - 1.2 * i) * t + i * 1.2 * (1 - t); const [x, y] = P(sx, PAZAR.y + (i % 2) * 0.6); camel(ctx, x, y, sz * 1.05, t < 1 ? Math.floor(now / 250 + i) % 2 : 0); }
   }
+  // v2.0.2 U4: party Ocakları – a flag in each party's colour on the Pazar's north side (meetings, dues)
+  w.meclis.factions.slice(0, 8).forEach((f, i) => { const [x, y] = P(31 + i * 1.5, 21.95); ctx.fillStyle = '#4a3420'; ctx.fillRect(x - 1, y - sz * 0.95, 2, sz * 0.95); const wave = Math.sin(now / 400 + i) * sz * 0.04; ctx.fillStyle = f.color; ctx.beginPath(); ctx.moveTo(x + 1, y - sz * 0.95); ctx.lineTo(x + sz * 0.5, y - sz * 0.83 + wave); ctx.lineTo(x + 1, y - sz * 0.68); ctx.fill(); if (z > 14) { ctx.font = `${Math.max(8, z * 0.32)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = '#000b'; ctx.fillText(f.name.split(' ')[0]!.slice(0, 8), x, y + z * 0.35); } });
   drawCombat(ctx, w, P, z, sz, now, placed);
 }
 function hpBar(ctx: CanvasRenderingContext2D, x: number, y: number, wd: number, v0: number, max: number, col: string, key?: string): void {

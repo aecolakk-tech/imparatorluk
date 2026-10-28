@@ -1,3 +1,4 @@
+import { tidy } from './tr';
 import { ek } from './tr';
 import { enactLaw, lawTitle, validateLaw, type LawSpec } from './laws';
 /**
@@ -70,8 +71,8 @@ export function naturalFaction(p: Person): string {
   return 'halk';
 }
 export const members = (w: World): Person[] => w.people.filter((p) => p.meclis);
-const mlog = (w: World, text: string, personId?: string): void => {
-  w.meclis.log.push({ day: w.day, text }); if (w.meclis.log.length > 150) w.meclis.log.shift();
+const mlog = (w: World, text0: string, personId?: string): void => {
+  const text = tidy(text0); w.meclis.log.push({ day: w.day, text }); if (w.meclis.log.length > 150) w.meclis.log.shift();
   log(w, `Meclis: ${text}`, personId);
 };
 

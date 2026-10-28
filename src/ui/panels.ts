@@ -1,3 +1,7 @@
+import { GENELGE, GKINDS, type GKind } from '../sim/genelge';
+import { rulerName } from '../sim/log';
+import { PROPOSE_FEE } from '../sim/meclis';
+import { partiesTab, campaignTab } from './campaign';
 import { shelf, isPanayir } from '../sim/market2';
 import { groupOf } from '../sim/economy';
 import { openModal } from './modal';
@@ -262,7 +266,7 @@ function billCard(c: Ctx, b: Bill, open: boolean): HTMLElement {
     const mine = b.votes[c.me.id];
     card.append(h('div', { class: 'row' }, ...(['evet', 'hayir', 'cekimser'] as const).map((v) => h('button', { class: mine === v ? 'primary' : '', onclick: () => c.act({ t: 'castVote', billId: b.id, choice: v }) }, `${VOTE_ICON[v]} ${v}`))));
     const sp = h('input', { placeholder: 'Kürsüden konuşun…', maxlength: '200', style: 'flex:1' });
-    card.append(h('div', { class: 'row' }, sp, h('button', { onclick: () => c.act({ t: 'speak', billId: b.id, text: sp.value }) }, '🎤 Konuş')));
+    card.append(h('div', { class: 'row' }, sp, h('button', { onclick: () => { c.act({ t: 'speak', billId: b.id, text: sp.value }); sp.value = ''; } }, '🎤 Konuş')));
   }
   if (b.status === 'onay' && isK(c)) card.append(h('div', { class: 'row' }, h('button', { class: 'primary', onclick: () => c.act({ t: 'sanction', billId: b.id, approve: true }) }, '✔ Onayla'), h('button', { class: 'danger', onclick: () => { void askConfirm('Veto kesindir ve halkın gönlünü biraz kırar (+0,7 cumhuriyet isteği, −1,5 sadakat). Emin misiniz?').then((yes) => { if (yes) c.act({ t: 'sanction', billId: b.id, approve: false }); }); } }, '✖ Veto')));
   return card;
@@ -282,14 +286,14 @@ export function electionCard(c: Ctx): HTMLElement {
   if (ph.phase === 'oylama') { const tu = turnout(w); box.append(h('div', { class: 'msg' }, `🗳 Sandık Meclis binasında açık (08–20). Katılım: ${tu.voted}/${tu.electorate} (%${tu.pct}). Oylar gizlidir.${me && w.election.votes[me.id] ? ' ✔ Oyunuz kaydedildi.' : ''}`)); }
   box.append(h('div', { class: 'muted' }, 'Kim oy verebilir: 16 yaşını doldurmuş, zindanda olmayan herkes (dilenciler dahil). Oy, seçim günü Meclis’teki sandıkta verilir.'));
   const last = w.election.last;
-  if (last) box.append(h('details', {}, h('summary', {}, `Son seçim sonuçları (gün ${last.day})`), h('table', {}, ...last.results.slice(0, 24).map((r, i) => h('tr', { class: r.won ? 'won' : '' }, h('td', {}, String(i + 1)), h('td', {}, findPerson(w, r.id)?.name ?? '?'), h('td', {}, `${r.votes} oy`), h('td', {}, r.won ? 'seçildi' : ''))))));
+  if (last) box.append(h('details', {}, h('summary', {}, `Son seçim sonuçları (gün ${last.day}) · ${last.voters ?? '?'} seçmen oy verdi / ${last.electorate ?? '?'} (katılım %${last.electorate ? Math.round((last.voters ?? 0) / last.electorate * 100) : 0}) · ilk 16 aday sandalye kazanır (D’Hondt)`), h('table', {}, ...last.results.slice(0, 24).map((r, i) => h('tr', { class: r.won ? 'won' : '' }, h('td', {}, String(i + 1)), h('td', {}, (r as { name?: string }).name || findPerson(w, r.id)?.name || '(vefat etti)'), h('td', {}, `${r.votes} oy`), h('td', {}, r.won ? 'seçildi' : ''))))));
   return box;
 }
 let meclisTab = 'gundem';
 function meclisPanel(c: Ctx): HTMLElement {
   const w = c.w; const root = h('div', { class: 'meclis-full' });
   const govt = (w.meclis.govt ?? []).map((id) => w.meclis.factions.find((f) => f.id === id)?.name).filter(Boolean).join(' + ') || '—';
-  root.append(h('div', { class: 'card row', style: 'flex-wrap:wrap;gap:10px' }, h('b', {}, '🏛 Meclis-i Mebusan'), h('span', {}, `💰 Hazine ${Math.round(w.treasury)} D${w.meclis.borc ? ` (borç ${Math.round(w.meclis.borc)})` : ''}`), h('span', {}, `Hükümet: ${govt}`), h('span', {}, `Seçim: ${w.election.nextDay}. gün`), h('span', {}, `Komisyon: ${komisyonMembers(w).map((id) => findPerson(w, id)?.name.split(' ').slice(-1)[0] ?? '?').join(', ')}`)));
+  root.append(h('div', { class: 'card row', style: 'flex-wrap:wrap;gap:10px' }, h('b', {}, '🏛 Meclis-i Mebusan'), h('span', {}, `💰 Hazine ${Math.round(w.treasury)} D${w.meclis.borc ? ` (borç ${Math.round(w.meclis.borc)})` : ''}`), h('span', {}, `Hükümet: ${govt}`), h('span', {}, `Başkan: ${findPerson(w, w.meclis.baskanId ?? null)?.name ?? '—'}`), h('span', {}, `Devlet: ${rulerName(w)}`), h('span', {}, `Seçim: ${w.election.nextDay}. gün`), h('span', {}, `Komisyon: ${komisyonMembers(w).map((id) => findPerson(w, id)?.name.split(' ').slice(-1)[0] ?? '?').join(', ')}`)));
   const TABS: [string, string][] = [['gundem', 'Gündem'], ['teklif', 'Teklif Ver'], ['gecmis', 'Geçmiş'], ['uyeler', 'Üyeler'], ['partiler', 'Partiler'], ['secim', 'Seçim-Kampanya']];
   const sec: Record<string, HTMLElement> = {}; for (const [k] of TABS) sec[k] = h('div', { class: 'stack', style: k === meclisTab ? '' : 'display:none' });
   const bar = h('div', { class: 'tabs row', style: 'flex-wrap:wrap' }, ...TABS.map(([k, l]) => h('button', { class: k === meclisTab ? 'primary sm' : 'sm', onclick: (e: Event) => { meclisTab = k; for (const [kk] of TABS) sec[kk]!.style.display = kk === k ? '' : 'none'; for (const b of bar.querySelectorAll('button')) b.className = 'sm'; (e.currentTarget as HTMLElement).className = 'primary sm'; } }, l)));
@@ -302,21 +306,15 @@ function meclisPanel(c: Ctx): HTMLElement {
     for (const id of w.election.baskanCandidates) { const p = findPerson(w, id); if (p) box.append(personLine(c, p, h('button', { onclick: (e) => { e.stopPropagation(); c.act({ t: 'voteBaskan', candidateId: id }); } }, 'Başkanlığa oy'))); }
     if (c.me) box.append(h('button', { class: 'primary', onclick: () => c.act({ t: 'runForBaskan' }) }, 'Başkan adayı ol'));
   } else box.append(h('div', { class: 'muted' }, 'İmparatorlukta Meclis’in kabul ettiği kararlar Kayzer’in onayına gider. Kayzer’in vetosu kesindir, aşılamaz.'));
-  sec.secim!.append(electionBlock(c), electionCard(c));
+  sec.secim!.append(campaignTab(c), electionBlock(c), electionCard(c));
   // seat chart (16 milletvekili)
   const uy = sec.uyeler!;
   uy.append(h('h3', {}, `Sandalyeler (${w.meclis.seats.filter((s) => s.holder).length}/${w.meclis.seats.length}) · üye maaşı ${w.meclis.salary} D/gün`));
   uy.append(h('div', { class: 'seats hemicycle' }, ...w.meclis.seats.map((s) => { const p = findPerson(w, s.holder); const f = fac(p?.faction ?? null);
-    return h('div', { class: `seat${p ? '' : ' empty'}${p && p.id === c.me?.id ? ' me' : ''}`, style: `--fc:${f?.color ?? '#555'}`, title: p ? `${p.name} · ${f?.name ?? ''}` : 'boş', onclick: () => p && c.openPerson(p.id) }, h('b', {}, p?.name.split(' ').slice(-1)[0] ?? '—'), h('small', {}, f?.name.split(' ')[0] ?? '')); })));
+    return h('div', { class: `seat${p ? '' : ' empty'}${p && p.id === c.me?.id ? ' me' : ''}`, style: `--fc:${f?.color ?? '#555'}`, title: p ? `${p.name} · ${f?.name ?? 'Bağımsız'}` : 'boş', onclick: () => p && c.openPerson(p.id) }, h('b', {}, p?.name.split(' ').slice(-1)[0] ?? '—'), h('small', {}, p ? (f?.name.split(' ')[0] ?? 'Bağımsız') : '')); })));
   const mp = !!c.me?.meclis;
   uy.append(h('div', { class: 'muted' }, `💰 Milletvekili geliri: günlük ${w.meclis.salary} Dinar Meclis maaşı + ${MP_ALLOWANCE} Dinar milletvekili ödeneği (Hazine’den, hesap defterinde görünür).`));
-  const pt = sec.partiler!; pt.append(h('h3', {}, 'Partiler'));
-  for (const f of w.meclis.factions) {
-    const n = w.people.filter((p) => p.meclis && p.faction === f.id).length;
-    pt.append(h('div', { class: 'row card', style: `border-left:6px solid ${f.color}` }, h('b', { class: 'grow' }, f.name), h('span', { class: 'muted' }, `${n} sandalye · lider: ${findPerson(w, f.leaderId)?.name ?? '—'}`),
-      mp && c.me!.faction !== f.id ? h('button', { class: 'sm', onclick: () => c.act({ t: 'joinFaction', factionId: f.id }) }, 'Katıl') : c.me?.faction === f.id ? h('span', { class: 'pill' }, 'üyesiniz') : ''));
-  }
-  if (mp) { const nm = h('input', { placeholder: 'Yeni parti adı' }); pt.append(h('div', { class: 'row' }, nm, h('button', { class: 'sm', onclick: () => c.act({ t: 'foundFaction', name: nm.value }) }, 'Parti kur'))); }
+  sec.partiler!.append(partiesTab(c)); // v2.0.2 full party UI (program, axes, support, kasa, Ocak, found/join/leave)
   // agenda: public sessions for everyone; only MPs speak/vote/propose
   const active = w.meclis.bills.filter((b) => ['tartisma', 'oylama', 'onay'].includes(b.status));
   box.append(h('h3', {}, `Gündem (${active.length})${mp ? '' : ' · açık oturum (izleyici)'}`));
@@ -338,7 +336,11 @@ function meclisPanel(c: Ctx): HTMLElement {
     const target = select([['', '— hedef —'], ...w.laws.map((l): [string, string] => [l.id, `Kanun: ${l.name}`]), ...GOODS.map((g): [string, string] => [g, `Mal: ${GOOD_LABEL[g]}`]), ['meclis', 'Maaş: Meclis üyesi'], ...STATE_PROFS.map((p): [string, string] => [p, `Maaş: ${PROF_LABEL[p]}`]), ...w.people.filter((p) => STATE_PROFS.includes(p.prof) || p.rank || p.meclis).map((p): [string, string] => [p.id, `Kişi: ${p.rank ? p.rank + ' ' : ''}${p.name}`])]);
     for (const r of rep) target.append(h('option', { value: r.target }, `Kaldır: ${r.name}`));
     const borc = h('input', { type: 'checkbox' }) as HTMLInputElement;
-    tk.append(h('h3', {}, 'Teklif ver (genelge, vergi, bütçe, gensoru, kaldır…)'), h('div', { class: 'row', style: 'flex-wrap:wrap' }, kind, val, target, title, h('label', { title: 'Hazine karşılamıyorsa dış borçla' }, borc, ' Borçlanma'), h('button', { class: 'primary', onclick: () => c.act({ t: 'propose', kind: kind.value as BillKind, value: Number(val.value), target: target.value, title: title.value || undefined, borc: borc.checked || undefined } as never) }, 'Teklif et')),
+    // v2.0.2 T5: a genelge is picked from the catalogue (real effect, duration, cost) – no Kanun/Mal targets
+    const gpick = select(GKINDS.map((k): [string, string] => [k, `${GENELGE[k].label} · ${GENELGE[k].days} gün · ${GENELGE[k].cost} D`])); const ghelp = h('div', { class: 'muted' });
+    const syncG = (): void => { const g = kind.value === 'genelge'; gpick.style.display = g ? '' : 'none'; target.style.display = g ? 'none' : ''; val.style.display = g ? 'none' : ''; ghelp.textContent = g ? GENELGE[gpick.value as GKind]?.desc ?? '' : ''; };
+    kind.addEventListener('change', syncG); gpick.addEventListener('change', syncG); queueMicrotask(syncG);
+    tk.append(h('h3', {}, 'Teklif ver (genelge, vergi, bütçe, gensoru, kaldır…)'), h('div', { class: 'row', style: 'flex-wrap:wrap' }, kind, val, target, gpick, title, h('label', { title: 'Hazine karşılamıyorsa dış borçla' }, borc, ' Borçlanma'), h('button', { class: 'primary', onclick: () => { const g = kind.value === 'genelge'; c.act({ t: 'propose', kind: kind.value as BillKind, value: g ? 0 : Number(val.value), target: g ? gpick.value : target.value, title: title.value || undefined, borc: borc.checked || undefined } as never); title.value = ''; } }, `Teklif et (harç ${PROPOSE_FEE} D)`)), ghelp,
       h('div', { class: 'muted' }, 'Genelge: bağlayıcı olmayan Meclis bildirisi. Gensoru: bir memuru ya da vezir/paşayı görevden alır. Bütçe: Saray’ın harcama sınırı. Kabul edilen kararlar Kayzer’in onayına gider; veto kesindir. Cumhuriyet İlanı (anayasa): 2 gün görüşülür, 14/16 evet ister, parti disiplini uygulanmaz, Kayzer veto edemez; reddedilirse teklif sahibi Kayzer’in gözünden düşer ve 10 gün yeniden verilemez.'),
       h('h3', {}, 'Kanun teklifi (kanun yazıcı)'), lawBuilder(w, 'Meclise sun', (law) => c.act({ t: 'propose', kind: 'ozel', value: law.value, target: law.good ?? '', law })));
   } else tk.append(h('div', { class: 'card muted' }, h('b', {}, 'Meclis bölümü kilitli. '), 'Teklif vermek, kürsüde konuşmak, oy kullanmak ve parti kurmak için milletvekili seçilmelisiniz.'));
