@@ -3,6 +3,7 @@ import { atHomeSafe } from './housing';
 import { interrogate } from './realm';
 import { revealOrder } from './orders';
 import { makeCorpse } from './v16';
+import { placePeople } from './place';
 /**
  * Daily life: needs (3 meals + 5 water), health & doctors, religiosity (cami / meyhane / vaaz / devlet yönlendirmesi),
  * crafts that matter (elbise, mobilya, alet, odun), nature (kuraklık every 180 days, salgın, sel, bereket),
@@ -339,6 +340,35 @@ export function arrest(w: World, criminal: Person, crime: CrimeKind, victimId: s
   if (criminal.playerId) personal(w, criminal.playerId, 'Yakalandınız! Gözaltındasınız (Mahkeme nezarethanesi). 1 dakika içinde bekçiye rüşvet teklif edebilirsiniz; sonra savcı dava açar ve duruşmanız görülür.');
   return a;
 }
+/** Only people within this many tiles (≈2 m) see a crime. */
+export const WITNESS_R = 2;
+export const REPORT_MS = 60_000; // a surviving victim's complaint reaches the bekçi after ~1 real minute
+/** v1.9.5: no magic arrests. A bekçi standing within 2 m catches the criminal in the act; otherwise only a
+ *  surviving victim (or a witness) can complain → bekçi → savcı → trial. Nobody near and the victim dead → no arrest. */
+export function crimeSeen(w: World, criminal: Person, victim: Person | null, crime: CrimeKind, amount: number): Arrest | null {
+  const now = w.serverNow ?? w.lastTickAt;
+  const placed = placePeople(w, now); const cq = placed.find((q) => q.p.id === criminal.id);
+  const near = cq ? placed.filter((q) => q.visible && q.p.id !== criminal.id && q.p.id !== victim?.id && Math.hypot(q.x - cq.x, q.y - cq.y) <= WITNESS_R) : [];
+  const bekci = near.find((q) => q.p.prof === 'bekci' && q.p.jailedDays === 0 && q.p.id !== criminal.id);
+  if (bekci) return arrest(w, criminal, crime, victim?.id ?? null, amount, bekci.p);
+  const reporter = victim && findPerson(w, victim.id) && victim.health > 0 ? victim : near.find((q) => fullAI(q.p))?.p;
+  if (reporter && victim) {
+    w.crimeReports = [...(w.crimeReports ?? []), { criminalId: criminal.id, victimId: victim.id, crime, amount, at: now }].slice(-20);
+    log(w, `☎ ${reporter.name}, ${ek(criminal.name, 'ı')} bekçiye şikâyet etmeye gidiyor.`, reporter.id);
+  }
+  return null;
+}
+/** Complaints that have reached a bekçi become arrests (normal custody → savcı → trial). */
+export function processReports(w: World, now: number): void {
+  const left: NonNullable<World['crimeReports']> = [];
+  for (const r of w.crimeReports ?? []) {
+    if (now - r.at < REPORT_MS) { left.push(r); continue; }
+    const cr = findPerson(w, r.criminalId); if (!cr || cr.jailedDays > 0) continue;
+    const by = w.people.find((x) => x.prof === 'bekci' && x.jailedDays === 0 && x.id !== cr.id);
+    if (by) { log(w, `${by.name} şikâyeti aldı ve savcıya bildirdi.`, by.id); arrest(w, cr, r.crime, r.victimId, r.amount, by); }
+  }
+  w.crimeReports = left;
+}
 export const CRIME_TEXT: Record<CrimeKind, string> = { hirsizlik: 'hırsızlık', rusvet: 'rüşvet', zimmet: 'zimmet', isyan: 'isyan', saldiri: 'saldırı', cinayet: 'cinayet', kacakcilik: 'kaçakçılık' };
 export function bribeAcceptChance(catcher: Person, offer: number): number {
   return clamp((100 - catcher.loyalty) * 0.6 + (60 - catcher.honesty) * 0.4 + Math.min(40, offer), 0, 95) / 100;
@@ -370,7 +400,7 @@ export function steal(w: World, thief: Person, victim: Person): number {
   transfer(w, victim.id, thief.id, amt, 'hırsızlık');
   victim.mood = clamp(victim.mood - 10); rel(victim, thief, -50, 'beni soydu'); thief.lastAction = 'hırsızlık';
   log(w, `${victim.name} soyuldu (${amt} Dinar).`, victim.id);
-  if (catcher(w, w.hour >= 21 || w.hour < 6)) arrest(w, thief, 'hirsizlik', victim.id, amt);
+  crimeSeen(w, thief, victim, 'hirsizlik', amt);
   return amt;
 }
 export function assault(w: World, a: Person, v: Person): string {
@@ -379,13 +409,13 @@ export function assault(w: World, a: Person, v: Person): string {
   v.health = clamp(v.health - 35); v.wounded = true; v.mood = clamp(v.mood - 10); rel(v, a, -60, 'beni dövdü');
   for (const x of w.people) if (x.relations[v.id] && (x.relations[v.id] ?? 0) > 40) rel(x, a, -20, `${ek(v.name, 'ı')} dövdü`);
   log(w, `${a.name}, ${ek(v.name, 'a')} saldırdı ve yaraladı! Yaralı hekime gitmeli.`, v.id);
-  if (catcher(w, w.hour >= 21 || w.hour < 6)) arrest(w, a, 'saldiri', v.id, 0);
+  crimeSeen(w, a, v, 'saldiri', 0);
   return `${ek(v.name, 'ı')} yaraladınız.`;
 }
 export function murder(w: World, a: Person, v: Person): string {
   if (isProtected(w, v)) return `${ek(v.name, 'a')} dokunulmaz.`;
   if (atHomeSafe(w, v)) return `${v.name} evinde; kapı kilitli, dışarıdan ulaşamazsınız.`;
-  if (v.playerId || v.prof === 'asker' && chance(w, 0.7)) { v.health = 5; v.wounded = true; log(w, `${a.name}, ${ek(v.name, 'ı')} öldürmeye kalktı; ağır yaralı kurtuldu!`, v.id); arrest(w, a, 'cinayet', v.id, 0); return `${v.name} ağır yaralı kurtuldu.`; }
+  if (v.playerId || v.prof === 'asker' && chance(w, 0.7)) { v.health = 5; v.wounded = true; log(w, `${a.name}, ${ek(v.name, 'ı')} öldürmeye kalktı; ağır yaralı kurtuldu!`, v.id); crimeSeen(w, a, v, 'cinayet', 0); return `${v.name} ağır yaralı kurtuldu.`; }
   const co = makeCorpse(w, v, a, w.serverNow ?? w.lastTickAt);
   for (const x of w.people) if ((x.relations[v.id] ?? 0) > 20 && co.witnesses.includes(x.id)) rel(x, a, -70, `${ek(v.name, 'ı')} öldürdü`);
   die(w, v, `CİNAYET! ${v.name} öldürüldü. Cesedi yerde yatıyor…`);

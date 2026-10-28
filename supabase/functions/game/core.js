@@ -2823,7 +2823,7 @@ var CUSTODY_MS = 6e4;
 function makeCorpse(w, v, killer, now) {
   const q = placeOf(w, v.id, now);
   const x = q?.x ?? 32, y = q?.y ?? 28;
-  const witnesses = placePeople(w, now).filter((o) => o.visible && o.p.id !== v.id && o.p.id !== killer?.id && Math.hypot(o.x - x, o.y - y) < 7).map((o) => o.p.id).slice(0, 6);
+  const witnesses = placePeople(w, now).filter((o) => o.visible && o.p.id !== v.id && o.p.id !== killer?.id && Math.hypot(o.x - x, o.y - y) <= WITNESS_R).map((o) => o.p.id).slice(0, 6);
   const co = { id: nextId(w, "C"), personId: v.id, name: v.name, look: { hairColor: v.hairColor, skin: v.skin, shirt: v.shirt, female: v.female, prof: v.prof }, x, y, at: now, killerId: killer?.id ?? null, witnesses, stage: "yerde" };
   w.corpses = [...w.corpses ?? [], co].slice(-12);
   return co;
@@ -2857,6 +2857,7 @@ function investigate(w, co, now) {
 }
 function realtime(w, now) {
   runTasks(w, now);
+  processReports(w, now);
   for (const a of w.arrests) {
     if (a.status !== "bekliyor") continue;
     const cr = findPerson(w, a.criminalId);
@@ -3611,6 +3612,39 @@ function arrest(w, criminal, crime, victimId, amount, by) {
   if (criminal.playerId) personal(w, criminal.playerId, "Yakaland\u0131n\u0131z! G\xF6zalt\u0131ndas\u0131n\u0131z (Mahkeme nezarethanesi). 1 dakika i\xE7inde bek\xE7iye r\xFC\u015Fvet teklif edebilirsiniz; sonra savc\u0131 dava a\xE7ar ve duru\u015Fman\u0131z g\xF6r\xFCl\xFCr.");
   return a;
 }
+var WITNESS_R = 2;
+var REPORT_MS = 6e4;
+function crimeSeen(w, criminal, victim, crime, amount) {
+  const now = w.serverNow ?? w.lastTickAt;
+  const placed = placePeople(w, now);
+  const cq = placed.find((q) => q.p.id === criminal.id);
+  const near = cq ? placed.filter((q) => q.visible && q.p.id !== criminal.id && q.p.id !== victim?.id && Math.hypot(q.x - cq.x, q.y - cq.y) <= WITNESS_R) : [];
+  const bekci = near.find((q) => q.p.prof === "bekci" && q.p.jailedDays === 0 && q.p.id !== criminal.id);
+  if (bekci) return arrest(w, criminal, crime, victim?.id ?? null, amount, bekci.p);
+  const reporter = victim && findPerson(w, victim.id) && victim.health > 0 ? victim : near.find((q) => fullAI(q.p))?.p;
+  if (reporter && victim) {
+    w.crimeReports = [...w.crimeReports ?? [], { criminalId: criminal.id, victimId: victim.id, crime, amount, at: now }].slice(-20);
+    log(w, `\u260E ${reporter.name}, ${ek(criminal.name, "\u0131")} bek\xE7iye \u015Fik\xE2yet etmeye gidiyor.`, reporter.id);
+  }
+  return null;
+}
+function processReports(w, now) {
+  const left = [];
+  for (const r of w.crimeReports ?? []) {
+    if (now - r.at < REPORT_MS) {
+      left.push(r);
+      continue;
+    }
+    const cr = findPerson(w, r.criminalId);
+    if (!cr || cr.jailedDays > 0) continue;
+    const by = w.people.find((x) => x.prof === "bekci" && x.jailedDays === 0 && x.id !== cr.id);
+    if (by) {
+      log(w, `${by.name} \u015Fik\xE2yeti ald\u0131 ve savc\u0131ya bildirdi.`, by.id);
+      arrest(w, cr, r.crime, r.victimId, r.amount, by);
+    }
+  }
+  w.crimeReports = left;
+}
 var CRIME_TEXT = { hirsizlik: "h\u0131rs\u0131zl\u0131k", rusvet: "r\xFC\u015Fvet", zimmet: "zimmet", isyan: "isyan", saldiri: "sald\u0131r\u0131", cinayet: "cinayet", kacakcilik: "ka\xE7ak\xE7\u0131l\u0131k" };
 function bribeAcceptChance(catcher2, offer) {
   return clamp((100 - catcher2.loyalty) * 0.6 + (60 - catcher2.honesty) * 0.4 + Math.min(40, offer), 0, 95) / 100;
@@ -3663,7 +3697,7 @@ function steal(w, thief, victim) {
   rel(victim, thief, -50, "beni soydu");
   thief.lastAction = "h\u0131rs\u0131zl\u0131k";
   log(w, `${victim.name} soyuldu (${amt} Dinar).`, victim.id);
-  if (catcher(w, w.hour >= 21 || w.hour < 6)) arrest(w, thief, "hirsizlik", victim.id, amt);
+  crimeSeen(w, thief, victim, "hirsizlik", amt);
   return amt;
 }
 function assault(w, a, v) {
@@ -3675,7 +3709,7 @@ function assault(w, a, v) {
   rel(v, a, -60, "beni d\xF6vd\xFC");
   for (const x of w.people) if (x.relations[v.id] && (x.relations[v.id] ?? 0) > 40) rel(x, a, -20, `${ek(v.name, "\u0131")} d\xF6vd\xFC`);
   log(w, `${a.name}, ${ek(v.name, "a")} sald\u0131rd\u0131 ve yaralad\u0131! Yaral\u0131 hekime gitmeli.`, v.id);
-  if (catcher(w, w.hour >= 21 || w.hour < 6)) arrest(w, a, "saldiri", v.id, 0);
+  crimeSeen(w, a, v, "saldiri", 0);
   return `${ek(v.name, "\u0131")} yaralad\u0131n\u0131z.`;
 }
 function murder(w, a, v) {
@@ -3685,7 +3719,7 @@ function murder(w, a, v) {
     v.health = 5;
     v.wounded = true;
     log(w, `${a.name}, ${ek(v.name, "\u0131")} \xF6ld\xFCrmeye kalkt\u0131; a\u011F\u0131r yaral\u0131 kurtuldu!`, v.id);
-    arrest(w, a, "cinayet", v.id, 0);
+    crimeSeen(w, a, v, "cinayet", 0);
     return `${v.name} a\u011F\u0131r yaral\u0131 kurtuldu.`;
   }
   const co = makeCorpse(w, v, a, w.serverNow ?? w.lastTickAt);

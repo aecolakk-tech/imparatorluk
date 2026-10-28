@@ -11,7 +11,7 @@ import { findPerson } from './world';
 import { log, personal } from './log';
 import { chance, clamp, nextId, pick, rand } from './rng';
 import { placeOf, placePeople, ESCORT_MS } from './place';
-import { arrest, decideBribe, bribeAcceptChance } from './life';
+import { arrest, decideBribe, bribeAcceptChance, WITNESS_R, processReports } from './life';
 import { verdict } from './tick';
 import { CRIME_LABEL, fullAI } from './ai';
 import { addressOf, opinion } from './chat';
@@ -27,7 +27,7 @@ export const CUSTODY_MS = 60_000; // a caught player waits 1 real minute in cust
 /** A murder: the victim falls where he stood; who was close enough saw it. */
 export function makeCorpse(w: World, v: Person, killer: Person | null, now: number): Corpse {
   const q = placeOf(w, v.id, now); const x = q?.x ?? 32, y = q?.y ?? 28;
-  const witnesses = placePeople(w, now).filter((o) => o.visible && o.p.id !== v.id && o.p.id !== killer?.id && Math.hypot(o.x - x, o.y - y) < 7).map((o) => o.p.id).slice(0, 6);
+  const witnesses = placePeople(w, now).filter((o) => o.visible && o.p.id !== v.id && o.p.id !== killer?.id && Math.hypot(o.x - x, o.y - y) <= WITNESS_R).map((o) => o.p.id).slice(0, 6);
   const co: Corpse = { id: nextId(w, 'C'), personId: v.id, name: v.name, look: { hairColor: v.hairColor, skin: v.skin, shirt: v.shirt, female: v.female, prof: v.prof }, x, y, at: now, killerId: killer?.id ?? null, witnesses, stage: 'yerde' };
   w.corpses = [...(w.corpses ?? []), co].slice(-12);
   return co;
@@ -58,7 +58,7 @@ function investigate(w: World, co: Corpse, now: number): void {
 
 /** Called on every heartbeat/action with the real time. Idempotent. */
 export function realtime(w: World, now: number): void {
-  runTasks(w, now);
+  runTasks(w, now); processReports(w, now);
   // v1.7: a caught PLAYER goes arrest → custody (1 min bribe window) → savcı → live hearing; never straight to the zindan
   for (const a of w.arrests) {
     if (a.status !== 'bekliyor') continue; const cr = findPerson(w, a.criminalId); if (!cr?.playerId || cr.npc) continue;

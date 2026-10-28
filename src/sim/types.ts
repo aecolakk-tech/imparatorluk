@@ -208,7 +208,7 @@ export interface World {
   arrests: Arrest[];
   chatOut: NpcMsg[];
   talks: Talk[];
-  corpses?: Corpse[]; escorts?: Escort[];
+  corpses?: Corpse[]; crimeReports?: { criminalId: string; victimId: string; crime: CrimeKind; amount: number; at: number }[]; escorts?: Escort[];
   llm?: { day: string; n: number; talkAt: number; speechAt?: number };
   offers: Offer[];
   rumors: { day: number; text: string; about: string }[];
