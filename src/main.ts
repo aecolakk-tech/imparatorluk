@@ -1,3 +1,4 @@
+import { ek, numA } from './sim/tr';
 import './ui/style.css';
 import type { Action, Person, Profession, World } from './sim/types';
 import { GOODS } from './sim/types';
@@ -7,6 +8,7 @@ import { makeBackend } from './backend';
 import type { Backend } from './backend/api';
 import { MOCK_FOUNDER_EMAIL } from './backend/mock';
 import { buildStatic, drawFrame, hitTest, placePeople, T, tapFx, type Camera, type Placed } from './ui/map';
+import type { PlacedAnimal } from './ui/animals';
 import { bar, fmt, h, select } from './ui/dom';
 import { ic, CREDITS, iconify, installIconify } from './ui/icons';
 import { electionCard, avatar, buildingPanel, familyPanel, isyanBar, personCard, type Ctx } from './ui/panels';
@@ -18,7 +20,7 @@ import { makeSprite } from './ui/sprites';
 import { GOALS } from './sim/goals';
 import { season, SEASON_LABEL, ANIMALS, ANIMAL_LABEL, ANIMAL_PRICE, ANIMAL_FEED, FARM_PRICE, BARN, RANKS_N, RANK_INFO, FIEFS, ORG_LABEL, ORG_GOAL, orgGoalProgress, ROLE_LABEL, type OrgRole, type OrgKind, type Rank } from './sim/realm';
 import type { GoalId } from './sim/types';
-import { ambience, installClickSounds, isMuted, setMuted, sfx, musicOn, setMusic } from './ui/sound';
+import { ambience, installClickSounds, isMuted, setMuted, sfx, musicOn, setMusic, setMusicMood, musicMood } from './ui/sound';
 import { needTarget, myPos } from './sim/v16';
 import { findPath, WALK_SPEED, walkEnd, doorSpot, distToBuilding, REACH, PERSON_REACH, type Pt } from './sim/move';
 import { electionDates, electionPhase } from './sim/tick';
@@ -108,10 +110,11 @@ let pending: { a: Action; label: string; since: number; retarget: number } | nul
 let walkTarget: Pt | null = null;
 let lowGfx = localStorage.getItem('imp-lowgfx') === '1';
 let localWalk: { walk: NonNullable<Person['walk']>; id: string } | null = null; // client-side prediction wins over older server copies
-let followCam = true; let lastMoveSent = 0; let moveTimer: ReturnType<typeof setTimeout> | null = null; let pendingOpen: string | null = null; let openTries = 0;
+let followCam = true; let lastMoveSent = 0; let moveTimer: ReturnType<typeof setTimeout> | null = null; let moveTo: Pt | null = null; let pendingOpen: string | null = null; let openTries = 0;
 function atSaray(): boolean { const w = world; const m = me(); const b = w?.buildings.find((x) => x.id === 'saray'); return !!(w && m && b && w.kayzerId === m.id && distToBuilding(b, myPos(w, m, gameNow())) <= REACH + 0.6); }
 async function send(a: Action): Promise<void> {
   const before = me()?.money ?? 0;
+  if (moveTimer && a.t !== 'move' && moveTo) { clearTimeout(moveTimer); moveTimer = null; lastMoveSent = Date.now(); await be.act({ t: 'move', x: moveTo.x, y: moveTo.y }); } // v1.9.3: a throttled move must not land AFTER the action (it pulled you out of the house)
   const r = await be.act(a);
   if (r.msg) toast(r.msg);
   if (r.ok) { await tick(); const d = Math.round(((me()?.money ?? 0) - before) * 10) / 10; if (Math.abs(d) >= 0.5) floatText(`${d > 0 ? '+' : ''}${d} D`, `coin${d < 0 ? ' neg' : ''}`); else floatText('✓'); }
@@ -135,6 +138,7 @@ function walkTo(to: Pt): void {
   const pl = Object.values(w.players).find((x) => x.personId === m.id); if (pl) pl.lastSeen = Date.now();
   walkTarget = m.walk.path[m.walk.path.length - 1] ?? to;
   // throttle server syncs: at most one move per 400 ms, the last target wins
+  moveTo = to;
   const sendMove = (): void => { lastMoveSent = Date.now(); moveTimer = null; void be.act({ t: 'move', x: to.x, y: to.y }); };
   if (moveTimer) clearTimeout(moveTimer);
   const wait = 400 - (Date.now() - lastMoveSent); if (wait <= 0) sendMove(); else moveTimer = setTimeout(sendMove, wait);
@@ -219,7 +223,7 @@ function needAlerts(m: ReturnType<typeof me>): void {
     if (left > 25) alarmArmed[key] = true; // re-arm once the bar is refilled
     if (left <= 15 && alarmArmed[key] && performance.now() - alarmAt[key]! > 90_000) {
       alarmArmed[key] = false; alarmAt[key] = performance.now(); flashKey = key; flashUntil = performance.now() + 4000;
-      const msg = key === 'hunger' ? `Açlığınız kritik! Tokluk ${Math.round(left)}’e düştü – bir şeyler yiyin.` : `Susuzluğunuz kritik! Su ${Math.round(left)}’e düştü – su için.`;
+      const msg = key === 'hunger' ? `Açlığınız kritik! Tokluk ${numA(left)} düştü – bir şeyler yiyin.` : `Susuzluğunuz kritik! Su ${numA(left)} düştü – su için.`;
       alertPop(key === 'hunger' ? 'bread' : 'water', msg, key);
       try { navigator.vibrate?.([180, 90, 180]); } catch { /* not supported */ }
       sfx('error'); setTimeout(renderHud, 4100);
@@ -257,7 +261,7 @@ function openMenu(sec: Section): void {
     let body: HTMLElement;
     switch (section) {
       case 'yap': { body = quickPanel(ctx()); const mm = me(); if (mm && (mm.inv.sut > 0 || mm.inv.yumurta > 0)) body.append(h('div', { class: 'row' }, mm.inv.sut > 0 ? h('button', { onclick: () => void send({ t: 'drinkMilk' }) }, ic('milk'), ` Süt iç (${mm.inv.sut})`) : '', mm.inv.yumurta > 0 ? h('button', { onclick: () => void send({ t: 'eatEgg' }) }, ic('egg'), ` Yumurta ye (${mm.inv.yumurta})`) : '')); if (mm && mm.home && mm.home.startsWith('ev')) body.append(h('div', { class: 'row' }, h('button', { onclick: () => void doAct({ t: 'goHome', sleep: true }) }, ic('moon'), ' Eve git, uyu'))); else if (mm && !mm.home) body.append(h('div', { class: 'card muted' }, 'Eviniz yok. Boş yeri olan bir eve dokunun: yer satın alın ya da kiralayın.'));
-        if ((mm?.animals?.at ?? 0) > 0) body.append(h('div', { class: 'row' }, h('button', { onclick: () => void send({ t: 'ride', on: !mm!.riding }) }, ic('horse'), mm!.riding ? ' Attan in' : ' Ata bin'))); break; }
+        if ((mm?.animals?.at ?? 0) > 0) body.append(mm!.riding ? h('div', { class: 'row' }, h('button', { onclick: () => void send({ t: 'ride', on: false }) }, ic('horse'), ' Attan in')) : h('div', { class: 'muted' }, 'Ata binmek için haritada atınıza (üstünde mavi işaret) dokunun.')); break; }
       case 'ben': body = m ? personCard(ctx(), m) : h('div', {}, '—'); break;
       case 'mesaj': body = chatBody(); break;
       case 'hedef': body = goalsBody(); break;
@@ -407,7 +411,7 @@ function chatBody(): HTMLElement {
   for (const m of shown.slice(-60)) { const npc = findPerson(w, m.fromPersonId); const mine = m.fromPersonId === meP?.id; list.append(h('div', { class: `msg${m.toPersonId ? ' dm' : ''}${mine ? ' mine' : ''}` }, h('b', { style: 'cursor:pointer', onclick: () => openPersonSheet(m.fromPersonId) }, m.fromName), npc && !npc.playerId ? h('span', { class: 'muted' }, ' (NPC)') : '', ': ', m.text)); }
   if (!shown.length) list.append(h('div', { class: 'muted' }, to ? `${to.name} ile henüz konuşmadınız. Bir şey yazın; kendi aklıyla cevap verir.` : 'Meydan sessiz.'));
   if (typing) list.append(h('div', { class: 'muted typing' }, `${to?.name ?? 'Biri'} yazıyor…`));
-  const inp = h('input', { maxlength: '280', placeholder: to ? `${to.name}'a yazın… (örn. merhaba, nasılsın?)` : 'Meydanda herkese duyurun…', style: 'flex:1' });
+  const inp = h('input', { maxlength: '280', placeholder: to ? `${ek(to.name, 'a')} yazın… (örn. merhaba, nasılsın?)` : 'Meydanda herkese duyurun…', style: 'flex:1' });
   const sendMsg = async (): Promise<void> => {
     const text = inp.value; if (!text.trim()) return; inp.value = ''; typing = !!dmTarget;
     msgs.push({ id: `local-${Date.now()}`, fromPersonId: meP?.id ?? '', fromName: meP?.name ?? '', toPersonId: dmTarget, text, at: Date.now() }); rerenderSheet(true);
@@ -468,7 +472,7 @@ function minZoom(): number { const tiles = innerWidth < 700 ? 16 : 30; return Ma
 function clampCam(): void {
   if (cam.z < minZoom()) cam.z = minZoom();
   const vw = canvas.width / (cam.z * T), vh = canvas.height / (cam.z * T);
-  const top = ((hudEl?.offsetHeight ?? 48) * (lowGfx ? 1 : window.devicePixelRatio || 1)) / (cam.z * T) + 2.2; // room above the top row so the info bar never hides buildings
+  const top = ((hudEl?.offsetHeight ?? 48) * (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1))) / (cam.z * T) + 2.2; // room above the top row so the info bar never hides buildings
   cam.x = Math.max(-2, Math.min(MAP_W - vw + 2, cam.x)); cam.y = Math.max(-top, Math.min(MAP_H - vh + 2, cam.y));
 }
 function zoomAt(sx: number, sy: number, nz: number): void {
@@ -477,7 +481,7 @@ function zoomAt(sx: number, sy: number, nz: number): void {
   cam.z = nz; cam.x = wx - sx / (nz * T); cam.y = wy - sy / (nz * T); clampCam();
 }
 function setupInput(): void {
-  const dpr = (): number => (lowGfx ? 1 : window.devicePixelRatio || 1);
+  const dpr = (): number => (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1)); // v1.9.3: cap at 2× – 3× phones pushed 2.25× the pixels for no visible gain
   canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pointers.size === 1) dragStart = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y, moved: false }; else { const [a, b] = [...pointers.values()]; pinch = { d: Math.hypot(a!.x - b!.x, a!.y - b!.y), z: cam.z }; } });
   canvas.addEventListener('pointermove', (e) => {
     if (!pointers.has(e.pointerId)) return; pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -489,12 +493,13 @@ function setupInput(): void {
     if (pointers.size < 2) pinch = null;
     if (pointers.size === 0 && dragStart) {
       if (!dragStart.moved && world) {
-        const r = canvas.getBoundingClientRect(); const hit = hitTest(world, placed, cam, (e.clientX - r.left) * dpr(), (e.clientY - r.top) * dpr());
+        const r = canvas.getBoundingClientRect(); const hit = hitTest(world, placed, cam, (e.clientX - r.left) * dpr(), (e.clientY - r.top) * dpr(), me()?.id ?? null);
         const tx = (e.clientX - r.left) * dpr() / (cam.z * T) + cam.x, ty = (e.clientY - r.top) * dpr() / (cam.z * T) + cam.y;
-        if (hit.corpse) openCorpse(hit.corpse.id);
+        if (hit.animal) tapAnimal(hit.animal);
+        else if (hit.corpse) openCorpse(hit.corpse.id);
         else if (hit.sign) openElectionSign();
         else if (hit.person && hit.person.id !== me()?.id) { const mq = placed.find((q) => q.p.id === me()?.id); const tq = placed.find((q) => q.p.id === hit.person!.id); if (!mq || !tq || Math.hypot(tq.x - mq.x, tq.y - mq.y) <= PERSON_REACH + 0.4) openPersonSheet(hit.person.id); else { closeSheet(); pending = null; openTries = 0; pendingOpen = hit.person.id; walkTo({ x: tq.x + 0.7, y: tq.y }); toast(`🚶 ${hit.person.name} yanına yürüyorsunuz…`); } }
-        else if (hit.person) openMenu('ben');
+        else if (hit.person) { const mm = me(); if (mm?.riding && (mm.animals?.at ?? 0) > 0) { sfx('step'); void send({ t: 'ride', on: false }); } else openMenu('ben'); }
         else if (hit.building) { const b = hit.building; selected = null; pending = null; walkTo(doorSpot(b)); sfx('door'); openSheet(() => bPanel(b)); }
         else { pending = null; pendingOpen = null; closeSheet(); walkTo({ x: tx, y: ty }); sfx('step'); }
       }
@@ -507,11 +512,30 @@ function setupInput(): void {
   addEventListener('resize', resize); resize();
 }
 
+let insideEl: HTMLElement | null = null;
+/** v1.9.3: while you are inside your house the street dims and a banner offers 'Evden çık'. */
+function insideBanner(): void {
+  const m = me(); const inside = !!m && (m.homeUntil ?? 0) > gameNow();
+  document.body.classList.toggle('inside-home', inside);
+  if (!inside) { insideEl?.remove(); insideEl = null; return; }
+  const b = world?.buildings.find((x) => x.id === m!.home); const txt = `${m!.sleeping ? 'Evinizde uyuyorsunuz' : 'Evinizdesiniz'} (${b?.name ?? 'ev'}) · burada kimse size dokunamaz`;
+  if (insideEl && insideEl.dataset.t === txt) return; insideEl?.remove();
+  insideEl = h('div', { class: 'inside-ov' }, ic(m!.sleeping ? 'moon' : 'house'), h('span', {}, txt), h('button', { class: 'primary', onclick: () => void send({ t: 'leaveHome' }) }, 'Evden çık')); insideEl.dataset.t = txt; app.append(insideEl);
+}
+/** v1.9.3: tap your own animal – a horse: mount it; a cow/sheep/chicken: offer to slaughter it for meat. */
+function tapAnimal(a: PlacedAnimal): void {
+  const m = me(); if (!m) return; sfx('step');
+  if (a.kind === 'at') { if (m.riding) { void send({ t: 'ride', on: false }); return; } toast('Atınıza biniyorsunuz…'); void doAct({ t: 'ride', on: true }); return; }
+  const lbl: Record<string, string> = { inek: 'İnek', koyun: 'Koyun', tavuk: 'Tavuk' }; const meat: Record<string, string> = { inek: 'bol et', koyun: 'et ve 2 yün', tavuk: 'biraz et' };
+  openSheet(() => h('div', { class: 'stack' }, h('h3', {}, ic(a.kind === 'inek' ? 'cow' : a.kind === 'koyun' ? 'sheep' : 'chicken'), ` ${lbl[a.kind]} (sizin)`), h('div', { class: 'muted' }, `Keserseniz ${meat[a.kind]} alırsınız; hayvan gider.`),
+    h('div', { class: 'row' }, h('button', { class: 'danger', onclick: () => { if (confirm(`${lbl[a.kind]} kesilsin mi?`)) { closeSheet(); void doAct({ t: 'slaughter', animal: a.kind }); } } }, 'Kes'), h('button', { onclick: () => closeSheet() }, 'Vazgeç'))));
+}
 function darkness(w: World): number {
   const t = w.hour; if (t >= 21 || t < 5) return 0.45; if (t >= 19) return (t - 19) / 2 * 0.45; if (t < 7) return (7 - t) / 2 * 0.45; return 0;
 }
 
-let lastHud = 0; let lastDraw = 0; let lastFrame = performance.now();
+const profAcc = { n: 0, sum: 0, max: 0 };
+let lastHud = 0; let lastFrame = performance.now();
 /** v1.9 NPC smoothing: the schedule/path target is computed from (server) time every frame; what we DRAW follows it
  * with a time-based critically-damped chase, so snapshot corrections, schedule switches and overrides never snap. */
 const shown = new Map<string, { x: number; y: number; vx: number; vy: number; dir: number; t: number }>();
@@ -524,14 +548,17 @@ function smoothPeople(list: Placed[], mine: string | null): Placed[] {
     const dt = Math.min(0.1, (t - s.t) / 1000); s.t = t;
     const w0 = 7; // spring stiffness (critically damped)
     const ax = w0 * w0 * (q.x - s.x) - 2 * w0 * s.vx, ay = w0 * w0 * (q.y - s.y) - 2 * w0 * s.vy;
-    s.vx += ax * dt; s.vy += ay * dt; s.x += s.vx * dt; s.y += s.vy * dt;
+    s.vx += ax * dt; s.vy += ay * dt;
+    const vmax = 5.5, v = Math.hypot(s.vx, s.vy); if (v > vmax) { s.vx *= vmax / v; s.vy *= vmax / v; } // v1.9.3: a schedule switch becomes a brisk walk, never a hop
+    s.x += s.vx * dt; s.y += s.vy * dt;
     const sp = Math.hypot(s.vx, s.vy); if (sp > 0.25 && Math.abs(s.vx) > 0.15) s.dir = s.vx > 0 ? 1 : -1;
     q.x = s.x; q.y = s.y; q.moving = q.moving || sp > 0.4; if (sp > 0.25) q.dir = s.dir;
   }
   return list;
 }
 function frame(): void {
-  const pf = performance.now(); if (lowGfx && pf - lastDraw < 32) { requestAnimationFrame(frame); return; } lastDraw = pf;
+  // v1.9.3: no 30 fps cap in low-graphics mode (it halved smoothness); low mode = 1× pixels
+  const prof0 = performance.now();
   if (world && stat) {
     const now = gameNow();
     const meP0 = me(); placed = smoothPeople(placePeople(world, now), meP0?.id ?? null);
@@ -542,8 +569,9 @@ function frame(): void {
     drawFrame(ctx2d, stat, world, cam, placed, now, selected, me()?.id ?? null, lowGfx ? 0 : darkness(world), walkTarget);
     pendingStep();
     if (walkTarget) { const m = me(); if (m?.walk && now > walkEnd(m.walk) + 300 && !pending) walkTarget = null; }
-    if (now - lastHud > 1000) { lastHud = now; renderHud(); soundscape(); }
+    if (now - lastHud > 1000) { lastHud = now; renderHud(); soundscape(); insideBanner(); }
   }
+  const pc = performance.now() - prof0; profAcc.n += 1; profAcc.sum += pc; if (pc > profAcc.max) profAcc.max = pc;
   requestAnimationFrame(frame);
 }
 
@@ -551,7 +579,7 @@ let ticking = false;
 async function tick(): Promise<void> {
   if (ticking || !be.session()) return; ticking = true;
   try {
-    const r = await be.heartbeat();
+    const r = await be.heartbeat(); ((window as unknown as { __hb?: number[] }).__hb ??= []).push(Math.round(performance.now()));
     const first = !world; world = r.world;
     if (world.serverNow) { const ns = world.serverNow - Date.now(); skew = first || Math.abs(ns - skew) > 3000 ? ns : skew + (ns - skew) * 0.15; } // smooth clock: no jumps
     const mm = me(); if (localWalk && mm && mm.id === localWalk.id && gameNow() < walkEnd(localWalk.walk) + 15_000) mm.walk = localWalk.walk;
@@ -566,7 +594,7 @@ async function start(): Promise<void> {
   setupInput();
   await tick();
   if (!localStorage.getItem('imp-guide-done')) guide(0);
-  setInterval(() => void tick(), be.mode === 'mock' ? 2500 : 6000);
+  setInterval(() => void tick(), be.mode === 'mock' && !location.search.includes('poll6') ? 2500 : 6000);
   setInterval(() => { void be.messages().then((m) => { msgs = m; renderDock(); }); }, 5000);
   setInterval(() => rerenderSheet(), 4000);
   requestAnimationFrame(frame);
@@ -631,6 +659,7 @@ function events(first: boolean): void {
 }
 function soundscape(): void {
   const w = world; if (!w) return;
+  setMusicMood(w.hour >= 19 || w.hour < 6 ? 'gece' : 'gun');
   if (w.isyan) ambience('isyan'); else if ((w.festivalUntil ?? 0) >= w.day && w.hour >= 12 && w.hour < 22) ambience('festival');
   else if (w.hour >= 5 && w.hour < 10) ambience('sabah'); else if (w.hour >= 19 && w.hour < 23) ambience('aksam'); else if (w.hour >= 23 || w.hour < 5) ambience('gece'); else ambience('gun');
 }
@@ -666,7 +695,7 @@ void ({} as Corpse);
 installIconify();
 void be.restore().then((s) => (s ? start() : loginScreen()));
 // expose for headless smoke tests
-(window as unknown as { __imp: () => unknown }).__imp = () => ({ mute: setMuted, look: (x: number, y: number) => { followCam = false; cam.x = x - canvas.width / (cam.z * T) / 2; cam.y = y - canvas.height / (cam.z * T) / 2; }, act: doAct, openB: (id: string) => { const b = world!.buildings.find((x) => x.id === id); if (b) openSheet(() => bPanel(b)); }, menu: openMenu, admin: openAdmin, world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (lowGfx ? 1 : window.devicePixelRatio || 1), r.top + (y - cam.y) * cam.z * T / (lowGfx ? 1 : window.devicePixelRatio || 1)]; } });
+(window as unknown as { __imp: () => unknown }).__imp = () => ({ profile: () => ({ frameCpuAvgMs: +(profAcc.sum / Math.max(1, profAcc.n)).toFixed(2), frameCpuMaxMs: +profAcc.max.toFixed(1) }), mood: musicMood, mute: setMuted, look: (x: number, y: number) => { followCam = false; cam.x = x - canvas.width / (cam.z * T) / 2; cam.y = y - canvas.height / (cam.z * T) / 2; }, act: doAct, openB: (id: string) => { const b = world!.buildings.find((x) => x.id === id); if (b) openSheet(() => bPanel(b)); }, menu: openMenu, admin: openAdmin, world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1)), r.top + (y - cam.y) * cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1))]; } });
 
 // ---- v1.9 landscape: rotate overlay (phones in portrait) + low-graphics class ----
 document.body.classList.toggle('low', lowGfx);

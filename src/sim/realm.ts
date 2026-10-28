@@ -1,3 +1,4 @@
+import { ek } from './tr';
 import { rehouse } from './housing';
 import { migrateMeclis16 } from './meclis';
 import { startIsyanHook } from './hooks';
@@ -150,14 +151,14 @@ export function grantTitle(w: World, k: Person, p: Person, rank: Rank, fief?: st
   const old = p.rank; p.rank = rank; p.fief = rank === 'Bey' ? (fief && FIEFS.includes(fief) ? fief : FIEFS.find((f) => !w.people.some((x) => x.fief === f)) ?? 'ciftlik') : null;
   p.favor = clamp((p.favor ?? 50) + 20); p.loyalty = clamp(p.loyalty + 15); relate(p, k, 20, `bana ${rank} unvanı verdi`);
   for (const r of w.people.filter((x) => x.rank && x.id !== p.id)) relate(r, p, -8, `${rank} oldu, gözdeleşti`);
-  const t = `👑 ${k.name}, ${p.name}'a ${old ? `${old} iken ` : ''}${rank} unvanı verdi${p.fief ? ` (tımar: ${w.buildings.find((b) => b.id === p.fief)?.name})` : ''}.`;
+  const t = `👑 ${k.name}, ${ek(p.name, 'a')} ${old ? `${old} iken ` : ''}${rank} unvanı verdi${p.fief ? ` (tımar: ${w.buildings.find((b) => b.id === p.fief)?.name})` : ''}.`;
   log(w, t, p.id); chronicle(w, 'unvan', t); return t;
 }
 export function stripTitle(w: World, k: Person, p: Person): string {
   if (k.id !== w.kayzerId) return 'Sadece Kayzer.'; if (!p.rank) return 'Unvanı yok.';
   const r = p.rank; p.rank = null; p.fief = null; p.favor = clamp((p.favor ?? 50) - 35); p.loyalty = clamp(p.loyalty - 25); relate(p, k, -40, `${r} unvanımı aldı`);
   if (p.ambition > 60 && chance(w, 0.5)) p.plotting = 'coup';
-  const t = `⚔ ${p.name}'ın ${r} unvanı geri alındı.`; log(w, t, p.id); chronicle(w, 'unvan', t); return t;
+  const t = `⚔ ${ek(p.name, 'ın')} ${r} unvanı geri alındı.`; log(w, t, p.id); chronicle(w, 'unvan', t); return t;
 }
 /** Daily: stipends, duties, favor and rivalry. */
 export function nobilityDay(w: World): void {
@@ -275,7 +276,7 @@ export function orgAct(w: World, by: Person, deed: OrgDeed): string {
     if (o.kind !== 'hirsiz') return 'Soygun hırsızlar loncasının işidir.';
     const v = [...w.people].filter((p) => p.money > 120 && !o.members.includes(p.id)).sort((a, b) => b.money - a.money)[0]; if (!v) return 'Soyacak zengin yok.';
     const amt = Math.round(Math.min(v.money * 0.15, 25 + helpers.length * 8)); transfer(w, v.id, by.id, amt, 'lonca soygunu'); o.funds = (o.funds ?? 0) + amt; o.suspicion = clamp(o.suspicion + 8);
-    rumor(w, `${v.name}'ın evi soyuldu! Gölgeler mi?`, v.id, 0);
+    rumor(w, `${ek(v.name, 'ın')} evi soyuldu! Gölgeler mi?`, v.id, 0);
     if (chance(w, 0.12 + o.suspicion / 300)) { const c = pick(w, helpers); if (c) arrest(w, c, 'hirsizlik', v.id, amt); return `Soygun yapıldı (${amt} Dinar) ama ${c?.name ?? 'biri'} yakalandı!`; }
     return `${v.name} soyuldu: ${amt} Dinar lonca kasasına.`;
   }
@@ -300,7 +301,7 @@ export function orgMeet(w: World, p: Person): string { const o = orgOf(w, p.id);
 export function assignSpy(w: World, k: Person, spy: Person, target: Person): string {
   if (k.id !== w.kayzerId) return 'Sadece Kayzer casus atar.'; if (spy.playerId && !spy.npc) return 'Oyunculara casusluk emri DM ile verilir.';
   if (!transfer(w, 'saray', spy.id, 15, 'casus ücreti')) return 'Hazine yetmiyor.';
-  (w.spies ??= []).push({ spyId: spy.id, targetId: target.id, until: w.day + 5 }); return `${spy.name}, 5 gün boyunca ${target.name}'ı gizlice izleyecek (15 Dinar).`;
+  (w.spies ??= []).push({ spyId: spy.id, targetId: target.id, until: w.day + 5 }); return `${spy.name}, 5 gün boyunca ${ek(target.name, 'ı')} gizlice izleyecek (15 Dinar).`;
 }
 export function issueWarrant(w: World, by: Person, target: Person): string {
   if (by.id !== w.kayzerId && by.prof !== 'hakim') return 'Arama emrini Kayzer ya da Kadı verir.';
@@ -311,10 +312,10 @@ export function searchHouse(w: World, by: Person, target: Person): string {
   if (!(w.warrants ?? []).includes(target.id)) return 'Arama emri (Kayzer ya da Kadı) olmadan ev aranamaz!';
   w.warrants = w.warrants!.filter((x) => x !== target.id);
   const o = orgOf(w, target.id); const pl = (w.plots ?? []).find((x) => x.by === target.id && !x.done);
-  if (!o && !pl) { relate(target, by, -15, 'evimi aradı, bir şey bulamadı'); return `${target.name}'ın evi arandı: hiçbir şey bulunamadı.`; }
+  if (!o && !pl) { relate(target, by, -15, 'evimi aradı, bir şey bulamadı'); return `${ek(target.name, 'ın')} evi arandı: hiçbir şey bulunamadı.`; }
   if (pl) { pl.exposed = true; arrest(w, target, pl.kind === 'darbe' ? 'isyan' : 'saldiri', pl.target, 0); }
-  if (o) { reveal(w, o, [target.id, ...(chance(w, 0.6) ? o.members.filter((x) => x !== target.id).slice(0, 2) : [])], `${target.name}'ın evinde mektuplar bulundu`); arrest(w, target, CRIME_OF[o.kind], null, 0); }
-  return `${target.name}'ın evinde ${o ? 'gizli örgüt mektupları' : ''}${o && pl ? ' ve ' : ''}${pl ? 'bir komplo planı' : ''} bulundu! Tutuklandı.`;
+  if (o) { reveal(w, o, [target.id, ...(chance(w, 0.6) ? o.members.filter((x) => x !== target.id).slice(0, 2) : [])], `${ek(target.name, 'ın')} evinde mektuplar bulundu`); arrest(w, target, CRIME_OF[o.kind], null, 0); }
+  return `${ek(target.name, 'ın')} evinde ${o ? 'gizli örgüt mektupları' : ''}${o && pl ? ' ve ' : ''}${pl ? 'bir komplo planı' : ''} bulundu! Tutuklandı.`;
 }
 export function raidOrg(w: World, k: Person, id: string): string {
   if (k.id !== w.kayzerId) return 'Sadece Kayzer baskın emreder.'; const o = (w.orgs ?? []).find((x) => x.id === id); if (!o?.known) return 'Bilinen bir örgüt değil.';
@@ -338,7 +339,7 @@ export function orgsDay(w: World): void {
     const rec = findPerson(w, pick(w, o.members) ?? ''); if (!rec || rec.playerId || !chance(w, 0.35 / (1 + o.members.length / 5))) continue;
     const cand = w.people.filter((p) => !p.playerId && !orgOf(w, p.id) && p.jailedDays === 0 && p.id !== w.kayzerId && !STATE.includes(p.prof) && (rec.relations[p.id] ?? 0) > 5);
     const t = [...cand].sort((a, b) => joinScore(w, b, o, rec) - joinScore(w, a, o, rec))[0];
-    if (t && joinScore(w, t, o, rec) >= 55) { orgJoin(w, t, o.id); const lp = findPerson(w, o.leaderId)?.playerId; if (lp) personal(w, lp, `🕯 ${rec.name}, ${t.name}'ı “${o.name}” cemiyetine kazandı.`); }
+    if (t && joinScore(w, t, o, rec) >= 55) { orgJoin(w, t, o.id); const lp = findPerson(w, o.leaderId)?.playerId; if (lp) personal(w, lp, `🕯 ${rec.name}, ${ek(t.name, 'ı')} “${o.name}” cemiyetine kazandı.`); }
   }
   for (const o of orgs) {
     o.members = o.members.filter((id) => findPerson(w, id)); if (!findPerson(w, o.leaderId)) o.leaderId = o.members[0] ?? '';
@@ -366,8 +367,8 @@ export function orgsDay(w: World): void {
     const spy = findPerson(w, s.spyId); const t = findPerson(w, s.targetId); if (!spy || !t || spy.jailedDays > 0) continue;
     const o = orgOf(w, t.id); const pl = (w.plots ?? []).find((x) => x.by === t.id && !x.done && !x.exposed);
     if (pl && chance(w, 0.55)) { pl.exposed = true; const kp = findPerson(w, w.kayzerId)?.playerId; const txt = `🕵 Casus ${spy.name}: ${t.name} bir ${pl.kind === 'zehir' ? 'zehirleme' : pl.kind === 'darbe' ? 'DARBE' : 'iftira'} planı yapıyor! (hedef: ${findPerson(w, pl.target)?.name ?? '?'})`; if (kp) personal(w, kp, txt); log(w, `🕵 Saray’da bir komplo açığa çıktı!`); chronicle(w, 'entrika', txt); }
-    if (o && chance(w, 0.45)) reveal(w, o, [t.id], `Casus ${spy.name} gece ${t.name}'ı izledi`);
-    if (chance(w, 0.08)) { relate(t, spy, -40, 'beni gizlice izliyordu'); s.until = w.day; log(w, `👀 ${t.name}, ${spy.name}'ın kendisini izlediğini fark etti!`, t.id); }
+    if (o && chance(w, 0.45)) reveal(w, o, [t.id], `Casus ${spy.name} gece ${ek(t.name, 'ı')} izledi`);
+    if (chance(w, 0.08)) { relate(t, spy, -40, 'beni gizlice izliyordu'); s.until = w.day; log(w, `👀 ${t.name}, ${ek(spy.name, 'ın')} kendisini izlediğini fark etti!`, t.id); }
   }
   w.spies = w.spies.filter((s) => s.until > w.day);
 }
@@ -403,6 +404,22 @@ export function placeHayvan(w: World): void {
     const [x, y] = spot ?? [70, 37];
     w.buildings.push({ id: 'hayvan', name: 'Hayvan Pazarı', kind: 'hayvan', x, y, w: 8, h: 5, door: { x: x + 4, y: y + 5 }, market: false });
   }
+}
+/** v1.9.3: the pen sat on the houses at y=40; it now fits the empty strip between the road (y=35) and the houses (y=40), gate on the road side. */
+export const PEN = { x: 70, y: 36, w: 8, h: 4 };
+export function fixPen(w: World): void {
+  const hv = w.buildings.find((b) => b.id === 'hayvan'); if (!hv) return;
+  if (hv.x === PEN.x && hv.y === PEN.y && hv.h === PEN.h) hv.door = { x: PEN.x + 4, y: PEN.y };
+  const clash = (x: number, y: number, ww: number, hh: number): boolean => w.buildings.some((o) => o !== hv && x < o.x + o.w && x + ww > o.x && y < o.y + o.h && y + hh > o.y);
+  if (!clash(hv.x, hv.y, hv.w, hv.h) && hv.y + hv.h + 1 <= 48) return;
+  if (!clash(PEN.x, PEN.y, PEN.w, PEN.h)) { Object.assign(hv, PEN); hv.door = { x: PEN.x + 4, y: PEN.y }; return; }
+  for (let y = 1; y < 44; y++) for (let x = 1; x < 92; x++) if (!clash(x, y, 8, 4) && ![13, 20, 29, 35, 44].some((r) => r >= y && r < y + 4) && ![6, 17, 29, 44, 56, 68, 80, 92].some((r) => r >= x && r < x + 8)) { Object.assign(hv, { x, y, w: 8, h: 4 }); hv.door = { x: x + 4, y }; return; }
+}
+export function migrate10(w: World): World {
+  w = migrate9(w); if ((w.schema ?? 1) >= 10) return w;
+  fixPen(w); for (const p of w.people) if (p.prof === 'hayvanci' && /^(Hamal|Çiftçi) /.test(p.name)) p.name = p.name.replace(/^\S+ /, 'Hayvancı '); // the seller kept his old job title
+  for (const p of w.people) p.name = p.name.replace(/^(Kayzer )(Kayzer )+/, 'Kayzer '); // "Kayzer Kayzer Enes"
+  w.schema = 10; return w;
 }
 export function migrate9(w: World): World {
   w = migrate8(w); if ((w.schema ?? 1) >= 9) return w;

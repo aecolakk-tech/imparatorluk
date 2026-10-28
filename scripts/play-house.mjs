@@ -1,0 +1,13 @@
+import { boot, sleep } from './play-lib.mjs';
+const T = await boot('Ev Test'); const log = (...a) => console.log(...a);
+let m = await T.me(); log('home', m.home, 'money', m.money);
+await T.W("const p=w.people.find(q=>q.id===arg); p.money=2000;", m.id); await sleep(6500);
+const hid = await T.I(() => { const w = window.__imp().world; return w.buildings.filter((b) => b.kind === 'ev').find((b) => w.people.filter((p) => p.home === b.id).length < 5).id; });
+await T.I((id) => window.__imp().openB(id), hid); await sleep(500); log('panel1', (await T.sheet()).replace(/\s+/g, ' ').slice(0, 200));
+await T.click('Kirala'); await sleep(25000); m = await T.me(); log('after rent home=', m.home, 'toasts', await T.toasts());
+await T.I((id) => window.__imp().openB(id), hid); await sleep(500); log('panel2', (await T.sheet()).replace(/\s+/g, ' ').slice(0, 250));
+await T.click('Eve gir'); await sleep(4000); m = await T.me(); log('homeUntil-now', (m.homeUntil ?? 0) - Date.now(), 'toasts', await T.toasts());
+log('visible', await T.I((id) => window.__imp().placed.find((q) => q[0] === id)?.[3], m.id));
+await sleep(7000); m = await T.me(); log('still inside after heartbeat', (m.homeUntil ?? 0) > Date.now());
+log('panel3', (await T.sheet()).replace(/\s+/g, ' ').slice(0, 250));
+log('errors', T.errors.slice(0, 5)); await T.b.close();

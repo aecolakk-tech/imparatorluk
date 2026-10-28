@@ -1,3 +1,4 @@
+import { ek } from './tr';
 import { enactLaw, lawTitle, validateLaw, type LawSpec } from './laws';
 /**
  * Meclis: seats by district and profession, factions, bills with debate → vote → (Kayzer sanction) → effect.
@@ -209,7 +210,7 @@ export function enact(w: World, b: Bill): void {
     case 'af': for (const p of w.people) p.jailedDays = 0; for (const c of w.cases) if (c.stage !== 'kapandi') { c.stage = 'kapandi'; c.verdict = 'af'; } break;
     case 'gensoru': { const t = findPerson(w, b.target); if (t) { const old = t.rank ? `${t.rank} unvanı ve ${PROF_LABEL[t.prof]}` : PROF_LABEL[t.prof]; t.rank = null; t.fief = null; t.prof = STATE_PROFS.includes(t.prof) ? 'hamal' : t.prof; t.work = WORKPLACE.hamal; t.mood = clamp(t.mood - 20); mlog(w, `Gensoru kabul edildi: ${t.name} ${old} görevinden alındı.`, t.id); } break; }
     case 'sorusturma': investigate(w, b.target); break;
-    case 'dokunulmazlik': { const t = findPerson(w, b.target); if (t) { t.immune = false; mlog(w, `${t.name}'ın dokunulmazlığı kaldırıldı.`, t.id); } break; }
+    case 'dokunulmazlik': { const t = findPerson(w, b.target); if (t) { t.immune = false; mlog(w, `${ek(t.name, 'ın')} dokunulmazlığı kaldırıldı.`, t.id); } break; }
     case 'genelge': { for (const x of w.people) x.mood = clamp(x.mood + 1); log(w, `📜 Meclis genelgesi yayımlandı: “${b.title}”.`); break; }
     case 'azil': { const t = findPerson(w, w.kayzerId); w.kayzerId = null; w.election.baskanNextDay = w.day + 1; mlog(w, `Başkan ${t?.name ?? ''} azledildi! Yarın yeni Başkanlık seçimi var.`); break; }
   }

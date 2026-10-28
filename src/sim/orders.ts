@@ -1,3 +1,4 @@
+import { ek } from './tr';
 import { orgInvite } from './realm';
 import { openCase } from './ai';
 /**
@@ -148,7 +149,7 @@ export function orderReply(w: World, npc: Person, from: Person, o: Order, d: Dec
     const st = STATE_FORCES.includes(npc.prof) && isRuler(w, from);
     const lead = st ? `Emredersiniz ${a}!` : ['Peki ' + a + ',', 'Olur ' + a + ',', 'Tamam ' + a + ',', 'Baş üstüne ' + a + ','][npc.id.length % 4];
     const what: Record<OrderType, string> = {
-      join: 'cemiyetinize katılıyorum.', go: `hemen ${w.buildings.find((b) => b.id === o.place)?.name ?? (t?.id === from.id ? 'yanınıza' : `${tn} yanına`)} geliyorum.`, follow: `${t?.id === from.id ? 'peşinizden' : tn + ' peşinden'} ayrılmam.`,
+      join: 'cemiyetinize katılıyorum.', go: `hemen ${((bn) => (bn ? ek(bn, 'a') : null))(w.buildings.find((b) => b.id === o.place)?.name) ?? (t?.id === from.id ? 'yanınıza' : `${tn} yanına`)} geliyorum.`, follow: `${t?.id === from.id ? 'peşinizden' : tn + ' peşinden'} ayrılmam.`,
       attack: `${tn}'a gereken dersi vereceğim.`, kill: `${tn}… iş bu gün bitecek. Kimse bilmeyecek.`, arrest: `${tn} şimdi zindanı boylar.`,
       steal: `${tn}'ın kesesi hafifleyecek, kimseye çaktırmam.`, give: `${o.amount} ${it} getiriyorum.`, sell: `${o.amount} ${it}, ${Math.round(marketPrice(w, o.item!) * (o.amount ?? 1))} Dinar. Geliyorum.`,
       buy: `pazardan ${o.amount} ${it} alıp getiririm.`, work: `işbaşı yapıyorum.`, vote: `oyum ${tn}'a.`, gossip: `${tn} hakkında söyleneceği herkes duyacak.`,
@@ -254,15 +255,15 @@ function execute(w: World, npc: Person, now: number): void {
     case 'leave': return finish(w, npc, true, 'Evime geldim.', now);
     case 'kill': { if (!t) return finish(w, npc, false, 'Hedef ortada yok.', now); npc.orderedBy = tk.byId ? { by: tk.byId, crime: 'cinayet', victimId: t.id, day: w.day } : undefined; const wasCruel = cruel(w, tk); const r = murder(w, npc, t); npc.lastAction = 'emirle cinayet'; const co = (w.corpses ?? []).find((c) => c.personId === t.id); if (wasCruel) stateCrimeSeen(w, npc, tk, t.name, co?.witnesses.length ?? 1); return finish(w, npc, !w.people.includes(t), r, now); }
     case 'attack': { if (!t) return finish(w, npc, false, 'Hedef ortada yok.', now); npc.orderedBy = { by: tk.byId, crime: 'saldiri', victimId: t.id, day: w.day }; const wc = cruel(w, tk); const res = assault(w, npc, t); if (wc) stateCrimeSeen(w, npc, tk, t.name, 1 + (t.id.length % 3)); return finish(w, npc, true, res, now); }
-    case 'steal': { if (!t) return finish(w, npc, false, 'Hedef ortada yok.', now); npc.orderedBy = { by: tk.byId, crime: 'hirsizlik', victimId: t.id, day: w.day }; const a = steal(w, npc, t); if (a > 0 && by && by.id !== npc.id) transfer(w, npc.id, by.id, Math.floor(a / 2), 'çalıntı payı'); return finish(w, npc, a > 0, a > 0 ? `${t.name}'dan ${a} Dinar çaldım; yarısı sizin.` : `${t.name}'ın kesesi boştu.`, now); }
+    case 'steal': { if (!t) return finish(w, npc, false, 'Hedef ortada yok.', now); npc.orderedBy = { by: tk.byId, crime: 'hirsizlik', victimId: t.id, day: w.day }; const a = steal(w, npc, t); if (a > 0 && by && by.id !== npc.id) transfer(w, npc.id, by.id, Math.floor(a / 2), 'çalıntı payı'); return finish(w, npc, a > 0, a > 0 ? `${ek(t.name, 'dan')} ${a} Dinar çaldım; yarısı sizin.` : `${ek(t.name, 'ın')} kesesi boştu.`, now); }
     case 'arrest': { if (!t) return finish(w, npc, false, 'Hedef ortada yok.', now); const open = w.cases.find((c) => c.accusedId === t.id && c.stage !== 'kapandi'); const r = arrest(w, t, open?.crime ?? 'isyan', null, 0, npc); return finish(w, npc, !!r, r ? `${t.name} tutuklandı.` : 'Tutuklayamadım.', now); }
-    case 'give': { if (!t || !tk.item || npc.inv[tk.item] < n) return finish(w, npc, false, `Elimde ${it} kalmadı.`, now); npc.inv[tk.item] -= n; t.inv[tk.item] += n; relate(t, npc, 4, 'bana hediye getirdi'); return finish(w, npc, true, `${t.name}'a ${n} ${it} verdim.`, now); }
+    case 'give': { if (!t || !tk.item || npc.inv[tk.item] < n) return finish(w, npc, false, `Elimde ${it} kalmadı.`, now); npc.inv[tk.item] -= n; t.inv[tk.item] += n; relate(t, npc, 4, 'bana hediye getirdi'); return finish(w, npc, true, `${ek(t.name, 'a')} ${n} ${it} verdim.`, now); }
     case 'sell': { if (!t || !tk.item || npc.inv[tk.item] < n) return finish(w, npc, false, `${it} kalmadı.`, now); const price = Math.round(marketPrice(w, tk.item) * n * 100) / 100; if (!transfer(w, t.id, npc.id, price, `${it} satışı`)) return finish(w, npc, false, 'Paranız yetmedi.', now); npc.inv[tk.item] -= n; t.inv[tk.item] += n; npc.incomeToday += price; return finish(w, npc, true, `${n} ${it} teslim; ${price} Dinar aldım.`, now); }
     case 'buy': { if (!tk.item) return finish(w, npc, false, 'Ne alacağımı bilmiyorum.', now); const price = marketPrice(w, tk.item) * n * 1.2; if (by && by.id !== npc.id) transfer(w, by.id, npc.id, Math.min(by.money, price), 'alışveriş parası'); const got = buy(w, npc.id, tk.item, n); if (got > 0 && by && by.id !== npc.id) { npc.inv[tk.item] -= got; by.inv[tk.item] += got; } return finish(w, npc, got > 0, got > 0 ? `${got} ${it} aldım, size teslim ettim.` : `Pazarda ${it} bulamadım.`, now); }
     case 'work': { produce(w, npc); npc.lastAction = 'emirle çalıştı'; return finish(w, npc, true, 'Çalıştım, mal pazarda.', now); }
-    case 'vote': { if (!t) return finish(w, npc, false, 'Aday yok.', now); const e = w.election; if (e.baskanCandidates.includes(t.id)) e.baskanVotes[npc.id] = t.id; else if (e.candidates.includes(t.id)) e.votes[npc.id] = t.id; else return finish(w, npc, false, `${t.name} aday değil.`, now); return finish(w, npc, true, `Oyumu ${t.name}'a verdim.`, now); }
+    case 'vote': { if (!t) return finish(w, npc, false, 'Aday yok.', now); const e = w.election; if (e.baskanCandidates.includes(t.id)) e.baskanVotes[npc.id] = t.id; else if (e.candidates.includes(t.id)) e.votes[npc.id] = t.id; else return finish(w, npc, false, `${t.name} aday değil.`, now); return finish(w, npc, true, `Oyumu ${ek(t.name, 'a')} verdim.`, now); }
     case 'gossip': { if (!t) return finish(w, npc, false, 'Kimin hakkında?', now); const line = tk.text && tk.text.length > 8 ? tk.text : `${t.name} hakkında kötü şeyler duydum…`; rumor(w, `${npc.name}: ${line}`, t.id, -8); w.chatOut.push({ fromPersonId: npc.id, fromName: npc.name, toPersonId: null, text: `🗣 ${t.name} diyorlar ki… ${line.replace(/^.*?(dedikodu|yay)\w*\s*/i, '')}`.slice(0, 200), at: now }); return finish(w, npc, true, 'Dedikoduyu Meydan’da yaydım.', now); }
-    case 'bribe': { if (!t) return finish(w, npc, false, 'Kime?', now); const amt = Math.min(npc.money, tk.pay ?? 0); if (amt <= 0 || !transfer(w, npc.id, t.id, amt, 'rüşvet')) return finish(w, npc, false, 'Para yok.', now); if (by) relate(t, by, 15, 'bana rüşvet gönderdi'); if (t.honesty > 75) { rumor(w, `${t.name} gönderilen rüşveti geri çevirdi ve herkese anlattı!`, by?.id ?? t.id, -10); } return finish(w, npc, true, `${amt} Dinar'ı ${t.name}'a ulaştırdım.`, now); }
+    case 'bribe': { if (!t) return finish(w, npc, false, 'Kime?', now); const amt = Math.min(npc.money, tk.pay ?? 0); if (amt <= 0 || !transfer(w, npc.id, t.id, amt, 'rüşvet')) return finish(w, npc, false, 'Para yok.', now); if (by) relate(t, by, 15, 'bana rüşvet gönderdi'); if (t.honesty > 75) { rumor(w, `${t.name} gönderilen rüşveti geri çevirdi ve herkese anlattı!`, by?.id ?? t.id, -10); } return finish(w, npc, true, `${amt} Dinar'ı ${ek(t.name, 'a')} ulaştırdım.`, now); }
     case 'follow': case 'guard': return;
   }
 }
@@ -312,10 +313,10 @@ export function revealOrder(w: World, criminal: Person): void {
     const heavy = o.crime === 'cinayet' ? 1 : 0.4;
     rumor(w, `${criminal.name} itiraf etti: “${victim}'ı bana ${w.regime === 'cumhuriyet' ? 'Başkan' : 'İmparator'} ${by.name} emretti!”`, by.id, -25 * heavy);
     for (const p of w.people) if (p.id !== by.id && p.prof !== 'naip') { p.loyalty = clamp(p.loyalty - 10 * heavy); p.republic = clamp(p.republic + 8 * heavy); p.mood = clamp(p.mood - 3 * heavy); }
-    log(w, `📢 SKANDAL: ${criminal.name}, ${victim} olayını ${by.name}'ın emriyle yaptığını söyledi! Halkın sadakati sarsıldı, cumhuriyetçiler güçleniyor.`, by.id);
+    log(w, `📢 SKANDAL: ${criminal.name}, ${victim} olayını ${ek(by.name, 'ın')} emriyle yaptığını söyledi! Halkın sadakati sarsıldı, cumhuriyetçiler güçleniyor.`, by.id);
   } else {
     rumor(w, `${criminal.name}: “${victim} işini bana ${by.name} yaptırdı!”`, by.id, -15);
-    log(w, `🗣 ${criminal.name}, ${victim} olayının azmettiricisi olarak ${by.name}'ı gösterdi.`, by.id);
+    log(w, `🗣 ${criminal.name}, ${victim} olayının azmettiricisi olarak ${ek(by.name, 'ı')} gösterdi.`, by.id);
     if (o.crime === 'cinayet' || o.crime === 'saldiri') { by.jailedDays = Math.max(by.jailedDays, 0); openCase(w, by.id, o.crime, o.victimId, 0, 55); }
   }
 }

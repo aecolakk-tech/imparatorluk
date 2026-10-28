@@ -1,3 +1,4 @@
+import { ek } from './tr';
 /** v1.9 housing: 5 people per house, buy or rent a spot, go home and sleep, home = safe zone. */
 import type { Person, World } from './types';
 import { findPerson } from './world';
@@ -28,7 +29,7 @@ export function moveIn(w: World, p: Person, id: string, how: 'satin' | 'kira'): 
   p.home = id; p.renting = how === 'kira' ? id : null;
   const sp = findPerson(w, p.spouse); if (sp && sp.home !== id && freeSpots(w, id) > 0) sp.home = id; // couples live together
   if (owner?.playerId && owner.id !== p.id) personal(w, owner.playerId, `🏠 ${p.name} evinize ${how === 'satin' ? `${SPOT_PRICE} Dinar’a yer satın aldı` : `kiracı olarak taşındı (${RENT_PER_DAY} D/gün)`}.`);
-  return how === 'satin' ? `${b.name}’de yer satın aldınız (${SPOT_PRICE} D, ${owner?.name ?? 'Saray'}’a). Geceleri evinizde uyuyabilirsiniz.` : `${b.name}’e kiracı olarak taşındınız (${RENT_PER_DAY} D/gün, ${owner?.name ?? 'Saray'}’a).`;
+  return how === 'satin' ? `${b.name}’de yer satın aldınız (${SPOT_PRICE} D, ${ek(owner?.name ?? 'Saray', 'a')}). Geceleri evinizde uyuyabilirsiniz.` : `${ek(b.name, 'a')} kiracı olarak taşındınız (${RENT_PER_DAY} D/gün, ${ek(owner?.name ?? 'Saray', 'a')}).`;
 }
 /** Daily rent; unpaid rent = eviction. */
 export function housingDay(w: World): void {

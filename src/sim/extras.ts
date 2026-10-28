@@ -1,5 +1,6 @@
+import { ek } from './tr';
 import { migrate4 } from './v16';
-import { migrate9 } from './realm';
+import { migrate10 } from './realm';
 /**
  * Sarraf (moneylender) loans with interest and haciz; world migration for saved worlds; law previews.
  */
@@ -45,7 +46,7 @@ export function loansDay(w: World): void {
       // haciz: seize goods at half price
       let seized = 0;
       for (const g of GOODS) while (d.inv[g] > 0 && l.amount > 0.5) { d.inv[g] -= 1; s.inv[g] += 1; l.amount -= w.prices[g] * 0.5; seized += 1; }
-      log(w, `HACİZ: ${s.name}, borcunu ödemeyen ${d.name}'ın ${seized} eşyasına el koydu.`, d.id);
+      log(w, `HACİZ: ${s.name}, borcunu ödemeyen ${ek(d.name, 'ın')} ${seized} eşyasına el koydu.`, d.id);
       if (l.amount > 0.5) { openCase(w, d.id, 'zimmet', s.id, Math.round(l.amount), 70); d.jailedDays = Math.max(d.jailedDays, 3); log(w, `${d.name} borç yüzünden zindana atıldı.`, d.id); }
     }
     w.loans = w.loans.filter((x) => x !== l);
@@ -116,7 +117,7 @@ export function migrateWorld(w: World): World {
     }
   }
   // fix same-sex marriages: separate them
-  for (const p of w.people) { const s = findPerson(w, p.spouse); if (s && s.female === p.female) { p.spouse = null; s.spouse = null; if (s.home === p.home && s.home !== 'saray') s.home = houses[randInt(w, 0, houses.length - 1)]!.id; log(w, `${p.name} ile ${s.name}'ın evliliği geçersiz sayıldı (evlilik bir kadın ile bir erkek arasında olur).`); } }
+  for (const p of w.people) { const s = findPerson(w, p.spouse); if (s && s.female === p.female) { p.spouse = null; s.spouse = null; if (s.home === p.home && s.home !== 'saray') s.home = houses[randInt(w, 0, houses.length - 1)]!.id; log(w, `${p.name} ile ${ek(s.name, 'ın')} evliliği geçersiz sayıldı (evlilik bir kadın ile bir erkek arasında olur).`); } }
   w.people = w.people.filter(Boolean);
   w.market = { sold: emptyInv(), unmet: emptyInv() };
   w.schema = 2;
@@ -126,9 +127,9 @@ export function migrateWorld(w: World): World {
 
 /** Schema 3: custom laws, hoarding suspicion, treasury book, price history, bigger granary. */
 function migrate3(w: World): World {
-  if ((w.schema ?? 1) >= 3) return migrate9(migrate4(w));
+  if ((w.schema ?? 1) >= 3) return migrate10(migrate4(w));
   const any = w as unknown as Record<string, unknown>;
   for (const [k, v] of Object.entries({ customLaws: [], suspicion: {}, treasuryBook: [], priceHist: {}, serving: [] })) if (any[k] === undefined) any[k] = v;
   if (w.granary < 800) w.granary = 800;
-  w.schema = 3; return migrate9(migrate4(w));
+  w.schema = 3; return migrate10(migrate4(w));
 }

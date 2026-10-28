@@ -1,3 +1,4 @@
+import { ek } from './tr';
 import { atHomeSafe } from './housing';
 import { interrogate } from './realm';
 import { revealOrder } from './orders';
@@ -244,7 +245,7 @@ export function payTribute(w: World): string {
   const t = w.threat; if (!t) return 'Haraç isteyen yok.';
   if (!transfer(w, 'saray', 'dis', t.demand, 'haraç')) return 'Hazine haraca yetmiyor!';
   for (const p of w.people) if (p.prof === 'asker') p.loyalty = clamp(p.loyalty - 3);
-  log(w, `${t.name}'a ${t.demand} Dinar haraç ödendi. Ordu bu aşağılanmadan hoşnut değil.`); w.threat = null; return 'Haraç ödendi.';
+  log(w, `${ek(t.name, 'a')} ${t.demand} Dinar haraç ödendi. Ordu bu aşağılanmadan hoşnut değil.`); w.threat = null; return 'Haraç ödendi.';
 }
 export function borderBattle(w: World): void {
   const t = w.threat; if (!t) return; w.threat = null;
@@ -334,7 +335,7 @@ export function arrest(w: World, criminal: Person, crime: CrimeKind, victimId: s
   if (criminal.orderedBy && chance(w, 0.65)) revealOrder(w, criminal); // the hired hand talks
   interrogate(w, criminal);
   if (criminal.task) { criminal.task.status = 'basarisiz'; criminal.task.note = 'Yakalandım.'; criminal.task.doneAt = w.serverNow ?? w.lastTickAt; }
-  log(w, `${c.name}, ${criminal.name}'ı yakaladı (${CRIME_TEXT[crime]}). Sabah/akşam ya hâkime gidecek ya da…`, criminal.id);
+  log(w, `${c.name}, ${ek(criminal.name, 'ı')} yakaladı (${CRIME_TEXT[crime]}). Sabah/akşam ya hâkime gidecek ya da…`, criminal.id);
   if (criminal.playerId) personal(w, criminal.playerId, 'Yakalandınız! Gözaltındasınız (Mahkeme nezarethanesi). 1 dakika içinde bekçiye rüşvet teklif edebilirsiniz; sonra savcı dava açar ve duruşmanız görülür.');
   return a;
 }
@@ -347,11 +348,11 @@ export function decideBribe(w: World, a: Arrest, accept: boolean): string {
   if (!cr || !ca) { a.status = 'ret'; return 'Kişi yok.'; }
   if (accept && a.offer > 0 && transfer(w, cr.id, ca.id, a.offer, 'rüşvet')) {
     a.status = 'kabul'; cr.jailedDays = 0; ca.incomeToday += a.offer; rel(cr, ca, 10, 'rüşvetimi aldı, beni saldı');
-    if (chance(w, 0.2)) rumor(w, `${ca.name} yakaladığı ${cr.name}'ı rüşvetle salmış!`, ca.id, -10);
-    return `${ca.name} ${a.offer} Dinar'ı aldı ve ${cr.name}'ı saldı.`;
+    if (chance(w, 0.2)) rumor(w, `${ca.name} yakaladığı ${ek(cr.name, 'ı')} rüşvetle salmış!`, ca.id, -10);
+    return `${ca.name} ${a.offer} Dinar'ı aldı ve ${ek(cr.name, 'ı')} saldı.`;
   }
   a.status = 'ret'; openCase(w, cr.id, a.crime, a.victimId, a.amount, a.crime === 'cinayet' ? 90 : 70); rel(cr, ca, -15, 'beni tutukladı');
-  if (a.offer > 0) { openCase(w, cr.id, 'rusvet', null, a.offer, 80); ca.rep = clamp(ca.rep + 3, -100, 100); rumor(w, `${ca.name} rüşveti reddetti, ${cr.name}'ı kadıya teslim etti.`, ca.id, 5); }
+  if (a.offer > 0) { openCase(w, cr.id, 'rusvet', null, a.offer, 80); ca.rep = clamp(ca.rep + 3, -100, 100); rumor(w, `${ca.name} rüşveti reddetti, ${ek(cr.name, 'ı')} kadıya teslim etti.`, ca.id, 5); }
   return `${ca.name} rüşveti reddetti; ${cr.name} kadının önüne çıkacak.`;
 }
 function resolveArrests(w: World): void {
@@ -376,17 +377,17 @@ export function assault(w: World, a: Person, v: Person): string {
   if (isProtected(w, v)) return `${v.name} şehre yeni geldi; ona dokunulmaz (koruma süresi).`;
   if (atHomeSafe(w, v)) return `${v.name} evinde; kapı kilitli, dışarıdan ulaşamazsınız.`;
   v.health = clamp(v.health - 35); v.wounded = true; v.mood = clamp(v.mood - 10); rel(v, a, -60, 'beni dövdü');
-  for (const x of w.people) if (x.relations[v.id] && (x.relations[v.id] ?? 0) > 40) rel(x, a, -20, `${v.name}'ı dövdü`);
-  log(w, `${a.name}, ${v.name}'a saldırdı ve yaraladı! Yaralı hekime gitmeli.`, v.id);
+  for (const x of w.people) if (x.relations[v.id] && (x.relations[v.id] ?? 0) > 40) rel(x, a, -20, `${ek(v.name, 'ı')} dövdü`);
+  log(w, `${a.name}, ${ek(v.name, 'a')} saldırdı ve yaraladı! Yaralı hekime gitmeli.`, v.id);
   if (catcher(w, w.hour >= 21 || w.hour < 6)) arrest(w, a, 'saldiri', v.id, 0);
-  return `${v.name}'ı yaraladınız.`;
+  return `${ek(v.name, 'ı')} yaraladınız.`;
 }
 export function murder(w: World, a: Person, v: Person): string {
-  if (isProtected(w, v)) return `${v.name}'a dokunulmaz.`;
+  if (isProtected(w, v)) return `${ek(v.name, 'a')} dokunulmaz.`;
   if (atHomeSafe(w, v)) return `${v.name} evinde; kapı kilitli, dışarıdan ulaşamazsınız.`;
-  if (v.playerId || v.prof === 'asker' && chance(w, 0.7)) { v.health = 5; v.wounded = true; log(w, `${a.name}, ${v.name}'ı öldürmeye kalktı; ağır yaralı kurtuldu!`, v.id); arrest(w, a, 'cinayet', v.id, 0); return `${v.name} ağır yaralı kurtuldu.`; }
+  if (v.playerId || v.prof === 'asker' && chance(w, 0.7)) { v.health = 5; v.wounded = true; log(w, `${a.name}, ${ek(v.name, 'ı')} öldürmeye kalktı; ağır yaralı kurtuldu!`, v.id); arrest(w, a, 'cinayet', v.id, 0); return `${v.name} ağır yaralı kurtuldu.`; }
   const co = makeCorpse(w, v, a, w.serverNow ?? w.lastTickAt);
-  for (const x of w.people) if ((x.relations[v.id] ?? 0) > 20 && co.witnesses.includes(x.id)) rel(x, a, -70, `${v.name}'ı öldürdü`);
+  for (const x of w.people) if ((x.relations[v.id] ?? 0) > 20 && co.witnesses.includes(x.id)) rel(x, a, -70, `${ek(v.name, 'ı')} öldürdü`);
   die(w, v, `CİNAYET! ${v.name} öldürüldü. Cesedi yerde yatıyor…`);
   return co.witnesses.length ? `${v.name} yere yığıldı… ${co.witnesses.length} kişi gördü!` : `${v.name} yere yığıldı. Kimse görmedi… şimdilik.`;
 }
@@ -457,6 +458,6 @@ export function hamalWork(w: World): void {
     }
     h.work = 'pazar';
     const s = sellers.length ? pick(w, sellers) : undefined;
-    if (s && transfer(w, s.id, h.id, 2, 'hamaliye (pazar taşıma)')) { h.incomeToday += 2; h.lastAction = `${s.name}'ın mallarını taşıyor`; h.xp += 1; h.relations[s.id] = clamp((h.relations[s.id] ?? 0) + 1, -100, 100); }
+    if (s && transfer(w, s.id, h.id, 2, 'hamaliye (pazar taşıma)')) { h.incomeToday += 2; h.lastAction = `${ek(s.name, 'ın')} mallarını taşıyor`; h.xp += 1; h.relations[s.id] = clamp((h.relations[s.id] ?? 0) + 1, -100, 100); }
   }
 }

@@ -1,3 +1,5 @@
+import { ek } from './tr';
+import { nearestOwnAnimal, ANIMAL_REACH } from './herdpos';
 /**
  * v1.6: real-time things that happen between game hours – corpses & the murder investigation,
  * trials with a defence in chat, bekçi escorts – plus movement actions, the v4 migration, and
@@ -38,7 +40,7 @@ export function reportCorpse(w: World, co: Corpse, by: Person, now: number): str
   const bq = bekcis.sort((a, b) => Math.hypot(a.x - co.x, a.y - co.y) - Math.hypot(b.x - co.x, b.y - co.y))[0];
   co.reportedBy = by.id; co.reportedAt = now; co.stage = 'ihbar';
   if (bq) { co.bekciId = bq.p.id; co.bekciFrom = { x: bq.x, y: bq.y }; }
-  log(w, `☎ ${by.name}, ${co.name}'ın cesedini ihbar etti. ${bq ? `Bekçi ${bq.p.name.replace(/^Bekçi /, '')} olay yerine koşuyor.` : 'Ama görevde bekçi yok!'}`, by.id, now);
+  log(w, `☎ ${by.name}, ${ek(co.name, 'ın')} cesedini ihbar etti. ${bq ? `Bekçi ${bq.p.name.replace(/^Bekçi /, '')} olay yerine koşuyor.` : 'Ama görevde bekçi yok!'}`, by.id, now);
   return bq ? `İhbar ettiniz. ${bq.p.name} olay yerine geliyor.` : 'İhbar ettiniz ama şu an görevde bekçi yok.';
 }
 
@@ -99,7 +101,7 @@ export function startTrial(w: World, c: CourtCase, now: number): void {
     { who: 'hakim', name: judge?.name ?? 'Kadı', text: `Sanık ${a.name}, söz sizde. Kendinizi savunun; ${Math.round(TRIAL_MS / 60000 * 10) / 10} dakikanız var.`, at: now + 1000 },
   ] };
   c.deadline = w.day + 2;
-  log(w, `⚖ ${a.name}'ın ${CRIME_LABEL[c.crime].toLocaleLowerCase('tr')} davası görülüyor. Kadı: ${judge?.name ?? '—'}, Savcı: ${pros?.name ?? '—'}.`, a.id, now);
+  log(w, `⚖ ${ek(a.name, 'ın')} ${CRIME_LABEL[c.crime].toLocaleLowerCase('tr')} davası görülüyor. Kadı: ${judge?.name ?? '—'}, Savcı: ${pros?.name ?? '—'}.`, a.id, now);
 }
 
 /** Rule-based judge: how convincing a defence line is (−4..+3) and an answer. */
@@ -213,6 +215,11 @@ export function needTarget(w: World, me: Person, a: Action, now: number): { ok: 
     const bs = need.ids.map((id) => w.buildings.find((b) => b.id === id)).filter((b): b is NonNullable<typeof b> => !!b);
     if (!bs.length || bs.some((b) => distToBuilding(b, pos) <= REACH)) return { ok: true };
     const b = bs.sort((x, y) => distToBuilding(x, pos) - distToBuilding(y, pos))[0]!; return { ok: false, to: doorSpot(b), label: b.name };
+  }
+  if (need.kind === 'animal') {
+    const an = nearestOwnAnimal(w, me, need.animal, now, pos); if (!an) return { ok: true };
+    if (Math.hypot(an.x - pos.x, an.y - pos.y) <= ANIMAL_REACH) return { ok: true };
+    return { ok: false, to: { x: an.x - 0.6, y: an.y + 0.1 }, label: 'Hayvanınızın yanına' };
   }
   const tp = need.id.startsWith('corpse:') ? w.corpses?.find((c) => `corpse:${c.id}` === need.id) : placeOf(w, need.id, now);
   if (!tp) return { ok: true };

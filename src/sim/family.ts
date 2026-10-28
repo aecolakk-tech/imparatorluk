@@ -1,3 +1,4 @@
+import { ek } from './tr';
 import { freeSpots, houses } from './housing';
 /**
  * Marriage & family: proposals, weddings, shared household, children (only above a prosperity threshold),
@@ -61,8 +62,8 @@ export function proposeMarriage(w: World, from: Person, to: Person, playerDecide
   if (w.proposals.some((x) => x.kind === 'evlilik' && x.from === from.id)) return 'Bekleyen bir teklifiniz var.';
   if (playerDecides(to)) {
     w.proposals.push({ id: nextId(w, 'E'), kind: 'evlilik', from: from.id, to: to.id, day: w.day });
-    log(w, `${from.name}, ${to.name}'a evlenme teklif etti.`, to.id);
-    return `Teklif ${to.name}'a iletildi; cevabını bekleyin.`;
+    log(w, `${from.name}, ${ek(to.name, 'a')} evlenme teklif etti.`, to.id);
+    return `Teklif ${ek(to.name, 'a')} iletildi; cevabını bekleyin.`;
   }
   const s = (to.relations[from.id] ?? 0) + to.mood / 2 + (from.money > 150 ? 10 : 0) + (from.soylu || from.id === w.kayzerId ? 25 : 0) + rand(w) * 30;
   if (s < 45) { to.relations[from.id] = clamp((to.relations[from.id] ?? 0) - 3, -100, 100); return `${to.name} teklifi nazikçe reddetti.`; }
@@ -74,7 +75,7 @@ export function answerProposal(w: World, me: Person, id: string, accept: boolean
   w.proposals = w.proposals.filter((x) => x !== pr);
   const from = findPerson(w, pr.from);
   if (pr.kind === 'evlilik') {
-    if (!accept || !from) { if (from) log(w, `${me.name}, ${from.name}'ın evlenme teklifini reddetti.`, from.id); return 'Teklif reddedildi.'; }
+    if (!accept || !from) { if (from) log(w, `${me.name}, ${ek(from.name, 'ın')} evlenme teklifini reddetti.`, from.id); return 'Teklif reddedildi.'; }
     if (!adultFree(w, from) || !adultFree(w, me)) return 'Artık evlenemezsiniz.';
     wed(w, from, me); return 'Evlendiniz! Mutluluklar.';
   }
@@ -234,7 +235,7 @@ export function cureChild(w: World, c: Child, payer: Person | null): string {
   if (c.sick <= 0) return 'Çocuk hasta değil.';
   const healer = w.people.find((p) => p.prof === 'hekim' && p.jailedDays === 0); if (!healer) return 'Şehirde hekim yok!';
   if (!transfer(w, payer?.id ?? 'saray', healer.id, CURE_FEE, 'çocuk tedavisi')) return 'Hekim parası yetmiyor.';
-  c.sick = 0; healer.incomeToday += CURE_FEE; log(w, `${healer.name}, ${c.name}'ı iyileştirdi.`, payer?.id);
+  c.sick = 0; healer.incomeToday += CURE_FEE; log(w, `${healer.name}, ${ek(c.name, 'ı')} iyileştirdi.`, payer?.id);
   return `${c.name} iyileşti.`;
 }
 

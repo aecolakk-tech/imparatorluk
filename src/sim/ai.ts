@@ -1,3 +1,4 @@
+import { ek } from './tr';
 import { BASE_PRICE } from './constants';
 import type { CrimeKind, Person, Petition, PetitionKind, World } from './types';
 import { STATE_PROFS } from './constants';
@@ -119,7 +120,7 @@ export function decide(w: World, p: Person): void {
   // greedy bribery (Cemal style): pays a tahsildar to look away → tax dodge, a crime under the law
   if (p.prof === 'tuccar' && p.honesty < 30 && p.money > 200 && chance(w, 0.12)) {
     const t = w.people.find((x) => x.prof === 'tahsildar' && x.honesty < 50 && x.jailedDays === 0);
-    if (t) { transfer(w, p.id, t.id, 20, 'rüşvet'); log(w, `${p.name}, ${t.name}'a rüşvet verdi diye fısıldanıyor.`, p.id); if (lawOn(w, 'rusvet') && chance(w, bekciPower(w) * 0.6)) openCase(w, p.id, 'rusvet', t.id, 20, 55); }
+    if (t) { transfer(w, p.id, t.id, 20, 'rüşvet'); log(w, `${p.name}, ${ek(t.name, 'a')} rüşvet verdi diye fısıldanıyor.`, p.id); if (lawOn(w, 'rusvet') && chance(w, bekciPower(w) * 0.6)) openCase(w, p.id, 'rusvet', t.id, 20, 55); }
   }
   // protest
   if (p.mood < 28 && lawOn(w, 'toplanti') && chance(w, 0.25)) { p.republic = clamp(p.republic + 2); log(w, `${p.name} Pazar meydanında protesto yaptı.`, p.id); }
@@ -134,7 +135,7 @@ export function decide(w: World, p: Person): void {
       if (t.id === p.id || t.prof === 'naip' || t.id === w.kayzerId) continue;
       const receptive = isPoor(w, t, avgMoney) || t.hunger > 60 || t.loyalty < 50;
       t.republic = clamp(t.republic + (receptive ? 4 : 0.8));
-      if (receptive && chance(w, 0.3)) log(w, `${p.name}, ${t.name}'a cumhuriyet propagandası yaptı.`, p.id);
+      if (receptive && chance(w, 0.3)) log(w, `${p.name}, ${ek(t.name, 'a')} cumhuriyet propagandası yaptı.`, p.id);
     }
   }
   // gossip – contagion of opinions

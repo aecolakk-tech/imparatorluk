@@ -173,3 +173,7 @@ body.low *, body.low *::before, body.low *::after { animation:none !important; t
 .bar.wide { width:110px; height:9px; } tr.won td { color:var(--gold2); }
 .a2hs{left:auto;right:12px;top:auto;bottom:calc(64px + env(safe-area-inset-bottom));transform:none;max-width:300px;font-size:12px;padding:6px 8px;gap:6px}
 .a2hs button{padding:4px 8px;font-size:12px;min-height:0}
+/* v1.9.3 inside your house */
+body.inside-home canvas { filter: brightness(0.55) saturate(0.7); transition: filter .4s; }
+.inside-ov { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 30; display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 14px; background: rgba(28,20,12,.92); color: #f4ecd8; font-size: 14px; box-shadow: 0 4px 18px rgba(0,0,0,.4); }
+.inside-ov svg { width: 20px; height: 20px; }

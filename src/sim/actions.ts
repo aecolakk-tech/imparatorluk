@@ -1,3 +1,4 @@
+import { ek } from './tr';
 import { moveIn, goInside, leaveHome, atHomeSafe } from './housing';
 import { kayzerBill, foundFaction, members } from './meclis';
 import { buildBarn, feedAnimals, collectFarm, hasHorse, drinkMilk, eatEgg, buyFarm, buyAnimal, slaughter, grantTitle, stripTitle, orgFound, orgJoin, orgLeave, orgMeet, orgRole, orgAct, assignSpy, issueWarrant, searchHouse, raidOrg } from './realm';
@@ -23,6 +24,7 @@ import { enactLaw, repealLaw, validateLaw } from './laws';
 import { inspectPerson } from './hoard';
 import { electionPhase, hourMs } from './tick';
 import { produce } from './economy';
+import { nearestOwnAnimal, ANIMAL_REACH } from './herdpos';
 import { actionNeed, distToBuilding, PERSON_REACH, REACH, rules } from './move';
 import { placeOf } from './place';
 import { addDefense, finishTrial, myPos, reportCorpse, startWalk } from './v16';
@@ -52,7 +54,7 @@ export function joinWorld(w: World, playerId: string, name: string, prof: Profes
     p = target;
   } else if (founder) {
     p = findPerson(w, w.hanedanId) ?? makePerson(w, { name, prof: 'kayzer' }, 'saray');
-    p.name = `Kayzer ${clean(name)}`; w.founderPersonId = p.id;
+    p.name = `Kayzer ${clean(name).replace(/^(Kayzer\s+)+/i, '')}`; w.founderPersonId = p.id;
   } else {
     const safeProf = PLAYER_PROFS.includes(prof) ? prof : 'hamal';
     const houses = w.buildings.filter((b) => b.kind === 'ev');
@@ -105,6 +107,10 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
   if (need) {
     const pos = myPos(w, me, now);
     if (need.kind === 'building' && need.ids.length && !need.ids.some((id) => { const b = w.buildings.find((x) => x.id === id); return b && distToBuilding(b, pos) <= REACH + 0.6; })) return no(`Bunun için önce ${need.label} yürümelisiniz.`);
+    if (need.kind === 'animal') {
+      const an = nearestOwnAnimal(w, me, need.animal, now, pos);
+      if (an && Math.hypot(an.x - pos.x, an.y - pos.y) > ANIMAL_REACH + 0.9) return no('Önce hayvanınızın yanına yürümelisiniz.');
+    }
     if (need.kind === 'person') {
       const tp = need.id.startsWith('corpse:') ? w.corpses?.find((c) => `corpse:${c.id}` === need.id) : placeOf(w, need.id, now);
       if (tp && Math.hypot(tp.x - pos.x, tp.y - pos.y) > PERSON_REACH + 0.9) return no('Önce yanına yürümelisiniz (çok uzaktasınız).');
@@ -199,7 +205,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'arrest': {
       if (me.prof !== 'bekci') return no('Sadece bekçiler tutuklar.'); const t = findPerson(w, a.personId); if (!t || t.id === w.kayzerId || t.prof === 'naip') return no('Geçersiz.');
       const recent = w.ledger.some((l) => l.from !== t.id && l.to === t.id && (l.reason === 'hırsızlık' || l.reason === 'rüşvet' || l.reason === 'zimmet') && w.day - l.day <= 3);
-      openCase(w, t.id, 'hirsizlik', null, 0, recent ? 70 : 15); log(w, `${me.name}, ${t.name}'ı tutukladı.`, t.id); return ok(recent ? 'Tutuklandı, deliller güçlü.' : 'Tutuklandı ama delil zayıf.');
+      openCase(w, t.id, 'hirsizlik', null, 0, recent ? 70 : 15); log(w, `${me.name}, ${ek(t.name, 'ı')} tutukladı.`, t.id); return ok(recent ? 'Tutuklandı, deliller güçlü.' : 'Tutuklandı ama delil zayıf.');
     }
     case 'steal': {
       const t = findPerson(w, a.personId); if (!t || t.id === me.id || t.prof === 'naip' || t.id === w.kayzerId) return no('Geçersiz.');
@@ -214,7 +220,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       if (t.meclis) w.meclis.bribes.push({ from: me.id, to: t.id, amount: amt, day: w.day, exposed: false });
       t.loyalty = clamp(t.loyalty - amt / 5); t.relations[me.id] = clamp((t.relations[me.id] ?? 0) + amt / 2, -100, 100);
       if (t.prof === 'asker' && amt >= 40 && chance(w, (100 - t.loyalty) / 100 + 0.1)) t.sidedWith = me.id;
-      if (lawOn(w, 'rusvet') && chance(w, bekciPower(w) * 0.35)) { openCase(w, me.id, 'rusvet', null, amt, 60); log(w, `${me.name}, ${t.name}'a rüşvet verirken yakalandı!`, me.id); return ok('Rüşveti verdiniz… ama bekçi gördü!'); }
+      if (lawOn(w, 'rusvet') && chance(w, bekciPower(w) * 0.35)) { openCase(w, me.id, 'rusvet', null, amt, 60); log(w, `${me.name}, ${ek(t.name, 'a')} rüşvet verirken yakalandı!`, me.id); return ok('Rüşveti verdiniz… ama bekçi gördü!'); }
       return ok(t.sidedWith === me.id ? `${t.name} artık sizin yanınızda.` : 'Rüşveti aldı; ne düşündüğü belli değil.');
     }
     case 'give': {
@@ -222,7 +228,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       const from = isKayzer(w, me) && a.personId !== me.id ? 'saray' : me.id;
       if (from === 'saray' && !spend(w, amt)) return no(`Meclis bütçesi yetmiyor (kalan ${Math.round(budgetLeft(w))} Dinar).`);
       if (!transfer(w, from, t.id, amt, from === 'saray' ? 'saray bağışı' : 'bağış')) return no('Para yetmiyor.');
-      t.loyalty = clamp(t.loyalty + Math.min(15, amt / 4)); t.mood = clamp(t.mood + 5); t.relations[me.id] = clamp((t.relations[me.id] ?? 0) + 10, -100, 100); return ok(`${t.name}'a ${amt} Dinar verildi.`);
+      t.loyalty = clamp(t.loyalty + Math.min(15, amt / 4)); t.mood = clamp(t.mood + 5); t.relations[me.id] = clamp((t.relations[me.id] ?? 0) + 10, -100, 100); return ok(`${ek(t.name, 'a')} ${amt} Dinar verildi.`);
     }
     case 'propose': {
       const law = a.law ? { ...a.law, name: a.law.name ? filterProfanity(String(a.law.name)).slice(0, 50) : undefined } : undefined;
@@ -334,7 +340,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'stripTitle': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); const r = stripTitle(w, me, t); return r.startsWith('⚔') ? ok(r) : no(r); }
     case 'orgFound': { const r = orgFound(w, me, a.kind, String(a.name ?? '')); return r.includes('kuruldu') ? ok(r) : no(r); }
     case 'orgJoin': { const r = orgJoin(w, me, a.orgId); return r.includes('katıldınız') ? ok(r) : no(r); }
-    case 'orgLeave': return ok(orgLeave(w, me));
+    case 'orgLeave': { const r = orgLeave(w, me); return r.startsWith('Örgütte değil') ? no(r) : ok(r); }
     case 'orgRole': { const r = orgRole(w, me, a.personId, a.role); return r.includes('artık') ? ok(r) : no(r); }
     case 'orgAct': { const r = orgAct(w, me, a.deed); return /asıldı|soyuldu|yapıldı|başarılı|BAŞLADI/.test(r) ? ok(r) : no(r); }
     case 'orgMeet': { const r = orgMeet(w, me); return r.startsWith('Bu gece') ? ok(r) : no(r); }

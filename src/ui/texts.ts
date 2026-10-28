@@ -7,7 +7,7 @@ export const RULES: [string, string[]][] = [
     'Hamallar inşaatta yük taşır (günde 3 D, inşaat ilerler) ya da pazarda tüccara taşıma yapar (2 D). Kuraklıkta buğday pahalanır; ambar her gün piyasaya buğday salar.',
   ]],
   ['Hayvanlar ve Çiftlik', [
-    'Hayvan Pazarı (Buğday Tarlaları’nın batısında, çitli ağıl): hayvan tüccarından inek, koyun, tavuk ve at alınır; çiftlik arsası da buradan alınır (250 D).',
+    'Hayvan Pazarı (Buğday Tarlaları’nın hemen batısında, yolun kenarındaki çitli ağıl; kapısı kuzeydeki yola bakar): hayvan tüccarından inek, koyun, tavuk ve at alınır; çiftlik arsası da buradan alınır (250 D).',
     'Çiftliğinize (Buğday Tarlaları) gidip ahır (120 D, 6 büyükbaş/at) ya da kümes (50 D, 15 tavuk) yapın. Hayvan almadan önce yer olmalı.',
     'Hayvanları HER GÜN çiftlikte “Yem ver” ile buğdayla besleyin. Beslenen hayvan ertesi gün ürün verir: inek 3 süt (süt susuzluğu da giderir), tavuk 1 yumurta, koyun yün. Ürünleri “Topla” ile alın, pazarda satın ya da tüketin.',
     'Kesim: inek 8, koyun 4 (+2 yün), tavuk 1 et verir. At kesilmez: ata binince %50 daha hızlı yürürsünüz (Yap → Ata bin).',
@@ -120,7 +120,7 @@ export const GUIDE: string[] = [
   'BİNALARA DOKUNARAK etkileşirsiniz: Pazar’da alışveriş, Kuyu’da su, Camide namaz, Meyhanede içki, Hekimhane’de tedavi, Saray’da dilekçe, Mahkeme’de davalar, Meclis’te seçim.',
   'Üstteki çubukta saat, ihtiyaçlarınız (🍞 öğün x/3, 💧 su x/5), sağlık, aktif olaylar ve seçim takvimi var. ⚡ “Ne yapabilirim?” düğmesi her an yapabileceklerinizi listeler.',
   'Her gün 3 öğün ve 5 su gerekir, yoksa sağlığınız düşer. Görevler (🎯) size adım adım şehri öğretir ve ödül verir.',
-  'HAYVANLAR: Buğday Tarlaları’nın hemen güneyindeki çitli ağıl HAYVAN PAZARI’dır. Satılık inek, koyun, tavuk ve atlar içinde dolaşır; tarlalarda çiftçilerin sürüleri otlar. Hayvancıdan arsa ve hayvan alın, ahır/kümes kurun, besleyin; süt, yumurta, yün toplayın. Ata binince daha hızlı yürürsünüz.',
+  'HAYVANLAR: Buğday Tarlaları’nın hemen batısında, yol kenarındaki çitli ağıl HAYVAN PAZARI’dır. Kendi hayvanlarınızın üstünde mavi işaret olur: ata dokununca binersiniz, inek/koyun/tavuğa dokununca “Kes” ile et alırsınız. Satılık inek, koyun, tavuk ve atlar içinde dolaşır; tarlalarda çiftçilerin sürüleri otlar. Hayvancıdan arsa ve hayvan alın, ahır/kümes kurun, besleyin; süt, yumurta, yün toplayın. Ata binince iki kat hızlı yürürsünüz.',
   'Yürüyen herhangi birine dokunun: kartında parasını, ihtiyaçlarını, ne düşündüğünü görürsünüz; para verebilir, mesaj atabilirsiniz.',
   'Karakteriniz her gün kendi mesleğinde otomatik çalışır ve kazandığıyla ekmek, su alır. Siz daha fazlasını yapabilirsiniz: ticaret, dilekçe, seçim… ya da darbe.',
   '📜 Gazete her günün özetini verir, 💬 Meydan’da herkesle konuşursunuz. Kurallar 📖 sayfasında. Hayırlı olsun!',

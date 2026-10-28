@@ -107,10 +107,34 @@ function scheduleBar(ac2: AudioContext, out: AudioNode, t0: number): number {
   [D3 / 2, f(7, D3 / 2)].forEach((fr) => { const o = ac2.createOscillator(); const g = ac2.createGain(); o.type = 'triangle'; o.frequency.value = fr; g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(0.025, t0 + 0.6); g.gain.linearRampToValueAtTime(0.0001, t0 + 8 * beat); o.connect(g); g.connect(out); o.start(t0); o.stop(t0 + 8 * beat + 0.1); });
   barNo += 1; return 8 * beat;
 }
+// ---------------- v1.9.3 night music: slow, sparse, minor (D minor + flat 2nd), low drones, distant bell ----------------
+let mood: 'gun' | 'gece' = 'gun'; let dayBus: GainNode | null = null; let nightBus: GainNode | null = null; let nightBarNo = 0;
+const NIGHT = [0, 1, 3, 5, 7, 8, 10, 12]; // Phrygian on D: uneasy minor
+function scheduleNightBar(ac2: AudioContext, out: AudioNode, t0: number): number {
+  const len = 9.6; const r = (k: number): number => { const x = Math.sin((nightBarNo * 13 + k) * 91.7) * 43758.5; return x - Math.floor(x); };
+  // two detuned low drones (D1 + Ab1 tritone shadow every other bar) with a slow swell
+  const roots = [D3 / 4, nightBarNo % 2 ? f(6, D3 / 4) : f(7, D3 / 4)];
+  roots.forEach((fr, i) => { for (const dt of [0, 0.7]) { const o = ac2.createOscillator(); const g = ac2.createGain(); const lp = ac2.createBiquadFilter(); o.type = 'sawtooth'; o.frequency.value = fr + dt; lp.type = 'lowpass'; lp.frequency.value = 260; g.gain.setValueAtTime(0.0001, t0); g.gain.linearRampToValueAtTime(i ? 0.016 : 0.03, t0 + len * 0.45); g.gain.linearRampToValueAtTime(0.0001, t0 + len + 0.8); o.connect(lp); lp.connect(g); g.connect(out); o.start(t0); o.stop(t0 + len + 1); } });
+  // a few lonely notes, far apart, soft and long
+  const n = 2 + Math.floor(r(1) * 3);
+  for (let i = 0; i < n; i++) { const deg = NIGHT[Math.floor(r(i + 2) * NIGHT.length)]!; pluck(ac2, out, f(deg), t0 + 0.8 + i * (len - 2) / n + r(i + 9) * 0.6, 2.6, 0.035); }
+  // distant bell now and then
+  if (nightBarNo % 3 === 2) for (const [m, v] of [[1, 0.03], [2.76, 0.012], [5.4, 0.006]] as const) { const o = ac2.createOscillator(); const g = ac2.createGain(); o.frequency.value = f(1, D3) * m; const at = t0 + len * 0.6; g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(v, at + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, at + 4.5); o.connect(g); g.connect(out); o.start(at); o.stop(at + 4.6); }
+  // a slow heartbeat-like low thud
+  [0, 0.35, 4.8, 5.15].forEach((b, i) => drum(ac2, out, t0 + b, true, i % 2 ? 0.035 : 0.05));
+  nightBarNo += 1; return len;
+}
+/** Day (Hicaz) ↔ night (dark, uneasy) background music with a 5 s crossfade. */
+export function setMusicMood(m: 'gun' | 'gece'): void {
+  if (m === mood) return; mood = m; const a = ctx; if (!a || !dayBus || !nightBus) return; const t = a.currentTime;
+  for (const [bus, on] of [[dayBus, m === 'gun'], [nightBus, m === 'gece']] as const) { bus.gain.cancelScheduledValues(t); bus.gain.setValueAtTime(bus.gain.value, t); bus.gain.linearRampToValueAtTime(on ? 1 : 0.0001, t + 5); }
+  nextBar = Math.max(t + 0.1, Math.min(nextBar, t + 2.5)); // start the new mood within a couple of seconds
+}
+export const musicMood = (): string => mood;
 export function startMusic(): void {
   if (!musicEnabled || musicTimer !== null) return; const a = ac(); if (!a) return;
-  if (!musicGain) { musicGain = a.createGain(); musicGain.gain.value = 0.55; musicGain.connect(a.destination); }
+  if (!musicGain) { musicGain = a.createGain(); musicGain.gain.value = 0.55; musicGain.connect(a.destination); dayBus = a.createGain(); nightBus = a.createGain(); dayBus.gain.value = mood === 'gun' ? 1 : 0.0001; nightBus.gain.value = mood === 'gece' ? 1 : 0.0001; dayBus.connect(musicGain); nightBus.connect(musicGain); }
   nextBar = a.currentTime + 0.2;
-  musicTimer = window.setInterval(() => { const x = ac(); if (!x || !musicGain) return; while (nextBar < x.currentTime + 1.5) nextBar += scheduleBar(x, musicGain, nextBar); }, 300);
+  musicTimer = window.setInterval(() => { const x = ac(); if (!x || !dayBus || !nightBus) return; while (nextBar < x.currentTime + 1.5) nextBar += mood === 'gece' ? scheduleNightBar(x, nightBus, nextBar) : scheduleBar(x, dayBus, nextBar); }, 300);
 }
-export function stopMusic(): void { if (musicTimer !== null) { clearInterval(musicTimer); musicTimer = null; } if (musicGain) { musicGain.disconnect(); musicGain = null; } }
+export function stopMusic(): void { if (musicTimer !== null) { clearInterval(musicTimer); musicTimer = null; } if (musicGain) { musicGain.disconnect(); musicGain = null; dayBus = null; nightBus = null; } }

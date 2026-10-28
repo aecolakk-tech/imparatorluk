@@ -1,4 +1,4 @@
-import { migrate9 } from './realm';
+import { migrate10 } from './realm';
 import type { Building, BuildingKind, Good, Law, Person, Profession, World } from './types';
 import { GOODS } from './types';
 import { BASE_PRICE, DEFAULT_SALARY, MAP_H, MAP_W } from './constants';
@@ -41,7 +41,7 @@ export function makeBuildings(): Building[] {
     b('dokuma', 'Dokuma Tezgâhı', 'dokuma', 70, 30, 8, 4),
     b('mobilyahane', 'Mobilyahane', 'mobilyahane', 82, 22, 8, 5),
     b('ambar', 'Tahıl Ambarı', 'ambar', 70, 22, 8, 5),
-    b('hayvan', 'Hayvan Pazarı', 'hayvan', 70, 37, 8, 5),
+    b('hayvan', 'Hayvan Pazarı', 'hayvan', 70, 36, 8, 4),
     b('arsa1', 'Arsa (boş)', 'arsa', 82, 3, 8, 6),
     b('arsa2', 'Arsa (boş)', 'arsa', 93, 3, 6, 6),
     b('arsa3', 'Arsa (boş)', 'arsa', 93, 22, 6, 5),
@@ -208,7 +208,7 @@ export function createWorld(seed = 42, now = Date.now()): World {
   for (const s of w.meclis.seats) s.holder = null; for (const p of w.people) { p.meclis = false; p.immune = false; }
   log(w, 'İmparatorluk kuruldu. İlk Meclis seçimi 10. gün: adaylık şimdi açık (3. güne kadar), ardından propaganda.');
   w.todayEvents = [];
-  return migrate9(w);
+  return migrate10(w);
 }
 
 export function findPerson(w: World, id: string | null | undefined): Person | undefined {

@@ -33,6 +33,8 @@ export function along(path: Pt[], f: number): Pt {
 }
 
 const MARKETS = ['pazar', 'gida', 'zanaat', 'yeni', 'kahve'];
+const dayPlan = new Map<string, { pious: boolean; eve: string }>();
+export const NPC_SPEED = 2.4; // tiles per real second (players walk 3.6)
 export interface Placed { p: Person; x: number; y: number; moving: boolean; visible: boolean; dir: number; talking?: boolean }
 
 export function playerWalking(w: World, p: Person, now: number): boolean {
@@ -52,7 +54,7 @@ function scheduled(w: World, p: Person, now: number, ctx: Ctx): Placed {
   if (festOpen && t >= 12 && t < 20 && h % 3 === 0) work = 'festival';
   const home = p.home;
   const off = (h % 60) / 60;
-  const s1 = 5.5 + off, s2 = 7.5 + off, s3 = 17 + off, s4 = 18 + off, s5 = 20.5 + off, s6 = 22 + off;
+  const s1 = 5.5 + off, s3 = 17 + off, s5 = 20.5 + off, s6 = 22 + off;
   let pos: Pt; let moving = false; let visible = true;
   const wanderX = Math.sin(now / 2300 + h) * 0.9 + Math.sin(now / 5100 + h * 3) * 0.6;
   const wanderY = Math.cos(now / 3100 + h * 2) * 0.35;
@@ -64,24 +66,34 @@ function scheduled(w: World, p: Person, now: number, ctx: Ctx): Placed {
   else {
     // v1.9 human routine: home → work → lunch (kahve / pazar / kuyu / cami) → work → evening (pazar, cami, meyhane or a friend's house) → home
     const dh = hash(p.id + ':' + w.day);
-    const lunch = p.din > 68 && dh % 3 === 0 ? 'cami' : (['kahve', market, 'kuyu', market] as const)[dh % 4]!;
-    const friend = Object.entries(p.relations).filter(([id, r]) => r > 25 && id !== p.id).sort((a, b) => b[1] - a[1])[dh % 3]?.[0];
-    const fHome = friend ? w.people.find((x) => x.id === friend)?.home : undefined;
-    const eve = p.din > 70 && dh % 2 === 0 ? 'cami' : p.din < 35 && dh % 3 === 0 && B.has('bar') ? 'bar' : fHome && fHome !== home && dh % 4 === 1 ? fHome : market;
-    const L1 = 11.8 + off * 0.6, L2 = L1 + 0.5, L3 = L2 + 0.8, L4 = L3 + 0.5;
-    const leg = (a: Pt, b: Pt, f: number): void => { pos = along(route(a, b), Math.min(1, Math.max(0, f))); moving = true; };
-    const idle = (at: Pt, r: number): void => { const s = stroll(p, now, r); pos = { x: at.x + s.dx, y: at.y + s.dy }; moving = s.moving; };
-    pos = door(home, p, 0.6);
-    if (t >= s1 && t < s2) leg(door(home, p), door(work, p), (t - s1) / (s2 - s1));
-    else if (t >= s2 && t < L1) idle(door(work, p), 1.2);
-    else if (t >= L1 && t < L2) leg(door(work, p), door(lunch, p, 2.2), (t - L1) / (L2 - L1));
-    else if (t >= L2 && t < L3) idle(door(lunch, p, 2.2), 0.9);
-    else if (t >= L3 && t < L4) leg(door(lunch, p, 2.2), door(work, p), (t - L3) / (L4 - L3));
-    else if (t >= L4 && t < s3) idle(door(work, p), 1.2);
-    else if (t >= s3 && t < s4) leg(door(work, p), door(eve, p, 2.2), (t - s3) / (s4 - s3));
-    else if (t >= s4 && t < s5) idle(door(eve, p, 2.2), eve === market ? 1.8 : 0.8);
-    else if (t >= s5 && t < s6) leg(door(eve, p, 2.2), door(home, p), (t - s5) / (s6 - s5));
-    else visible = false;
+    // v1.9.3: the day's plan is fixed at the first look each day: din/relations drift every heartbeat and used to
+    // flip the lunch/evening destination mid-walk (a visible jump every 6 s).
+    const fk = `${w.seed}:${p.id}:${w.day}`; let plan0 = dayPlan.get(fk);
+    if (!plan0) { const friend = Object.entries(p.relations).filter(([id, r]) => r > 25 && id !== p.id).sort((a, b) => b[1] - a[1])[dh % 3]?.[0]; const fHome = (friend ? w.people.find((x) => x.id === friend)?.home : undefined) ?? '';
+      plan0 = { pious: p.din > 68 && dh % 3 === 0, eve: p.din > 70 && dh % 2 === 0 ? 'cami' : p.din < 35 && dh % 3 === 0 && B.has('bar') ? 'bar' : fHome && fHome !== home && dh % 4 === 1 ? fHome : market };
+      if (dayPlan.size > 4000) dayPlan.clear(); dayPlan.set(fk, plan0); }
+    const eve = plan0.eve; const lunch = plan0.pious ? 'cami' : market;
+    // v1.9.3: legs are walked at a real, constant pace (NPC_SPEED tiles/s) instead of "cover the leg in N game hours"
+    // (a 7.5 s lunch leg across town meant sprinting, then crawling). Each leg starts where the previous one really ended.
+    const workP = door(work, p); const lunchCands = (plan0.pious ? ['cami'] : ['kahve', market, 'kuyu', 'gida', 'pazar']).filter((id) => B.has(id));
+    const lunchP = lunchCands.map((id) => door(id, p, 2.2)).sort((x, y) => Math.abs(x.x - workP.x) + Math.abs(x.y - workP.y) - Math.abs(y.x - workP.x) - Math.abs(y.y - workP.y))[dh % 2 && lunchCands.length > 1 ? 1 : 0] ?? door(lunch, p, 2.2);
+    const L1 = 11.8 + off * 0.6, L3 = L1 + 1.3;
+    const plan: [number, Pt, number][] = [[s1, workP, 1.2], [L1, lunchP, 0.9], [L3, workP, 1.2], [s3, door(eve, p, 2.2), eve === market ? 1.8 : 0.8], [s5, door(home, p), 0]];
+    const hs = hourMs(w) / 1000; let cur: Pt = door(home, p); let free = 0; let rad = 0; let arrived = true; visible = t >= s1 && t < s6;
+    const idle = (at: Pt, r: number): void => { const st = stroll(p, now, r); pos = { x: at.x + st.dx, y: at.y + st.dy }; moving = st.moving; };
+    pos = cur;
+    for (const [start, dest, r] of plan) {
+      if (t < start) break;
+      const t0 = Math.max(start, free); if (t < t0) { break; }
+      let from = cur; if (rad > 0) { const st = stroll(p, now - (t - t0) * hs * 1000, rad); from = { x: cur.x + st.dx, y: cur.y + st.dy }; } // leave from where you were strolling
+      const path = route(from, dest); let len = 0; for (let i = 1; i < path.length; i += 1) len += Math.abs(path[i]!.x - path[i - 1]!.x) + Math.abs(path[i]!.y - path[i - 1]!.y);
+      const walked = (t - t0) * hs * NPC_SPEED;
+      if (walked < len) { pos = along(path, walked / len); moving = true; arrived = false; rad = -1; break; }
+      cur = dest; free = t0 + len / NPC_SPEED / hs; rad = r; arrived = true;
+    }
+    if (rad >= 0) { if (rad > 0) idle(cur, rad); else pos = cur; }
+    if (!arrived) visible = true; // still on the way home after 22:00 – walk in, don't vanish
+    void lunch;
     void wanderY; void walking;
   }
   if (p.id === w.kayzerId || p.prof === 'naip' || (p.soylu && p.home === 'saray')) { pos = door('saray', p, 2); pos.x += wanderX * 0.7; moving = walking; visible = !night || !!p.nightOut; }
@@ -99,6 +111,7 @@ function stroll(p: Person, now: number, r: number): { dx: number; dy: number; mo
 /** Personal space: standing people never stack (cheap grid pass). */
 function separate(list: Placed[]): void {
   const grid = new Map<string, Placed[]>(); const MIN = 0.62;
+  list = list.filter((q) => !q.moving); // v1.9.3: walkers pass through; only people standing around keep their distance
   for (const q of list) { if (!q.visible) continue; const key = `${Math.floor(q.x)},${Math.floor(q.y)}`; const g = grid.get(key); if (g) g.push(q); else grid.set(key, [q]); }
   for (const q of list) {
     if (!q.visible || q.talking) continue; const cx = Math.floor(q.x), cy = Math.floor(q.y);
@@ -111,8 +124,10 @@ function separate(list: Placed[]): void {
 }
 interface Ctx { t: number; night: boolean; B: Map<string, World['buildings'][number]>; door: (id: string, p: Person, spread?: number) => Pt; site?: string; festOpen: boolean }
 function mkCtx(w: World, now: number): Ctx {
-  const frac = w.frozen ? 0 : Math.max(0, Math.min(0.999, (now - w.lastTickAt) / hourMs(w)));
-  const t = w.hour + frac;
+  // v1.9.3: the clock keeps running between snapshots. It used to stop at hour+0.999 until the next
+  // heartbeat delivered the new hour (1 game hour = 15 s, polls every 6 s), so everyone froze, then lurched.
+  const frac = w.frozen ? 0 : Math.max(0, Math.min(3, (now - w.lastTickAt) / hourMs(w)));
+  const t = (w.hour + frac) % 24;
   const B = new Map(w.buildings.map((b) => [b.id, b]));
   const door = (id: string, p: Person, spread = 1.6): Pt => {
     const b = B.get(id) ?? B.get('pazar')!; const h = hash(p.id + id);

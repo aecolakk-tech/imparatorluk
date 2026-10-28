@@ -5,7 +5,7 @@ import { electionPhase } from '../sim/tick';
 import { ROADS_X, ROADS_Y } from '../sim/world';
 import { shade, spriteFor } from './sprites';
 import { drawIcon } from './icons';
-import { animalSprite, animalSize, placeAnimals, isRiding } from './animals';
+import { animalSprite, animalSize, placeAnimals, isRiding, type PlacedAnimal } from './animals';
 
 export const T = 16;
 
@@ -99,7 +99,7 @@ function drawBuilding(g: CanvasRenderingContext2D, b: Building): void {
     g.fillStyle = '#c9a36a'; g.fillRect(X + W - 3 * T, Y + 2, 3 * T - 2, 2 * T); g.fillStyle = '#9a3a2a'; g.fillRect(X + W - 3 * T - 2, Y - 6, 3 * T + 2, 12); g.fillStyle = '#5a3a1a'; g.fillRect(X + W - 2 * T, Y + T, 12, T + 2);
     g.fillStyle = '#e8d8a8'; g.fillRect(X + 4, Y + H - 10, 22, 6); // trough
     g.fillStyle = '#7a5230'; for (let i = 0; i <= W; i += 8) { g.fillRect(X + i - 1, Y, 3, 6); g.fillRect(X + i - 1, Y + H - 6, 3, 6); } for (let j = 0; j <= H; j += 8) { g.fillRect(X, Y + j - 1, 4, 3); g.fillRect(X + W - 4, Y + j - 1, 4, 3); }
-    g.fillRect(X, Y + 2, W, 2); g.fillRect(X, Y + H - 4, W / 2 - 8, 2); g.fillRect(X + W / 2 + 8, Y + H - 4, W / 2 - 8, 2); g.fillRect(X, Y, 2, H); g.fillRect(X + W - 2, Y, 2, H); return;
+    g.fillRect(X, Y + H - 4, W, 2); g.fillRect(X, Y + 2, W / 2 - 8, 2); g.fillRect(X + W / 2 + 8, Y + 2, W / 2 - 8, 2); g.fillRect(X, Y, 2, H); g.fillRect(X + W - 2, Y, 2, H); return; // gate on the road (north) side
   }
   if (b.kind === 'arsa') {
     g.fillStyle = '#9a8a6a'; g.fillRect(X, Y, W, H); g.fillStyle = '#7a6a4a'; for (let i = 0; i < 30; i += 1) { const hh = hash(b.id + i); g.fillRect(X + (hh % W), Y + ((hh >> 8) % H), 3, 2); }
@@ -146,6 +146,7 @@ import { TALK_MS, type Placed } from '../sim/place';
 import type { Corpse } from '../sim/types';
 const findPersonLite = (w: World, id: string | undefined): Person | undefined => (id ? w.people.find((p) => p.id === id) : undefined);
 export const SPRITE_SCALE = 1.4;
+let lastAnimals: PlacedAnimal[] = [];
 /** Tap marker: an expanding ring where the player tapped. */
 export const tapFx = { x: 0, y: 0, t: 0 };
 /** The Meydan election notice board (tile coords). */
@@ -169,24 +170,26 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
   if (tapFx.t && performance.now() - tapFx.t < 550) { const k = (performance.now() - tapFx.t) / 550; const tx = (tapFx.x - cam.x) * z, ty = (tapFx.y - cam.y) * z; ctx.strokeStyle = `rgba(255,240,160,${1 - k})`; ctx.lineWidth = 3 * (1 - k) + 1; ctx.beginPath(); ctx.ellipse(tx, ty, sz * (0.2 + k * 0.7), sz * (0.09 + k * 0.32), 0, 0, Math.PI * 2); ctx.stroke(); }
   if (target) { const tx = (target.x - cam.x) * z, ty = (target.y - cam.y) * z; ctx.strokeStyle = 'rgba(255,240,120,0.9)'; ctx.lineWidth = 2; const r0 = sz * (0.25 + 0.08 * Math.sin(now / 150)); ctx.beginPath(); ctx.ellipse(tx, ty, r0, r0 * 0.45, 0, 0, Math.PI * 2); ctx.stroke(); }
   // animals (visual only)
-  for (const a of placeAnimals(w, now).sort((p, q) => p.y - q.y)) {
+  lastAnimals = placeAnimals(w, now);
+  for (const a of [...lastAnimals].sort((p, q) => p.y - q.y)) {
     const s = Math.round(sz * animalSize(a.kind)); const sx = (a.x - cam.x) * z, sy = (a.y - cam.y) * z;
     if (sx < -s || sy < -s || sx > cw + s || sy > ch + s) continue;
-    const img = animalSprite(a.kind, a.moving ? Math.floor(now / 260 + a.x * 5) % 2 : 0);
+    const img = animalSprite(a.kind, a.moving ? Math.floor(now / 260 + (Math.floor(a.y * 7) % 5) / 5) % 2 : 0);
     if (a.dir < 0) { ctx.save(); ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); ctx.drawImage(img, Math.round(-s / 2), Math.round(sy - s), s, s); ctx.restore(); } else ctx.drawImage(img, Math.round(sx - s / 2), Math.round(sy - s), s, s);
+    if (myPersonId && a.owner === myPersonId) { ctx.fillStyle = '#7fd0ff'; ctx.beginPath(); ctx.moveTo(sx - 4, sy - s - 7); ctx.lineTo(sx + 4, sy - s - 7); ctx.lineTo(sx, sy - s - 1); ctx.fill(); } // yours
   }
   // people sorted by y
   const vis = placed.filter((q) => q.visible).sort((a, b) => a.y - b.y);
   for (const q of vis) {
     const sx = (q.x - cam.x) * z, sy = (q.y - cam.y) * z;
     if (sx < -sz || sy < -sz * 2 || sx > cw + sz || sy > ch + sz) continue;
-    const fr = spriteFor(q.p); const f = q.moving ? Math.floor(now / 220 + q.x * 3) % 2 : 0;
+    const fr = spriteFor(q.p); const f = q.moving ? Math.floor(now / 220 + (hash(q.p.id) % 7) / 7) % 2 : 0; // v1.9.3: steady step rhythm (the phase used to depend on x → legs flickered while walking)
     if (q.p.id === selected || q.p.id === myPersonId) {
       ctx.fillStyle = q.p.id === selected ? 'rgba(255,230,80,0.55)' : 'rgba(120,200,255,0.5)';
       ctx.beginPath(); ctx.ellipse(sx, sy, sz * 0.45, sz * 0.18, 0, 0, Math.PI * 2); ctx.fill();
     }
     const ride = isRiding(q.p); const lift = ride ? sz * 0.42 : 0;
-    if (ride) { const hs = Math.round(sz * 1.25); const hi = animalSprite('at', q.moving ? Math.floor(now / 160 + q.x * 3) % 2 : 0); if (q.dir < 0) { ctx.save(); ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); ctx.drawImage(hi, Math.round(-hs / 2), Math.round(sy - hs), hs, hs); ctx.restore(); } else ctx.drawImage(hi, Math.round(sx - hs / 2), Math.round(sy - hs), hs, hs); }
+    if (ride) { const hs = Math.round(sz * 1.25); const hi = animalSprite('at', q.moving ? Math.floor(now / 160) % 2 : 0); if (q.dir < 0) { ctx.save(); ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); ctx.drawImage(hi, Math.round(-hs / 2), Math.round(sy - hs), hs, hs); ctx.restore(); } else ctx.drawImage(hi, Math.round(sx - hs / 2), Math.round(sy - hs), hs, hs); }
     const pf = ride ? 0 : f; // seated rider: no leg swing
     if (ride) { ctx.save(); ctx.beginPath(); ctx.rect(sx - sz, sy - sz - lift - 2, sz * 2, sz * 0.78); ctx.clip(); } // legs hidden behind the horse's flank
     if (q.dir < 0) { ctx.save(); ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); ctx.drawImage(fr[pf]!, Math.round(-sz / 2), Math.round(sy - sz - lift), sz, sz); ctx.restore(); }
@@ -296,8 +299,13 @@ function drawSign(ctx: CanvasRenderingContext2D, w: World, cam: Camera, z: numbe
   if (ph !== 'bekleme') { ctx.fillStyle = 'rgba(255,220,80,0.9)'; ctx.beginPath(); ctx.arc(sx + 32 * s, sy - 20 * s, (3 + Math.sin(now / 200)) * s, 0, Math.PI * 2); ctx.fill(); }
 }
 
-export function hitTest(w: World, placed: Placed[], cam: Camera, sx: number, sy: number): { person?: Person; building?: Building; corpse?: Corpse; sign?: boolean } {
+export function hitTest(w: World, placed: Placed[], cam: Camera, sx: number, sy: number, myId: string | null = null): { person?: Person; building?: Building; corpse?: Corpse; sign?: boolean; animal?: PlacedAnimal } {
   const z = cam.z * T; const sz = T * cam.z * SPRITE_SCALE;
+  if (myId) { // v1.9.3: only YOUR animals react to a tap (others' are scenery)
+    let ba: PlacedAnimal | undefined; let bd2 = Infinity;
+    for (const a of lastAnimals) { if (a.owner !== myId) continue; const s = Math.max(22, sz * animalSize(a.kind)); const px = (a.x - cam.x) * z, py = (a.y - cam.y) * z; if (sx < px - s * 0.5 || sx > px + s * 0.5 || sy < py - s || sy > py + 4) continue; const d = -a.y; if (d < bd2) { bd2 = d; ba = a; } } // inside the sprite; the front-most (drawn last) wins
+    if (ba) return { animal: ba };
+  }
   for (const co of w.corpses ?? []) { const px = (co.x - cam.x) * z, py = (co.y - cam.y) * z - sz * 0.2; if (Math.hypot(px - sx, py - sy) < Math.max(22, sz * 0.6)) return { corpse: co }; }
   { const px = (SIGN.x - cam.x) * z, py = (SIGN.y - cam.y) * z; const s = z / 16; if (sx >= px - 6 * s && sx <= px + 34 * s && sy >= py - 20 * s && sy <= py + 18 * s) return { sign: true }; }
   const r = Math.max(22, sz * 0.7);

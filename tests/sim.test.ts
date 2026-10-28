@@ -18,7 +18,7 @@ describe('world seed', () => {
   it('has the old empire cast, ~110 people and 10 soldiers', () => {
     const w = createWorld(3, T0);
     const names = w.people.map((p) => p.name);
-    for (const n of ['Tüccar Cemal', 'Usta Bekir', 'Öğretmen Nur', 'Hamal Can', 'Hamal Burak', 'Fırıncı Ayşe', 'Fırıncı Zehra', 'Bekçi Emre', 'Savcı Tarık', 'Hâkim Süleyman', 'Kalemşör Necati', 'Hoca Abdullah', 'Maecenas']) expect(names).toContain(n);
+    for (const n of ['Tüccar Cemal', 'Usta Bekir', 'Öğretmen Nur', 'Hamal Burak', 'Fırıncı Ayşe', 'Fırıncı Zehra', 'Bekçi Emre', 'Savcı Tarık', 'Hâkim Süleyman', 'Kalemşör Necati', 'Hoca Abdullah', 'Maecenas']) expect(names).toContain(n); expect(names.some((n) => /^(Hamal|Hayvancı) Can$/.test(n))).toBe(true);
     expect(w.people.length).toBeGreaterThanOrEqual(100);
     expect(w.people.filter((p) => p.prof === 'asker').length).toBe(10);
     for (const m of ['pazar', 'gida', 'zanaat', 'yeni', 'kahve']) expect(w.buildings.find((b) => b.id === m)?.market).toBe(true);

@@ -91,7 +91,7 @@ export function distToBuilding(b: Building, p: Pt): number {
 /** The spot in front of a building's door where a walker stops. */
 export function doorSpot(b: Building): Pt { return OPEN.has(b.kind) && b.kind !== 'liman' ? { x: b.x + b.w / 2, y: b.y + b.h / 2 } : { x: b.door.x + 0.5, y: b.door.y + 0.6 }; }
 
-export type Need = { kind: 'building'; ids: string[]; label: string } | { kind: 'person'; id: string } | null;
+export type Need = { kind: 'building'; ids: string[]; label: string } | { kind: 'person'; id: string } | { kind: 'animal'; animal: import('./realm').Animal } | null;
 const MARKET_IDS = (w: World): string[] => w.buildings.filter((b) => b.market).map((b) => b.id);
 const RULER: Action['t'][] = ['answer', 'setTax', 'setHeadTax', 'setSalary', 'toggleLaw', 'startProject', 'appoint', 'pardon', 'enactLaw', 'repealLaw', 'sanction', 'directive', 'granary', 'priceCap', 'tribute', 'festivalOpen', 'festival', 'buildAt', 'veliaht', 'abdicate', 'petition'];
 /** Where an action has to be done. null = anywhere (messages, answers, settings). */
@@ -105,7 +105,9 @@ export function actionNeed(w: World, me: Person, a: Action): Need {
     case 'buyHome': case 'rentHome': return B([a.houseId], 'eve');
     case 'goHome': return me.home ? B([me.home], 'evinize') : null;
     case 'buyFarm': case 'buyAnimal': return B(['hayvan'], 'Hayvan Pazarı’na');
-    case 'buildBarn': case 'feedAnimals': case 'collectFarm': case 'slaughter': return B(['ciftlik'], 'çiftliğinize (Buğday Tarlaları)');
+    case 'slaughter': return { kind: 'animal', animal: a.animal };
+    case 'ride': return a.on ? { kind: 'animal', animal: 'at' } : null;
+    case 'buildBarn': case 'feedAnimals': case 'collectFarm': return B(['ciftlik'], 'çiftliğinize (Buğday Tarlaları)');
     case 'grantTitle': case 'stripTitle': case 'assignSpy': case 'warrant': case 'raidOrg': case 'informantPay': return B(['saray'], 'Saray’a');
     case 'searchHouse': { const t = w.people.find((p) => p.id === a.personId); return t ? B([t.home], 'şüphelinin evine') : null; }
     case 'drinkWater': return B(['kuyu', 'gida', 'pazar', me.home], 'kuyuya, evinize ya da pazara');

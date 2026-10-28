@@ -1,3 +1,4 @@
+import { ek } from './tr';
 /**
  * Hoarding (karaborsa) detection by the bekçi corps: daily patrols, suspicion from price spikes,
  * tips and gossip from neighbours, and a catch chance that depends on the bekçi's diligence and loyalty.
@@ -48,7 +49,7 @@ export function patrolDay(w: World): void {
     // neighbours who dislike the hoarder tip off the bekçi; gossip spreads the word
     const neighbours = w.people.filter((n) => n.home === p.home || (n.relations[p.id] ?? 0) < -30);
     const tipsters = neighbours.filter((n) => n.id !== p.id && (n.relations[p.id] ?? 0) < 0 && n.honesty > 40);
-    if (tipsters.length && chance(w, 0.5)) { s += 15 * Math.min(3, tipsters.length); if (chance(w, 0.4)) w.rumors.push({ day: w.day, text: `${p.name}'ın mahzeni ${GOOD_LABEL[ex[0]![0]]} dolu diyorlar…`, about: p.id }); }
+    if (tipsters.length && chance(w, 0.5)) { s += 15 * Math.min(3, tipsters.length); if (chance(w, 0.4)) w.rumors.push({ day: w.day, text: `${ek(p.name, 'ın')} mahzeni ${GOOD_LABEL[ex[0]![0]]} dolu diyorlar…`, about: p.id }); }
     if (w.rumors.some((r) => r.about === p.id && w.day - r.day <= 3)) s += 10;
     S[p.id] = clamp((S[p.id] ?? 0) + s, 0, 100);
   }
@@ -66,11 +67,11 @@ export function patrolDay(w: World): void {
 /** A bekçi searches someone: confiscates the excess (grain goes to the granary) and fines – or takes a bribe. */
 export function searchAndSeize(w: World, b: Person, t: Person): string {
   const ex = excess(t);
-  if (!ex.length) { (w.suspicion ?? {})[t.id] = 0; t.relations[b.id] = clamp((t.relations[b.id] ?? 0) - 5, -100, 100); return `${t.name}'ın evinde fazla mal çıkmadı.`; }
+  if (!ex.length) { (w.suspicion ?? {})[t.id] = 0; t.relations[b.id] = clamp((t.relations[b.id] ?? 0) - 5, -100, 100); return `${ek(t.name, 'ın')} evinde fazla mal çıkmadı.`; }
   // a corrupt bekçi may look the other way for money
   if (b.honesty < 35 && b.loyalty < 50 && t.money > 20 && !t.playerId && chance(w, 0.6)) {
     const amt = Math.round(Math.min(t.money * 0.3, 15 + ex.length * 10));
-    if (transfer(w, t.id, b.id, amt, 'karaborsa rüşveti')) { if (chance(w, 0.3)) w.rumors.push({ day: w.day, text: `Bekçi ${b.name} stokçu ${t.name}'dan rüşvet almış!`, about: b.id }); return `${b.name} rüşvet alıp göz yumdu.`; }
+    if (transfer(w, t.id, b.id, amt, 'karaborsa rüşveti')) { if (chance(w, 0.3)) w.rumors.push({ day: w.day, text: `Bekçi ${b.name} stokçu ${ek(t.name, 'dan')} rüşvet almış!`, about: b.id }); return `${b.name} rüşvet alıp göz yumdu.`; }
   }
   const parts: string[] = [];
   for (const [g, x] of ex) { t.inv[g] -= x; if (g === 'bugday') w.granary += x; else w.listings.push({ id: `L${++w.idSeq}`, sellerId: 'saray', good: g, qty: x, price: Math.round(BASE_PRICE[g] * 100) / 100, market: 'pazar' }); parts.push(`${x} ${GOOD_LABEL[g]}`); }
@@ -79,7 +80,7 @@ export function searchAndSeize(w: World, b: Person, t: Person): string {
   b.xp = (b.xp ?? 0) + 3; b.rep = clamp((b.rep ?? 0) + 2, -100, 100); t.rep = clamp((t.rep ?? 0) - 6, -100, 100);
   t.relations[b.id] = clamp((t.relations[b.id] ?? 0) - 30, -100, 100); (t.relNote ??= {})[b.id] = 'malıma el koydu';
   (w.suspicion ?? {})[t.id] = 0;
-  log(w, `🚨 Bekçi ${b.name}, ${t.name}'ın karaborsa stoğuna el koydu: ${parts.join(', ')} (ceza ${Math.round(fine)} D).`, t.id);
+  log(w, `🚨 Bekçi ${b.name}, ${ek(t.name, 'ın')} karaborsa stoğuna el koydu: ${parts.join(', ')} (ceza ${Math.round(fine)} D).`, t.id);
   if (t.playerId) personal(w, t.playerId, `Bekçi ${b.name} stoğunuza el koydu: ${parts.join(', ')}.`);
   return `El konuldu: ${parts.join(', ')}; ceza ${Math.round(fine)} D.`;
 }
