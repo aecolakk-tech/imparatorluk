@@ -156,7 +156,7 @@ export function createWorld(seed = 42, now = Date.now()): World {
     treasury: 10000, taxRate: 10, headTax: 1.75, salaries: { ...DEFAULT_SALARY }, laws: defaultLaws(),
     people: [], buildings: makeBuildings(), listings: [], prices: { ...BASE_PRICE }, market: { sold: emptyInv(), unmet: emptyInv() }, ledger: [], petitions: [], cases: [],
     projects: [{ id: 'saray-insa', name: 'Saray Kanadı İnşaatı (Usta Bekir)', site: 'santiye', cost: 1200, paid: 200, progress: 0, needed: 120, done: false }],
-    election: { nextDay: 10, candidates: [], votes: {}, seats: 5, baskanNextDay: 0, baskanCandidates: [], baskanVotes: {} }, gazette: [], events: [], todayEvents: [], players: {},
+    election: { nextDay: 10, candidates: [], votes: {}, seats: 16, baskanNextDay: 0, baskanCandidates: [], baskanVotes: {} }, gazette: [], events: [], todayEvents: [], players: {},
     regime: 'imparatorluk', meclis: initMeclis(), budget: { limit: DEFAULT_BUDGET, spent: 0, until: 20, approved: false }, schema: 4, corpses: [], escorts: [], llm: { day: '', n: 0, talkAt: 0 }, speed: 1, nature: null, nextDrought: 60, festivalUntil: 0, granary: 800, priceCaps: {}, arrests: [], chatOut: [], talks: [], offers: [], rumors: [], caravan: null, threat: null, bans: [], loans: [], outsideNet: 0, customLaws: [], suspicion: {}, treasuryBook: [], priceHist: {},
     headAwayDays: 0, children: [], proposals: [], pregnancies: [], veliaht: null, regentId: null, regentFor: null, isyan: null, deposed: null, allowStateTakeover: false, kayzerId: null, founderPersonId: null, hanedanId: '', cumhuriyet: 5, cumhuriyetDays: 0, coup: null, stats: [],
     dailyIncome: 0, dailyExpense: 0, lastSnapshotAt: now, idSeq: 0,

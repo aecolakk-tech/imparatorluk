@@ -2966,8 +2966,10 @@ function finishTrial(w, c, now) {
   const a = findPerson(w, c.accusedId);
   if (!a) return;
   const judge = findPerson(w, tr.judgeId);
-  const pGuilty = (c.evidence * ((judge?.honesty ?? 70) / 80) - tr.persuasion * 7) / 100;
-  const guilty = rand(w) < clamp(pGuilty, 0.03, 0.97);
+  const pGuilty = (c.evidence * ((judge?.honesty ?? 70) / 80) + Math.min(20, (c.witnesses?.length ?? 0) * 5) - tr.persuasion * 5) / 100;
+  const floor = c.evidence >= 80 ? Math.max(0.5, 0.85 - Math.max(0, tr.persuasion - 3) * 0.05) : 0.03;
+  const roll = rand(w);
+  const guilty = roll < clamp(Math.max(pGuilty, floor), 0.03, 0.97);
   const fromQ = placeOf(w, a.id, now);
   verdict(w, c.id, guilty, now);
   if (guilty && tr.persuasion >= 4 && c.crime !== "cinayet" && c.crime !== "isyan") {
@@ -4779,7 +4781,7 @@ function createWorld(seed = 42, now = Date.now()) {
     petitions: [],
     cases: [],
     projects: [{ id: "saray-insa", name: "Saray Kanad\u0131 \u0130n\u015Faat\u0131 (Usta Bekir)", site: "santiye", cost: 1200, paid: 200, progress: 0, needed: 120, done: false }],
-    election: { nextDay: 10, candidates: [], votes: {}, seats: 5, baskanNextDay: 0, baskanCandidates: [], baskanVotes: {} },
+    election: { nextDay: 10, candidates: [], votes: {}, seats: 16, baskanNextDay: 0, baskanCandidates: [], baskanVotes: {} },
     gazette: [],
     events: [],
     todayEvents: [],
@@ -5178,7 +5180,7 @@ function buyAnimal(w, p, a, n = 1) {
     transfer(w, seller.id, "dis", cost * 0.55, "hayvan tedariki");
   }
   herd(p)[a] += n;
-  return `${n} ${ANIMAL_LABEL[a]} ald\u0131n\u0131z${seller ? ` (${seller.name})` : ""}. G\xFCnl\xFCk yem: ${ANIMAL_FEED[a] * n} bu\u011Fday.`;
+  return `${n} ${ANIMAL_LABEL[a]} ald\u0131n\u0131z${seller ? ` (${seller.name})` : ""}. G\xFCnl\xFCk yem: ${Math.round(ANIMAL_FEED[a] * n * 10) / 10} bu\u011Fday.`;
 }
 function slaughter(w, p, a) {
   const hd = herd(p);
@@ -5718,6 +5720,7 @@ function migrate10(w) {
   w = migrate9(w);
   if ((w.schema ?? 1) >= 10) return w;
   fixPen(w);
+  w.election.seats = w.meclis.seats.length;
   for (const p of w.people) if (p.prof === "hayvanci" && /^(Hamal|Çiftçi) /.test(p.name)) p.name = p.name.replace(/^\S+ /, "Hayvanc\u0131 ");
   for (const p of w.people) p.name = p.name.replace(/^(Kayzer )(Kayzer )+/, "Kayzer ");
   w.schema = 10;

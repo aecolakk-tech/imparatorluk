@@ -105,7 +105,7 @@ export function buyAnimal(w: World, p: Person, a: Animal, n = 1): string {
   const cost = ANIMAL_PRICE[a] * n;
   if (!transfer(w, p.id, seller?.id ?? 'saray', cost, `${a} alımı`)) return `${n} ${ANIMAL_LABEL[a]} ${cost} Dinar; paranız yetmiyor.`;
   if (seller) { seller.incomeToday += cost * 0.4; transfer(w, seller.id, 'dis', cost * 0.55, 'hayvan tedariki'); }
-  herd(p)[a] += n; return `${n} ${ANIMAL_LABEL[a]} aldınız${seller ? ` (${seller.name})` : ''}. Günlük yem: ${ANIMAL_FEED[a] * n} buğday.`;
+  herd(p)[a] += n; return `${n} ${ANIMAL_LABEL[a]} aldınız${seller ? ` (${seller.name})` : ''}. Günlük yem: ${Math.round((ANIMAL_FEED[a] * n) * 10) / 10} buğday.`;
 }
 export function slaughter(w: World, p: Person, a: Animal): string {
   const hd = herd(p); if (hd[a] <= 0) return 'O hayvandan yok.'; if (!ANIMAL_MEAT[a]) return 'At kesilmez!';
@@ -417,7 +417,8 @@ export function fixPen(w: World): void {
 }
 export function migrate10(w: World): World {
   w = migrate9(w); if ((w.schema ?? 1) >= 10) return w;
-  fixPen(w); for (const p of w.people) if (p.prof === 'hayvanci' && /^(Hamal|Çiftçi) /.test(p.name)) p.name = p.name.replace(/^\S+ /, 'Hayvancı '); // the seller kept his old job title
+  fixPen(w); w.election.seats = w.meclis.seats.length; // the sign said “5 sandalye”
+  for (const p of w.people) if (p.prof === 'hayvanci' && /^(Hamal|Çiftçi) /.test(p.name)) p.name = p.name.replace(/^\S+ /, 'Hayvancı '); // the seller kept his old job title
   for (const p of w.people) p.name = p.name.replace(/^(Kayzer )(Kayzer )+/, 'Kayzer '); // "Kayzer Kayzer Enes"
   w.schema = 10; return w;
 }

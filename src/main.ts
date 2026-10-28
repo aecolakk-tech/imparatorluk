@@ -638,7 +638,7 @@ function electionInfo(w: World): HTMLElement {
   const row = (k: string, label: string, days: string): HTMLElement => h('tr', { class: ph.phase === k ? 'on' : '' }, h('td', {}, label), h('td', {}, days));
   return h('div', {}, h('h2', {}, '🗳 Meclis Seçim Tabelası'), h('div', { class: 'muted' }, `Bugün ${w.day}. gün. ${ph.label}.`),
     h('table', { class: 'sign' }, row('aday', '1. Adaylık', `${Math.max(1, d.adayFrom)}–${d.adayTo}. gün (Meclis’e gidip aday olun)`), row('propaganda', '2. Propaganda', `${d.propFrom}–${d.propTo}. gün (afiş, meydan konuşması)`), row('oylama', '3. Seçim', `${d.vote}. gün (Meclis ya da Meydan’daki sandık)`)),
-    h('div', { class: 'muted' }, `Askerler ve bekçiler aday olamaz. ${w.election.seats} sandalye. Adaylar: ${w.election.candidates.map((id) => findPerson(w, id)?.name).filter(Boolean).join(', ') || 'henüz yok'}.`));
+    h('div', { class: 'muted' }, `Askerler ve bekçiler aday olamaz. ${w.meclis.seats.length} sandalye. Adaylar: ${w.election.candidates.map((id) => findPerson(w, id)?.name).filter(Boolean).join(', ') || 'henüz yok'}.`));
 }
 function openElectionSign(): void { openSheet(() => h('div', { class: 'stack' }, electionInfo(world!), electionCard(ctx()))); }
 let lastCorpses = new Set<string>(); let lastJail = 0; let lastIsyan = false;

@@ -139,8 +139,9 @@ export function finishTrial(w: World, c: CourtCase, now: number): void {
   for (const o of w.cases) if (o !== c && o.accusedId === c.accusedId && o.stage !== 'kapandi' && (o.crime === c.crime || (o.victimId && o.victimId === c.victimId))) { o.stage = 'kapandi'; o.verdict = 'dusuruldu'; o.sentence = 'Aynı olay için görülen davayla birleştirildi.'; if (o.trial) { o.trial.done = true; o.trial.doneAt = now; } }
   const a = findPerson(w, c.accusedId); if (!a) return;
   const judge = findPerson(w, tr.judgeId);
-  const pGuilty = (c.evidence * ((judge?.honesty ?? 70) / 80) - tr.persuasion * 7) / 100;
-  const guilty = rand(w) < clamp(pGuilty, 0.03, 0.97);
+  const pGuilty = (c.evidence * ((judge?.honesty ?? 70) / 80) + Math.min(20, (c.witnesses?.length ?? 0) * 5) - tr.persuasion * 5) / 100; // v1.9.3: witnesses weigh; one good sentence no longer erases a 90-evidence murder
+  const floor = c.evidence >= 80 ? Math.max(0.5, 0.85 - Math.max(0, tr.persuasion - 3) * 0.05) : 0.03; // v1.9.3: a well-witnessed deed is rarely acquitted on words alone
+  const roll = rand(w); const guilty = roll < clamp(Math.max(pGuilty, floor), 0.03, 0.97);
   const fromQ = placeOf(w, a.id, now);
   verdict(w, c.id, guilty, now);
   if (guilty && tr.persuasion >= 4 && c.crime !== 'cinayet' && c.crime !== 'isyan') { a.jailedDays = 0; c.sentence = `${c.sentence?.replace(/^\d+ gün zindan, /, '') ?? ''} (zindan yerine para cezası – savunma ikna edici bulundu)`; }

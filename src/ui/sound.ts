@@ -138,3 +138,10 @@ export function startMusic(): void {
   musicTimer = window.setInterval(() => { const x = ac(); if (!x || !dayBus || !nightBus) return; while (nextBar < x.currentTime + 1.5) nextBar += mood === 'gece' ? scheduleNightBar(x, nightBus, nextBar) : scheduleBar(x, dayBus, nextBar); }, 300);
 }
 export function stopMusic(): void { if (musicTimer !== null) { clearInterval(musicTimer); musicTimer = null; } if (musicGain) { musicGain.disconnect(); musicGain = null; dayBus = null; nightBus = null; } }
+/** Test hook: render ~12 s of the day or night track into an OfflineAudioContext and report its loudness. */
+export async function renderNightForTest(oc: OfflineAudioContext, m: 'gun' | 'gece'): Promise<{ rms: number; peak: number }> {
+  const out = oc.createGain(); out.connect(oc.destination); let t = 0.1; const ac2 = oc as unknown as AudioContext;
+  while (t < oc.length / oc.sampleRate - 1) t += m === 'gece' ? scheduleNightBar(ac2, out, t) : scheduleBar(ac2, out, t);
+  const buf = await oc.startRendering(); const d = buf.getChannelData(0); let s = 0, pk = 0; for (let i = 0; i < d.length; i++) { s += d[i]! * d[i]!; pk = Math.max(pk, Math.abs(d[i]!)); }
+  return { rms: Math.sqrt(s / d.length), peak: pk };
+}
