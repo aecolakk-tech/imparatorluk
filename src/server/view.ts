@@ -62,6 +62,8 @@ function sections(w: World, myPersonId: string | null): Record<string, unknown> 
     out[k] = v;
   }
   out.ledger = (w.ledger ?? []).filter((l) => l.from === myPersonId || l.to === myPersonId);
+  // the accused's "📍 Tanık çağır" picker reads the position log (who was near him at the crime hour): sent only while on trial
+  if (myPersonId && w.posLog && (w.cases ?? []).some((c) => c.trial && !c.verdict && c.accusedId === myPersonId)) out.posLog = w.posLog;
   return out;
 }
 

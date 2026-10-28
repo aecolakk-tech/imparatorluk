@@ -17,7 +17,7 @@ import { assignSlot, hotbarSlots } from './controls';
 import { marketPrice } from '../sim/economy';
 
 export const APP_NAME = 'Medieval Empire';
-export const VERSION = 'v2.0.4';
+export const VERSION = 'v2.0.5';
 const EAT: Good[] = ['ekmek', 'et', 'balik', 'yumurta', 'sut', 'su'];
 
 /** 🎒 Çanta: carried weapons (draw / holster), food & water (use), and the house chest. */
@@ -100,6 +100,8 @@ export function eventOptions(kind: string, env: PopupEnv, close: () => void): HT
 export function eventTitle(kind: string): string { return `${ICON[kind] ?? '⚠'} ${TITLE[kind] ?? 'OLAY'}`; }
 
 export const WHATS_NEW: string[] = [
+  '⚡ v2.0.5 – Daha az takılma: sunucu artık her 6 saniyede bütün dünyayı (~300 KB) değil, yalnızca değişenleri gönderir (çoğu zaman ~8 KB). Bir işlem yaptığınızda yeni durum işlemin cevabıyla gelir; ayrıca beklemezsiniz.',
+  '🐢 Zayıf telefonlarda harita çizimi hafifledi (insanların konumu daha seyrek hesaplanır, yazılar ve konuşma balonları önbellekten çizilir).',
   '🛠 YENİ – İş görevi: işiniz varsa iş yerinize gidin, binaya girip “İş görevi yap”a basın. 3 kısa adım (ör. meyhane: sipariş al → içki doldur → servis). Günde 3 görev = günlük ücret + 1 itibar hemen ödenir; hızlı bitirene bahşiş. Artık bütün vardiya iş yerinde beklemek gerekmiyor. Menü → İşin: “Bugün 1/3 görev”.',
   '🧯 Bir işlem başarısız olursa artık mutlaka sebebini söyleyen bir uyarı çıkar (sessizce “hiçbir şey olmuyor” durumu kalmadı); sunucu meşgulse işlem daha çok kez denenir.',
   '📌 “Ana ekrana ekle” bandı artık açık pencerelerin düğmelerinin üstüne çıkmıyor (Al/Başvur’a basınca o banda basılıyordu).',

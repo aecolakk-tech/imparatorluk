@@ -6,7 +6,7 @@ export async function boot(name = 'Oyuncu Test', extra = '') {
   const errors = []; p.on('pageerror', (e) => errors.push('pageerror: ' + e.message)); p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   p.on('dialog', (d) => void d.accept(d.type() === 'prompt' ? 'SIFIRLA' : undefined));
   const I = (f, ...a) => p.evaluate(f, ...a);
-  await p.goto('http://localhost:5173/?live' + extra, { waitUntil: 'networkidle0' });
+  await p.goto('http://localhost:' + (process.env.PORT ?? 5173) + '/?live' + extra, { waitUntil: 'networkidle0' });
   await I(async () => { localStorage.clear(); const st = await (await fetch('__live.json')).json(); localStorage.setItem('imparatorluk-mock-v1', JSON.stringify(st)); localStorage.setItem('imp-guide-done', '1'); localStorage.setItem('imp-music', '0'); });
   await p.reload({ waitUntil: 'networkidle0' });
   await I(() => [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Davetle kayıt')).click()); await sleep(300);

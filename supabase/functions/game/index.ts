@@ -174,7 +174,7 @@ Deno.serve(async (req) => {
           return json(r);
         }
         try { // v2.0.3: players' actions retry harder and never fail silently; v2.0.5: the answer carries the new world view (no extra heartbeat)
-          const cm: Committed = { state: null, ver: 0 }; const r = await mutate((w) => core.act(w, uid, body.action, now), 10, cm);
+          const cm: Committed = { state: null, ver: 0 }; const r = await mutate((w) => core.act(w, uid, body.action, now), 10, cm, uid); // v2.0.5: a refused action that changed nothing writes nothing
           return jsonZ(req, body.vw === 1 ? { ...r, view: viewOf(cm, uid, body.have) } : r);
         }
         catch (e) { return json({ ok: false, msg: `Dünya şu an çok meşgul; işleminiz yapılamadı, tekrar deneyin. (${String((e as Error).message ?? e).slice(0, 60)})` }); }

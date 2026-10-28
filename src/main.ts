@@ -42,7 +42,8 @@ import { openJobTask } from './ui/jobtask';
 import { isSoldierJob, tasksToday, taskFor, TASKS_PER_DAY } from './sim/jobtask';
 import { ambience, installClickSounds, isMuted, setMuted, sfx, musicOn, setMusic, setMusicMood, musicMood } from './ui/sound';
 import { needTarget, myPos } from './sim/v16';
-import { findPath, WALK_SPEED, walkEnd, doorSpot, distToBuilding, REACH, PERSON_REACH, type Pt } from './sim/move';
+import { playerWalking } from './sim/place';
+import { findPath, WALK_SPEED, walkEnd, walkPos, doorSpot, distToBuilding, REACH, PERSON_REACH, type Pt } from './sim/move';
 import { electionDates, electionPhase } from './sim/tick';
 import { CRIME_LABEL } from './sim/ai';
 import type { Corpse, CourtCase } from './sim/types';
@@ -742,6 +743,21 @@ let lastHud = 0; let lastFrame = performance.now();
 /** v1.9 NPC smoothing: the schedule/path target is computed from (server) time every frame; what we DRAW follows it
  * with a time-based critically-damped chase, so snapshot corrections, schedule switches and overrides never snap. */
 const shown = new Map<string, { x: number; y: number; vx: number; vy: number; dir: number; t: number }>();
+/**
+ * v2.0.5 lag fix: the full placement pass (schedules, doors, strolls, crowd separation for every person) was the
+ * biggest per-frame cost on slow phones. It now runs ~12×/s; in between, the last targets are reused (the spring in
+ * smoothPeople keeps NPC motion smooth) and only walking players (you included) are moved exactly every frame.
+ */
+const PLACE_MS = 80; let placeCache: { at: number; w: World; list: Placed[] } | null = null;
+function placeAll(w: World, now: number): Placed[] {
+  const t = performance.now();
+  if (!placeCache || placeCache.w !== w || t - placeCache.at > PLACE_MS || t < placeCache.at) placeCache = { at: t, w, list: placePeople(w, now) };
+  return placeCache.list.map((q) => {
+    const p = q.p;
+    if (p.walk && q.visible && !p.jailedDays && !w.combat && !w.isyan && playerWalking(w, p, now)) { const r = walkPos(p.walk, now); return { ...q, x: r.pt.x, y: r.pt.y, moving: r.moving, dir: r.dir }; }
+    return { ...q };
+  });
+}
 function smoothPeople(list: Placed[], mine: string | null): Placed[] {
   const t = performance.now();
   for (const q of list) {
@@ -982,7 +998,7 @@ function frameInner(): void {
   const prof0 = performance.now();
   if (world && stat) {
     const now = gameNow();
-    const meP0 = me(); placed = smoothPeople(placePeople(world, now), meP0?.id ?? null);
+    const meP0 = me(); placed = smoothPeople(placeAll(world, now), meP0?.id ?? null);
     const meP = meP0; const mq = meP ? placed.find((q) => q.p.id === meP.id) : undefined;
     const dt = Math.min(0.1, (performance.now() - lastFrame) / 1000); lastFrame = performance.now();
     if (mq && followCam && !dragStart) { const vw = canvas.width / (cam.z * T), vh = canvas.height / (cam.z * T); const tx = mq.x - vw / 2, ty = mq.y - vh / 2 - 0.5; const k = Math.min(1, dt * 6); cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; clampCam(); }
@@ -1004,12 +1020,13 @@ async function tick(): Promise<void> {
   try {
     const fw = be.takeFresh(); // v2.0.5: an action already brought the new world back: no extra round trip
     const r = fw ? { world: fw, summary: null } : await withTimeout(be.heartbeat(), 15_000); if (!fw) ((window as unknown as { __hb?: number[] }).__hb ??= []).push(Math.round(performance.now()));
-    const first = !world; world = r.world;
+    const tp0 = performance.now(); const first = !world; world = r.world;
     if (world.serverNow) { const ns = world.serverNow - Date.now(); skew = first || Math.abs(ns - skew) > 3000 ? ns : skew + (ns - skew) * 0.15; } // smooth clock: no jumps
     const mm = me(); if (localWalk && mm && mm.id === localWalk.id && gameNow() < walkEnd(localWalk.walk) + 15_000) mm.walk = localWalk.walk;
     if (first) { stat = buildStatic(world); const m = me(); const b = m ? world.buildings.find((x) => x.id === m.home) : undefined; if (b) { cam.x = b.x - canvas.width / (cam.z * T) / 2; cam.y = b.y - canvas.height / (cam.z * T) / 2; clampCam(); } }
     if (r.summary) modal(maecenas(r.summary));
     renderDock(); stateNotices(); liveNotices(first); statToasts(first); if (sheet && !sheetPointer) rerenderSheet(); lastWorldAt = performance.now(); const onb = onboarding(); events(first, onb); trialPopup(); if (!onb) { disasterPopup(); v2Popups(); }
+    { const tm = ((window as unknown as { __tickMs?: number[] }).__tickMs ??= []); tm.push(Math.round(performance.now() - tp0)); if (tm.length > 50) tm.shift(); } // v2.0.5 profiling: UI work per world update
   } catch (e) { console.warn('heartbeat', e); } finally { ticking = false; }
 }
 

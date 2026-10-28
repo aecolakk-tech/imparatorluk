@@ -6536,7 +6536,7 @@ function hash3(s) {
   }
   return h >>> 0;
 }
-function placeAnimals(w, now) {
+function animalLayout(w) {
   const out = [];
   const B = new Map(w.buildings.map((b2) => [b2.id, b2]));
   const pen = B.get("hayvan");
@@ -6549,7 +6549,8 @@ function placeAnimals(w, now) {
       const n2 = Math.min(kind === "tavuk" ? 8 : 5, hd[kind] - (kind === "at" && p.riding ? 1 : 0));
       if (n2 <= 0) continue;
       for (let i = 0; i < n2; i++) {
-        const h = hash3(p.id + kind + i);
+        const key = p.id + kind + i;
+        const h = hash3(key);
         let bx, by, bw, bh;
         if (area) {
           const sub = area === farm ? hash3(p.id) % 6 : 0;
@@ -6565,22 +6566,38 @@ function placeAnimals(w, now) {
           bw = 2.6;
           bh = 0.8;
         }
-        const P = 9e3 + h % 7e3;
-        const ph = now / P + h % 997 / 997;
-        const k = Math.floor(ph), f = ph - k;
-        const spot = (j) => {
-          const a = hash3(p.id + kind + i + ":" + j);
-          return [bx + a % 1e3 / 1e3 * bw, by + (a >>> 10) % 1e3 / 1e3 * bh];
-        };
-        const [ax, ay] = spot(k), [cx, cy] = spot(k + 1);
-        const wf = kind === "tavuk" ? 0.25 : 0.4;
-        const e = Math.min(1, f / wf);
-        const s = e * e * (3 - 2 * e);
-        out.push({ kind, x: ax + (cx - ax) * s, y: ay + (cy - ay) * s, dir: cx >= ax ? 1 : -1, moving: f < wf, owner: p.id });
+        out.push({ kind, owner: p.id, key, h, bx, by, bw, bh, k: NaN, a: [0, 0], b: [0, 0] });
       }
     }
   }
   return out;
+}
+function animalsAt(layout, now) {
+  const out = [];
+  for (const L of layout) {
+    const { h } = L;
+    const P = 9e3 + h % 7e3;
+    const ph = now / P + h % 997 / 997;
+    const k = Math.floor(ph), f = ph - k;
+    if (L.k !== k) {
+      const spot = (j) => {
+        const a = hash3(L.key + ":" + j);
+        return [L.bx + a % 1e3 / 1e3 * L.bw, L.by + (a >>> 10) % 1e3 / 1e3 * L.bh];
+      };
+      L.a = spot(k);
+      L.b = spot(k + 1);
+      L.k = k;
+    }
+    const [ax, ay] = L.a, [cx, cy] = L.b;
+    const wf = L.kind === "tavuk" ? 0.25 : 0.4;
+    const e = Math.min(1, f / wf);
+    const s = e * e * (3 - 2 * e);
+    out.push({ kind: L.kind, x: ax + (cx - ax) * s, y: ay + (cy - ay) * s, dir: cx >= ax ? 1 : -1, moving: f < wf, owner: L.owner });
+  }
+  return out;
+}
+function placeAnimals(w, now) {
+  return animalsAt(animalLayout(w), now);
 }
 var ANIMAL_REACH = 1.1;
 function ownAnimals(w, p, kind, now) {
@@ -12564,6 +12581,100 @@ function applyAdmin(w, op) {
   }
 }
 
+// src/server/view.ts
+var VIEW_V = 1;
+var SERVER_ONLY = /* @__PURE__ */ new Set(["posLog", "posAt", "crimeLog", "llm", "chatOut"]);
+var sent = /* @__PURE__ */ new Map();
+var SENT_MAX = 4e3;
+function remember(hash4, p) {
+  let f = sent.get(hash4);
+  if (!f) {
+    f = {};
+    for (const [k, v] of Object.entries(p)) if (v !== void 0) f[k] = JSON.stringify(v);
+    sent.set(hash4, f);
+    if (sent.size > SENT_MAX) sent.delete(sent.keys().next().value);
+  }
+  return f;
+}
+function patchOf(p, base, b2) {
+  const f = {};
+  const x = [];
+  let n2 = 0;
+  for (const [k, v] of Object.entries(p)) {
+    if (v === void 0) continue;
+    const j = JSON.stringify(v);
+    if (base[k] !== j) {
+      f[k] = v;
+      n2++;
+    }
+  }
+  for (const k of Object.keys(base)) if (p[k] === void 0) x.push(k);
+  return n2 || x.length ? { id: p.id, b: b2, f, ...x.length ? { x } : {} } : null;
+}
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+function sections(w, myPersonId) {
+  const out = {};
+  for (const [k, v] of Object.entries(w)) {
+    if (k === "people" || k === "players" || SERVER_ONLY.has(k) || v === void 0) continue;
+    out[k] = v;
+  }
+  out.ledger = (w.ledger ?? []).filter((l) => l.from === myPersonId || l.to === myPersonId);
+  if (myPersonId && w.posLog && (w.cases ?? []).some((c) => c.trial && !c.verdict && c.accusedId === myPersonId)) out.posLog = w.posLog;
+  return out;
+}
+function makeView(w, playerId, have) {
+  const myPersonId = playerId ? w.players[playerId]?.personId ?? null : null;
+  const ok3 = !!have && have.v === VIEW_V;
+  const hs = ok3 ? have.s ?? {} : {};
+  const hp = ok3 ? have.p ?? {} : {};
+  const s = {};
+  const h = {};
+  for (const [k, v] of Object.entries(sections(w, myPersonId))) {
+    const json = JSON.stringify(v);
+    if (json === void 0) continue;
+    const x = hashStr(json);
+    h[k] = x;
+    if (hs[k] !== x) s[k] = v;
+  }
+  const ids = [];
+  const upd = [];
+  const ph = {};
+  for (const p of w.people) {
+    const x = hashStr(JSON.stringify(p));
+    ids.push(p.id);
+    ph[p.id] = x;
+    const had = hp[p.id];
+    if (had === x && p.id !== myPersonId) {
+      remember(x, p);
+      continue;
+    }
+    const base = had ? sent.get(had) : void 0;
+    const pt = base && p.id !== myPersonId ? patchOf(p, base, had) : null;
+    upd.push(pt ?? p);
+    remember(x, p);
+  }
+  const pls = w.players ?? {};
+  const plu = {};
+  const plh = {};
+  const hpl = ok3 ? have.l ?? {} : {};
+  for (const [id, pl] of Object.entries(pls)) {
+    const x = hashStr(JSON.stringify(pl));
+    plh[id] = x;
+    if (hpl[id] !== x) plu[id] = pl;
+  }
+  return { v: VIEW_V, s, h, p: { ids, upd, h: ph }, pl: { upd: plu, h: plh } };
+}
+function haveOf(view) {
+  return view ? { v: view.v, s: view.h, p: view.p.h, l: view.pl?.h ?? {} } : null;
+}
+
 // src/server/core.ts
 function drainChat(w) {
   const out = (w.chatOut ?? []).map((m) => ({ ...m, text: tidy(m.text) }));
@@ -12746,6 +12857,7 @@ function resetWorld(w, now) {
   return ids;
 }
 export {
+  VIEW_V,
   act2 as act,
   admin,
   applySpeeches,
@@ -12754,6 +12866,8 @@ export {
   createWorld,
   drainChat,
   filterProfanity,
+  hashStr,
+  haveOf,
   heartbeat,
   judgeReply,
   judgeRequest,
@@ -12761,6 +12875,7 @@ export {
   llmOrder,
   llmSpend,
   makeChat,
+  makeView,
   migrateWorld,
   personOf,
   rateOk,

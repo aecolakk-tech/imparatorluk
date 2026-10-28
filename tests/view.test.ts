@@ -34,6 +34,13 @@ describe('v2.0.5 slim world view', () => {
     expect(cw.ledger.length).toBeGreaterThan(0); expect(cw.ledger.every((l) => l.from === me || l.to === me)).toBe(true);
     expect(cw.people.length).toBe(w.people.length);
   });
+  it('the position log reaches only an accused on trial (Tanık çağır picker needs it)', () => {
+    const w = setup(); w.posLog = { p1: [[1, 2, 3]] }; const me = w.players.u2!.personId;
+    expect(applyView(null, null, wire(makeView(w, 'u2', null)))!.posLog).toBeUndefined();
+    w.cases.push({ id: 'C1', accusedId: me, crime: 'hirsizlik', victimId: null, amount: 0, evidence: 1, stage: 'dava', day: w.day, deadline: w.day + 2, trial: { msgs: [] } } as never);
+    expect(applyView(null, null, wire(makeView(w, 'u2', null)))!.posLog).toEqual(w.posLog);
+    expect(applyView(null, null, wire(makeView(w, 'f', null)))!.posLog).toBeUndefined();
+  });
   it('a delta computed against a base the client no longer holds is refused (→ full view), never half-applied', () => {
     const w = setup(); const v0 = wire(makeView(w, 'u2', null)); const c0 = applyView(null, null, v0)!;
     heartbeat(w, 'u2', T0 + 4 * 3600_000); const v1 = wire(makeView(w, 'u2', haveOf(v0))); const c1 = applyView(c0, v0, v1)!;

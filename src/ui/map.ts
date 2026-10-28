@@ -7,7 +7,8 @@ import { electionPhase } from '../sim/tick';
 import { ROADS_X, ROADS_Y } from '../sim/world';
 import { shade, spriteFor } from './sprites';
 import { drawIcon } from './icons';
-import { animalSprite, animalSize, placeAnimals, isRiding, type PlacedAnimal } from './animals';
+import { animalSprite, animalSize, isRiding, type PlacedAnimal } from './animals';
+import { animalLayout, animalsAt, type AnimalSlot } from '../sim/herdpos';
 
 export const T = 16;
 
@@ -148,6 +149,18 @@ import { TALK_MS, type Placed } from '../sim/place';
 import type { Corpse } from '../sim/types';
 import { yearsOf } from '../sim/age';
 
+/** v2.0.5: text widths are cached (labels and bubbles were re-measured every frame; measureText was a top cost on slow phones) */
+const mtCache = new Map<string, number>();
+function textW(ctx: CanvasRenderingContext2D, s: string): number { const k = ctx.font + '|' + s; let v = mtCache.get(k); if (v === undefined) { v = ctx.measureText(s).width; if (mtCache.size > 4000) mtCache.clear(); mtCache.set(k, v); } return v; }
+
+
+/** v2.0.5: animal layout per received world (each server update brings new people/buildings arrays; the client never mutates them) */
+let animalCache: { people: unknown; buildings: unknown; layout: AnimalSlot[] } | null = null;
+function layoutOf(w: World): AnimalSlot[] {
+  if (!animalCache || animalCache.people !== w.people || animalCache.buildings !== w.buildings) animalCache = { people: w.people, buildings: w.buildings, layout: animalLayout(w) };
+  return animalCache.layout;
+}
+
 /** v2.0.1 D13: body height scale for under-16s. bebek/çocuk 0–6: 55→60 %, genç 7–16: 65→100 % (linear). */
 export function kidScale(years: number): number { if (years >= 16) return 1; if (years <= 6) return 0.55 + 0.05 * Math.max(0, years) / 6; return 0.65 + 0.35 * (years - 7) / 9; }
 /** Head rows keep more of their size than the body (kids have proportionally bigger heads). */
@@ -195,7 +208,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
   if (tapFx.t && performance.now() - tapFx.t < 550) { const k = (performance.now() - tapFx.t) / 550; const tx = (tapFx.x - cam.x) * z, ty = (tapFx.y - cam.y) * z; ctx.strokeStyle = `rgba(255,240,160,${1 - k})`; ctx.lineWidth = 3 * (1 - k) + 1; ctx.beginPath(); ctx.ellipse(tx, ty, sz * (0.2 + k * 0.7), sz * (0.09 + k * 0.32), 0, 0, Math.PI * 2); ctx.stroke(); }
   if (target) { const tx = (target.x - cam.x) * z, ty = (target.y - cam.y) * z; ctx.strokeStyle = 'rgba(255,240,120,0.9)'; ctx.lineWidth = 2; const r0 = sz * (0.25 + 0.08 * Math.sin(now / 150)); ctx.beginPath(); ctx.ellipse(tx, ty, r0, r0 * 0.45, 0, 0, Math.PI * 2); ctx.stroke(); }
   // animals (visual only)
-  lastAnimals = placeAnimals(w, now);
+  lastAnimals = animalsAt(layoutOf(w), now);
   for (const a of [...lastAnimals].sort((p, q) => p.y - q.y)) {
     const s = Math.round(sz * animalSize(a.kind)); const sx = (a.x - cam.x) * z, sy = (a.y - cam.y) * z;
     if (sx < -s || sy < -s || sx > cw + s || sy > ch + s) continue;
@@ -257,7 +270,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
     if (sx < -200 || sy < -40 || sx > cw + 200 || sy > ch + 40) continue;
     if (b.kind === 'ev') { drawIcon(ctx, 'house', sx, sy, fs * 1.5); continue; }
     const label = b.name;
-    const tw = ctx.measureText(label).width + 10;
+    const tw = textW(ctx, label) + 10;
     ctx.fillStyle = 'rgba(20,14,8,0.78)'; ctx.fillRect(sx - tw / 2, sy - fs * 0.75, tw, fs * 1.5);
     ctx.fillStyle = b.market ? '#ffd76a' : '#ffffff'; ctx.fillText(label, sx, sy);
   }
@@ -269,7 +282,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
     if (!q.p.thought) continue;
     const sx = (q.x - cam.x) * z, sy = (q.y - cam.y) * z - sz - 8;
     const text = q.p.thought.length > 34 ? q.p.thought.slice(0, 33) + '…' : q.p.thought;
-    const tw = ctx.measureText(text).width + 12;
+    const tw = textW(ctx, text) + 12;
     ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.strokeStyle = '#222'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.roundRect(sx - tw / 2, sy - 22, tw, 20, 6); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#222'; ctx.fillText(text, sx, sy - 12);
@@ -299,16 +312,27 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
   }
 }
 
-function bubble(ctx: CanvasRenderingContext2D, sx: number, sy: number, raw: string, cw: number): void {
+/** v2.0.5: a speech bubble's box and text are drawn once into a small canvas and reused (text drawing every frame was a top cost) */
+const bubbleCache = new Map<string, { c: HTMLCanvasElement; tw: number; bh: number }>();
+function bubbleImg(font: string, raw: string): { c: HTMLCanvasElement; tw: number; bh: number } {
+  const key = font + '|' + raw; const hit = bubbleCache.get(key); if (hit) return hit;
   const words = raw.split(' '); const rows: string[] = []; let cur = '';
   for (const wd of words) { if ((cur + ' ' + wd).trim().length > 30 && cur) { rows.push(cur); cur = wd; } else cur = (cur + ' ' + wd).trim(); }
   if (cur) rows.push(cur); const lines = rows.slice(0, 3); if (rows.length > 3) lines[2] = lines[2]!.slice(0, 28) + '…';
-  const lh = 15; const tw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14; const bh = lines.length * lh + 8;
+  const c = document.createElement('canvas'); const g = c.getContext('2d')!; g.font = font;
+  const lh = 15; const tw = Math.ceil(Math.max(...lines.map((l) => g.measureText(l).width)) + 14); const bh = lines.length * lh + 8;
+  const R = 2; c.width = (tw + 4) * R; c.height = (bh + 4) * R; g.scale(R, R); g.translate(2, 2); g.font = font;
+  g.fillStyle = 'rgba(255,250,232,0.97)'; g.strokeStyle = '#6a4a1a'; g.lineWidth = 1.5;
+  g.beginPath(); g.roundRect(0, 0, tw, bh, 8); g.fill(); g.stroke();
+  g.fillStyle = '#3a2a10'; g.textAlign = 'left'; g.textBaseline = 'middle'; lines.forEach((l, i) => g.fillText(l, 7, 4 + lh / 2 + i * lh));
+  const v = { c, tw, bh }; if (bubbleCache.size > 120) bubbleCache.delete(bubbleCache.keys().next().value!); bubbleCache.set(key, v); return v;
+}
+function bubble(ctx: CanvasRenderingContext2D, sx: number, sy: number, raw: string, cw: number): void {
+  const { c, tw, bh } = bubbleImg(ctx.font, raw);
   const x = Math.max(4, Math.min(cw - tw - 4, sx - tw / 2));
-  ctx.fillStyle = 'rgba(255,250,232,0.97)'; ctx.strokeStyle = '#6a4a1a'; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.roundRect(x, sy - bh, tw, bh, 8); ctx.fill(); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(sx - 5, sy - 1); ctx.lineTo(sx, sy + 7); ctx.lineTo(sx + 5, sy - 1); ctx.fill();
-  ctx.fillStyle = '#3a2a10'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; lines.forEach((l, i) => ctx.fillText(l, x + 7, sy - bh + 4 + lh / 2 + i * lh)); ctx.textAlign = 'center';
+  ctx.drawImage(c, x - 2, sy - bh - 2, tw + 4, bh + 4);
+  ctx.fillStyle = 'rgba(255,250,232,0.97)'; ctx.beginPath(); ctx.moveTo(sx - 5, sy - 1); ctx.lineTo(sx, sy + 7); ctx.lineTo(sx + 5, sy - 1); ctx.fill();
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; // same context state as before the cache
 }
 function drawCorpse(ctx: CanvasRenderingContext2D, co: Corpse, cam: Camera, z: number, sz: number, now: number): void {
   const sx = (co.x - cam.x) * z, sy = (co.y - cam.y) * z; const grow = Math.min(1, (now - co.at) / 4000);
