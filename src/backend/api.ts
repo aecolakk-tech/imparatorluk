@@ -16,6 +16,8 @@ export interface Backend {
   logout(): Promise<void>;
   heartbeat(): Promise<{ world: World; summary: string | null }>;
   act(a: Action): Promise<ActionResult>;
+  /** v2.0.5: world that came back with the last action (null if none / already used) */
+  takeFresh(): World | null;
   chat(text: string, toPersonId: string | null): Promise<string | null>;
   messages(): Promise<ChatMsg[]>;
   admin(r: AdminRequest): Promise<string>;

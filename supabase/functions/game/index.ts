@@ -69,16 +69,44 @@ async function storeNpcChat(msgs: any[]) {
   if (!msgs.length) return;
   await db.from('messages').insert(msgs.map((m) => ({ from_user: null, from_person: m.fromPersonId, from_name: m.fromName, to_person: m.toPersonId, text: String(m.text).slice(0, 280), created_at: new Date(m.at).toISOString() })));
 }
-async function mutate<T>(f: (w: any) => T, tries = 5): Promise<T> {
+/** commit info of the last successful mutate (per request: set right before mutate returns) */
+interface Committed { state: any; ver: number }
+/**
+ * read → mutate → compare-and-swap commit, retried on conflict.
+ * v2.0.5: `skipIfSame` (heartbeats): when the change is only the caller's own "last seen" clock (fresh < 20 s) and the
+ * server clock field, nothing is written – the world is identical, so the version check stays correct and no row is rewritten.
+ */
+async function mutate<T>(f: (w: any) => T, tries = 5, out?: Committed, skipIfSame?: string): Promise<T> {
   for (let i = 0; i < tries; i++) {
     const { state, version } = await loadWorld();
+    const sig = skipIfSame ? quietSig(state, skipIfSame) : null; const seen0 = skipIfSame ? state.players?.[skipIfSame]?.lastSeen ?? 0 : 0;
     const r = f(state);
     const npc = core.drainChat(state);
+    if (sig !== null && !npc.length && Date.now() - seen0 < 20_000 && quietSig(state, skipIfSame!) === sig) {
+      state.players[skipIfSame!].lastSeen = seen0; // what is stored
+      if (out) { out.state = state; out.ver = version; } return r;
+    }
     const { data: ok } = await db.rpc('commit_world', { new_state: state, expected: version });
-    if (ok) { await storeNpcChat(npc); return r; }
+    if (ok) { await storeNpcChat(npc); if (out) { out.state = state; out.ver = version + 1; } return r; }
     await new Promise((res) => setTimeout(res, (40 + Math.random() * 160) * (1 + Math.min(i, 4) * 0.5))); // v2.0.2: jittered back-off (attack spam starved heartbeats)
   }
   throw new Error('Dünya meşgul, tekrar deneyin.');
+}
+/** the world without the fields a heartbeat always touches (server clock, caller's lastSeen) */
+function quietSig(w: any, uid: string): string {
+  const sn = w.serverNow; const pl = w.players?.[uid]; const ls = pl?.lastSeen;
+  w.serverNow = 0; if (pl) pl.lastSeen = 0;
+  try { return JSON.stringify(w); } finally { w.serverNow = sn; if (pl) pl.lastSeen = ls; }
+}
+/** v2.0.5: slim per-client view (only what changed since the hashes the client echoed) */
+const viewOf = (c: Committed, uid: string, have: unknown) => ({ ...core.makeView(c.state, uid, (have ?? null) as any), ver: c.ver });
+/** gzip big JSON answers when the browser accepts it (≈7× smaller on the wire) */
+const GZIP = false; // switched on only after the wire check (op 'ping') proved the gateway passes gzip through
+async function jsonZ(req: Request, b: unknown, force = false): Promise<Response> {
+  const s = JSON.stringify(b);
+  if (!(GZIP || force) || s.length < 1400 || !(req.headers.get('Accept-Encoding') ?? '').includes('gzip')) return json(b);
+  const z = await new Response(new Blob([s]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+  return new Response(z, { status: 200, headers: { ...cors, 'Content-Type': 'application/json', 'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding' } });
 }
 
 Deno.serve(async (req) => {
@@ -89,6 +117,7 @@ Deno.serve(async (req) => {
     if (body.op === 'llmtest') { // founder-free health check: does the model answer? (no key is ever returned)
       const r = await llm({ system: 'Kısa cevap ver.', user: 'Bir fırıncı olarak "merhaba" de.' }); return json({ provider: PROVIDER, model: MODEL, configured: !!LLM_KEY, ok: !!r });
     }
+    if (body.op === 'ping') return jsonZ(req, { ok: true, pad: 'imparatorluk '.repeat(Math.min(2000, Number(body.pad) || 0)) }, true); // wire check (gzip), no data
     if (body.op === 'candidates') {
       const { data: okAccess } = await db.rpc('check_access', { pw: String(body.access ?? '') });
       if (!okAccess) return json({ error: 'Giriş şifresi yanlış.' });
@@ -122,19 +151,20 @@ Deno.serve(async (req) => {
       case 'me': return json({ playerId: uid, founder: pl.is_founder });
       case 'heartbeat': {
         let due = false; let batch: { idx: number[]; prompt: { system: string; user: string } } | null = null; let sbatch: unknown = null;
-        let out: any;
+        let out: any; const cm: Committed = { state: null, ver: 0 }; const vw = body.vw === 1;
         try { out = await mutate((w) => {
           const r = core.heartbeat(w, uid, now); due = r.snapshotDue; batch = null;
           if (LLM_KEY && now - (w.llm?.talkAt ?? 0) > TALK_EVERY_MS && core.llmBudget(w, today(), Math.floor(PER_DAY * 0.15))) { const b = core.talkBatch(w, now); if (b) { batch = b; w.llm!.talkAt = now; core.llmSpend(w, today()); } }
           if (LLM_KEY && now - (w.llm?.speechAt ?? 0) > 10 * 60_000 && core.llmBudget(w, today(), Math.floor(PER_DAY * 0.2))) { const b = core.speechBatch(w); if (b) { sbatch = b; w.llm!.speechAt = now; core.llmSpend(w, today()); } }
           return { world: w, summary: r.summary };
-        }); } catch { const { state } = await loadWorld(); core.heartbeat(state, uid, now); out = { world: state, summary: null }; batch = null; sbatch = null; due = false; } // v2.0.2: busy world → still answer with a fresh (uncommitted) view so the client never freezes
+        }, 5, cm, uid); } catch { const { state, version } = await loadWorld(); core.heartbeat(state, uid, now); out = { world: state, summary: null }; cm.state = state; cm.ver = version; batch = null; sbatch = null; due = false; } // v2.0.2: busy world → still answer with a fresh (uncommitted) view so the client never freezes
+        if (vw) out = { view: viewOf(cm, uid, body.have), summary: out.summary };
         const sb = sbatch as { refs: [string, number][]; prompt: { system: string; user: string } } | null;
         if (due) await db.rpc('snapshot_world', { force: false });
         const bt = batch as { idx: number[]; prompt: { system: string; user: string } } | null;
         if (sb) background((async () => { const o = parseJson(await llm(sb.prompt, true, 300)); if (o) await mutate((w) => core.applySpeeches(w, sb.refs, o)); })().catch(() => {}));
         if (bt) background((async () => { const o = parseJson(await llm(bt.prompt, true, 400)); if (o) await mutate((w) => core.applyTalks(w, bt.idx, o, Date.now())); })().catch(() => {}));
-        return json(out);
+        return jsonZ(req, out);
       }
       case 'act': {
         if (body.action?.t === 'defense' && LLM_KEY) {
@@ -143,7 +173,10 @@ Deno.serve(async (req) => {
           if (prompt) { const o = parseJson(await llm(prompt, true, 220)); await mutate((w) => core.judgeReply(w, String(body.action.caseId), o, Date.now())); }
           return json(r);
         }
-        try { return json(await mutate((w) => core.act(w, uid, body.action, now), 10)); } // v2.0.3: players' actions retry harder and never fail silently
+        try { // v2.0.3: players' actions retry harder and never fail silently; v2.0.5: the answer carries the new world view (no extra heartbeat)
+          const cm: Committed = { state: null, ver: 0 }; const r = await mutate((w) => core.act(w, uid, body.action, now), 10, cm);
+          return jsonZ(req, body.vw === 1 ? { ...r, view: viewOf(cm, uid, body.have) } : r);
+        }
         catch (e) { return json({ ok: false, msg: `Dünya şu an çok meşgul; işleminiz yapılamadı, tekrar deneyin. (${String((e as Error).message ?? e).slice(0, 60)})` }); }
       }
       case 'chat': {

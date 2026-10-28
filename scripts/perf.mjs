@@ -3,7 +3,7 @@ const TAG = process.env.TAG ?? 'x'; const SECS = Number(process.env.SECS ?? 40);
 const b = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--enable-gpu-rasterization', '--ignore-gpu-blocklist'] });
 const p = await b.newPage(); await p.setViewport({ width: 844, height: 390, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); const I = (f, ...a) => p.evaluate(f, ...a);
-await p.goto('http://localhost:5173/?live&poll6', { waitUntil: 'networkidle0' });
+await p.goto('http://localhost:' + (process.env.PORT ?? 5173) + '/?live&poll6', { waitUntil: 'networkidle0' });
 await I(async () => { localStorage.clear(); const st = await (await fetch('__live.json')).json(); localStorage.setItem('imparatorluk-mock-v1', JSON.stringify(st)); localStorage.setItem('imp-guide-done', '1'); });
 await p.reload({ waitUntil: 'networkidle0' });
 await I(() => [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Davetle kayıt')).click()); await sleep(300);

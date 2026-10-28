@@ -2,12 +2,15 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Action, ActionResult, Profession, World } from '../sim/types';
 import type { Candidate, ChatMsg } from '../server/core';
 import type { AdminRequest, Backend, Session, Snapshot } from './api';
+import { ViewCache } from './viewcache';
+import type { WorldView } from '../server/view';
 
 /** Production backend: Supabase Auth + Edge Function `game` (authoritative) + messages table. */
 export class SupabaseBackend implements Backend {
   readonly mode = 'supabase' as const;
   private sb: SupabaseClient;
   private s: Session | null = null;
+  private vc = new ViewCache();
   constructor(url: string, anonKey: string) { this.sb = createClient(url, anonKey); }
 
   private async call<T>(body: Record<string, unknown>): Promise<T> {
@@ -39,9 +42,23 @@ export class SupabaseBackend implements Backend {
     if (error) return 'E-posta ya da şifre yanlış.';
     const me = await this.restore(); return me ? null : 'Hesap oyunda bulunamadı.';
   }
-  async logout(): Promise<void> { await this.sb.auth.signOut(); this.s = null; }
-  async heartbeat(): Promise<{ world: World; summary: string | null }> { return this.call({ op: 'heartbeat' }); }
-  async act(a: Action): Promise<ActionResult> { return this.call({ op: 'act', action: a }); }
+  async logout(): Promise<void> { await this.sb.auth.signOut(); this.s = null; this.vc = new ViewCache(); }
+  /** v2.0.5: slim view protocol (only changes travel); falls back to a full view if a delta cannot be applied */
+  async heartbeat(): Promise<{ world: World; summary: string | null }> {
+    for (let i = 0; i < 2; i++) {
+      const r = await this.call<{ world?: World; view?: WorldView & { ver?: number }; summary: string | null }>({ op: 'heartbeat', vw: 1, have: this.vc.have() });
+      if (r.world) { this.vc.reset(); return { world: r.world, summary: r.summary }; } // older server
+      const w = r.view ? this.vc.take(r.view) : null;
+      if (w) return { world: w, summary: r.summary };
+    }
+    throw new Error('dünya görünümü alınamadı');
+  }
+  async act(a: Action): Promise<ActionResult> {
+    const r = await this.call<ActionResult & { view?: WorldView & { ver?: number } }>({ op: 'act', action: a, vw: 1, have: this.vc.have() });
+    if (r && r.view) { this.vc.take(r.view, true); delete r.view; }
+    return r;
+  }
+  takeFresh(): World | null { return this.vc.takeFresh(); }
   async chat(text: string, to: string | null): Promise<string | null> { const r = await this.call<{ error?: string }>({ op: 'chat', text, to }); return r.error ?? null; }
   async messages(): Promise<ChatMsg[]> {
     // RLS returns only public messages and my DMs

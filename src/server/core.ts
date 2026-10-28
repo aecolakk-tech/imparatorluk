@@ -136,3 +136,4 @@ export function resetWorld(w: World, now: number): Record<string, string> {
   Object.assign(w, nw);
   return ids;
 }
+export { makeView, haveOf, VIEW_V, hashStr, type Have, type WorldView } from './view';

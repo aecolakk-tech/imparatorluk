@@ -1002,7 +1002,8 @@ const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> => Promise.race(
 async function tick(): Promise<void> {
   if ((ticking && performance.now() - tickAt < 20_000) || !be.session()) return; ticking = true; tickAt = performance.now();
   try {
-    const r = await withTimeout(be.heartbeat(), 15_000); ((window as unknown as { __hb?: number[] }).__hb ??= []).push(Math.round(performance.now()));
+    const fw = be.takeFresh(); // v2.0.5: an action already brought the new world back: no extra round trip
+    const r = fw ? { world: fw, summary: null } : await withTimeout(be.heartbeat(), 15_000); if (!fw) ((window as unknown as { __hb?: number[] }).__hb ??= []).push(Math.round(performance.now()));
     const first = !world; world = r.world;
     if (world.serverNow) { const ns = world.serverNow - Date.now(); skew = first || Math.abs(ns - skew) > 3000 ? ns : skew + (ns - skew) * 0.15; } // smooth clock: no jumps
     const mm = me(); if (localWalk && mm && mm.id === localWalk.id && gameNow() < walkEnd(localWalk.walk) + 15_000) mm.walk = localWalk.walk;

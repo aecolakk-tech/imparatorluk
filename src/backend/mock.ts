@@ -6,6 +6,8 @@ import type { Action, ActionResult, Profession, World } from '../sim/types';
 import { resetWorld, act, admin, candidates, createWorld, drainChat, heartbeat, makeChat, migrateWorld, register, type Candidate, type ChatMsg } from '../server/core';
 import type { AdminRequest, Backend, Session, Snapshot } from './api';
 import { SNAPSHOTS_KEPT } from '../sim/constants';
+import { makeView } from '../server/view';
+import { ViewCache } from './viewcache';
 
 interface Store { world: World; users: Record<string, { pw: string; playerId: string; founder: boolean }>; access: string; msgs: ChatMsg[]; snaps: (Snapshot & { state: string })[]; }
 const KEY = 'imparatorluk-mock-v1';
@@ -20,6 +22,7 @@ export class MockBackend implements Backend {
   readonly mode = 'mock' as const;
   private s: Session | null = null;
   private chatTimes: number[] = [];
+  private vc = new ViewCache(); private ver = 0;
   constructor(private storage: Pick<globalThis.Storage, 'getItem' | 'setItem'> = localStorage, private clock: () => number = () => Date.now()) {}
 
   private load(): Store {
@@ -66,18 +69,27 @@ export class MockBackend implements Backend {
     if (st.world.players[u.playerId]?.banned) return 'Bu hesap sürgün edildi.';
     this.s = { playerId: u.playerId, founder: u.founder }; this.storage.setItem(`${KEY}-session`, u.playerId); return null;
   }
-  async logout(): Promise<void> { this.s = null; this.storage.setItem(`${KEY}-session`, ''); }
+  async logout(): Promise<void> { this.vc = new ViewCache(); this.s = null; this.storage.setItem(`${KEY}-session`, ''); }
   async heartbeat(): Promise<{ world: World; summary: string | null }> {
     const me = this.s; if (!me) throw new Error('oturum yok');
-    return this.tx((st) => {
-      const r = heartbeat(st.world, me.playerId, this.clock());
-      if (r.snapshotDue) this.snapshotInto(st);
-      return { world: st.world, summary: r.summary };
-    });
+    // v2.0.5: same slim-view protocol as the server (JSON round trip = the wire)
+    for (let i = 0; i < 2; i++) {
+      const have = this.vc.have();
+      const r = this.tx((st) => {
+        const r = heartbeat(st.world, me.playerId, this.clock());
+        if (r.snapshotDue) this.snapshotInto(st);
+        return JSON.parse(JSON.stringify({ view: { ...makeView(st.world, me.playerId, have), ver: ++this.ver }, summary: r.summary }));
+      });
+      const w = this.vc.take(r.view); if (w) return { world: w, summary: r.summary };
+    }
+    throw new Error('dünya görünümü alınamadı');
   }
+  takeFresh(): World | null { return this.vc.takeFresh(); }
   async act(a: Action): Promise<ActionResult> {
     const me = this.s; if (!me) return { ok: false, msg: 'Oturum yok.' };
-    return this.tx((st) => act(st.world, me.playerId, a, this.clock()));
+    const have = this.vc.have();
+    const r = this.tx((st) => { const x = act(st.world, me.playerId, a, this.clock()); return JSON.parse(JSON.stringify({ ...x, view: { ...makeView(st.world, me.playerId, have), ver: ++this.ver } })); });
+    this.vc.take(r.view, true); delete r.view; return r;
   }
   async chat(text: string, to: string | null): Promise<string | null> {
     const me = this.s; if (!me) return 'Oturum yok.';
