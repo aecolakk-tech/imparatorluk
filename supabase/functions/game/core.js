@@ -12551,7 +12551,19 @@ function resetWorld(w, now) {
   for (const pl of list) {
     const p = oldPeople.find((x) => x.id === pl.personId);
     const prof2 = pl.founder ? "kayzer" : p && PLAYER_PROFS.includes(p.prof) ? p.prof : "hamal";
-    const np = joinWorld(nw, pl.playerId, pl.name, prof2, !!pl.founder, now);
+    const lc = (x) => x.toLocaleLowerCase("tr");
+    for (const q of nw.people) if (!q.playerId && lc(q.name) === lc(pl.name)) q.name = `${q.name} Efendi`;
+    let np;
+    let name = pl.name;
+    for (let i = 2; !np && i < 50; i++) {
+      try {
+        np = joinWorld(nw, pl.playerId, name, prof2, !!pl.founder, now);
+      } catch (e) {
+        if (!/zaten var/.test(String(e.message))) throw e;
+        name = `${pl.name} ${i}`;
+      }
+    }
+    if (!np) throw new Error("S\u0131f\u0131rlama: oyuncu yeniden yerle\u015Ftirilemedi.");
     ids[pl.playerId] = np.id;
     if (nw.players[pl.playerId]) nw.players[pl.playerId].banned = pl.banned;
   }

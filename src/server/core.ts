@@ -4,7 +4,7 @@ import { handleOrder, sanitizeOrder } from '../sim/orders';
  * (bundled to supabase/functions/game/core.js by `npm run build:edge`).
  * Everything that changes money or state goes through here – the client only sends intents.
  */
-import type { Action, ActionResult, Profession, World } from '../sim/types';
+import type { Action, ActionResult, Person, Profession, World } from '../sim/types';
 import { advanceWorld } from '../sim/tick';
 import { applyAction, filterProfanity, joinWorld, rateOk, touchPlayer, personOf, takeoverCandidates, officeOf } from '../sim/actions';
 import { applyAdmin, type AdminOp } from '../sim/admin';
@@ -123,7 +123,13 @@ export function resetWorld(w: World, now: number): Record<string, string> {
   for (const pl of list) {
     const p = oldPeople.find((x) => x.id === pl.personId);
     const prof = (pl.founder ? 'kayzer' : p && PLAYER_PROFS.includes(p.prof) ? p.prof : 'hamal') as Profession;
-    const np = joinWorld(nw, pl.playerId, pl.name, prof, !!pl.founder, now); ids[pl.playerId] = np.id;
+    // A fresh world's NPCs (or two old players) can share a player's name; joinWorld rejects duplicates, which used to abort the whole reset.
+    const lc = (x: string) => x.toLocaleLowerCase('tr');
+    for (const q of nw.people) if (!q.playerId && lc(q.name) === lc(pl.name)) q.name = `${q.name} Efendi`;
+    let np: Person | undefined; let name = pl.name;
+    for (let i = 2; !np && i < 50; i++) { try { np = joinWorld(nw, pl.playerId, name, prof, !!pl.founder, now); } catch (e) { if (!/zaten var/.test(String((e as Error).message))) throw e; name = `${pl.name} ${i}`; } }
+    if (!np) throw new Error('Sıfırlama: oyuncu yeniden yerleştirilemedi.');
+    ids[pl.playerId] = np.id;
     if (nw.players[pl.playerId]) nw.players[pl.playerId]!.banned = pl.banned;
   }
   for (const k of Object.keys(w)) delete (w as unknown as Record<string, unknown>)[k];
