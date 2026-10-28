@@ -38,7 +38,7 @@ export function heartbeat(w: World, playerId: string, now: number): { summary: s
 
 export function act(w: World, playerId: string, a: Action, now: number, deferJudge = false): ActionResult {
   migrateWorld(w); advanceWorld(w, now); realtime(w, now);
-  const r = applyAction(w, playerId, a, now);
+  const r = applyAction(w, playerId, a, now) ?? { ok: false, msg: 'Bilinmeyen işlem.' }; // v2.0.2: an unknown action type never crashes the server
   if (a.t === 'defense' && r.ok && !deferJudge) { const c = w.cases.find((x) => x.id === a.caseId); const last = c?.trial?.msgs.at(-1); if (c && last) { const j = judgeRule(w, c, last.text); judgeAnswer(w, c, j.reply, j.score, now + 800); } }
   if (r.ok) markQuest(w, playerId, a.t, a.t === 'useItem' ? (a.good === 'su' || a.good === 'sut' ? 'drink' : 'eat') : undefined);
   const q = questReward(w, playerId); if (q) r.msg = `${r.msg}\n🎯 ${q}`;

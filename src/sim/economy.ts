@@ -84,7 +84,8 @@ export function buy(w: World, buyerAcc: string, good: Good, qty: number, maxPric
   const bp = findPerson(w, buyerAcc); const imul = bp?.playerId && !bp.npc ? itibarPriceMul(bp) : 1; const traded = new Set<string>(); // v2.0.1 itibar discount; trade count
   for (const l of offers) {
     while (got < qty && l.qty > 0) {
-      const pay = Math.round((fixedWater ? Math.min(l.price, lawParam(w, 'devletsuyu', 2)) : l.price) * imul * 100) / 100;
+      const pmul = bp?.faction && findPerson(w, l.sellerId)?.faction === bp.faction ? 0.97 : 1; // v2.0.2 U11: same-party trade discount
+      const pay = Math.round((fixedWater ? Math.min(l.price, lawParam(w, 'devletsuyu', 2)) : l.price) * imul * pmul * 100) / 100;
       if (pay > maxPrice || balance(w, buyerAcc) < pay) return finishPoor();
       transfer(w, buyerAcc, l.sellerId, pay, `${good} alımı`);
       // state water: treasury tops up the difference to the seller

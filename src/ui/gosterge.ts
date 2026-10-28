@@ -2,6 +2,7 @@
 import type { World } from '../sim/types';
 import { h } from './dom';
 import { quoted, unemployed } from '../sim/market2';
+import { supportAvg, mpsOf } from '../sim/party';
 
 const SERIES: { i: number; label: string; color: string; fmt: (v: number) => string }[] = [
   { i: 2, label: '👥 Nüfus', color: '#8fc0ff', fmt: (v) => String(v) },
@@ -24,7 +25,16 @@ export function gostergeModal(w: World, close: () => void): HTMLElement {
   const cards = SERIES.map((s) => { const pts = hist.map((r) => r[s.i]!); const lo = pts.length ? Math.min(...pts) : now[s.i]!, hi = pts.length ? Math.max(...pts) : now[s.i]!;
     return h('div', { class: 'card gs-card' }, h('div', { class: 'row', style: 'justify-content:space-between' }, h('b', {}, s.label), h('b', { style: `color:${s.color}` }, s.fmt(now[s.i]!))), spark(pts, s.color), h('div', { class: 'muted' }, `en düşük ${s.fmt(lo)} · en yüksek ${s.fmt(hi)}`)); });
   const el = h('div', { class: 'modal gosterge-modal' }, h('div', { class: 'box parchment' }, h('button', { class: 'close icon', onclick: close }, '✕'),
-    h('h2', {}, '📊 Şehir Göstergesi'), h('div', { class: 'muted' }, first ? `Son 5 oyun günü (${first[0]}. gün ${String(first[1]).padStart(2, '0')}:00’dan bu yana, saatlik).` : 'Veri toplanıyor…'), ...cards));
+    h('h2', {}, '📊 Şehir Göstergesi'), partyChart(w), h('div', { class: 'muted' }, first ? `Son 5 oyun günü (${first[0]}. gün ${String(first[1]).padStart(2, '0')}:00’dan bu yana, saatlik).` : 'Veri toplanıyor…'), ...cards));
   el.addEventListener('click', (e) => { if (e.target === el) close(); });
   return el;
+}
+
+/** v2.0.2 U11: party support (city average %) and seats as a bar chart. */
+function partyChart(w: World): HTMLElement {
+  const fs = w.meclis.factions; const max = Math.max(1, ...fs.map((f) => supportAvg(f)));
+  return h('div', { class: 'card gs-card' }, h('b', {}, '🏛 Parti desteği ve sandalyeler'),
+    ...fs.map((f) => h('div', { class: 'row', style: 'gap:6px;align-items:center' }, h('span', { style: 'min-width:110px' }, f.name),
+      h('div', { style: 'flex:1;background:#0004;border-radius:4px;height:10px;overflow:hidden' }, h('div', { style: `width:${Math.round(supportAvg(f) / max * 100)}%;height:100%;background:${f.color ?? '#aaa'}` })),
+      h('small', {}, `%${supportAvg(f)} · ${mpsOf(w, f).length} sandalye`))));
 }
