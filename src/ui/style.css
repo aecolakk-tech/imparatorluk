@@ -286,3 +286,10 @@ body.has-sheet .controls .hotbar { display:none; }
 .seatbar { display:flex; height:16px; border-radius:4px; overflow:hidden; margin:4px 0; } .seatbar span { color:#fff; font-size:10px; text-align:center; line-height:16px; min-width:12px; }
 .pbadge { display:inline-block; width:12px; height:12px; border-radius:50%; } .axes .bar { flex:1; }
 .cand-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px; } .card.cand { cursor:pointer; font-size:12px; }
+/* v2.0.3: the Müzik / Ses buttons are never pushed off-screen (the left chips shrink/clip instead) */
+.hud-r { flex-shrink:0; flex-wrap:nowrap; }
+.hud-l { flex:1 1 auto; min-width:0; }
+.sound-set { display:flex; flex-wrap:wrap; gap:8px; }
+.sound-set button { flex:1 1 140px; }
+/* v2.0.3: while typing (soft keyboard open) or on the login form, the rotate overlay never covers the form */
+body.typing .rotate-ov, body.on-login .rotate-ov { display:none !important; }

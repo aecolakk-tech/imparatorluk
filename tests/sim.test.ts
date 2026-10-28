@@ -58,7 +58,7 @@ describe('clock', () => {
     const n2 = advanceWorld(w, T0 + DAY_MS / 2);
     expect(n1).toBeGreaterThan(0); expect(n2).toBe(0); expect(JSON.stringify(w)).toBe(snap);
   });
-  it('1 game day = 20 real minutes: 06–22 hours last 60 s, 22–06 hours 30 s (v2.0.1)', () => { expect(DAY_MS).toBe(1_200_000); expect(hourLen(10)).toBe(60_000); expect(hourLen(23)).toBe(30_000); expect(hourLen(5)).toBe(30_000); expect(hourLen(6)).toBe(60_000); let t = 0; for (let h = 0; h < 24; h++) t += hourLen(h); expect(t).toBe(DAY_MS); });
+  it('1 game day = 18 real minutes: 06–22 = 15 min (56.25 s/h), 22–06 = 3 min (22.5 s/h) (v2.0.3)', () => { expect(DAY_MS).toBe(1_080_000); expect(hourLen(10)).toBe(56_250); expect(hourLen(23)).toBe(22_500); expect(hourLen(5)).toBe(22_500); expect(hourLen(6)).toBe(56_250); let t = 0; for (let h = 0; h < 24; h++) t += hourLen(h); expect(t).toBe(DAY_MS); });
 });
 
 describe('economy', () => {

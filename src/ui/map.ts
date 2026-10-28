@@ -280,7 +280,7 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
   if (cam.z >= 1.4) for (const tk of (w.talks ?? [])) {
     if (!tk.at || now < tk.at + 5000 || now > tk.at + TALK_MS) continue;
     const lines = tk.lines?.length ? tk.lines : [tk.text]; const k = Math.floor((now - tk.at - 5000) / 9000); if (k >= lines.length * 2) continue;
-    const li = k % lines.length; const q = byId.get(li % 2 === 0 ? tk.a : tk.b); if (!q) continue;
+    const li = k % lines.length; const q = byId.get((li % 2 === 0) !== !!tk.toPlayer ? tk.a : tk.b); if (!q) continue;
     const bx = (q.x - cam.x) * z, by = (q.y - cam.y) * z - sz - 8; const age = (now - tk.at - 5000) % 9000; const e = Math.min(1, age / 220); const sc = 0.6 + 0.4 * (1 - (1 - e) * (1 - e)) + (e < 1 ? 0 : 0);
     if (sc < 1) { ctx.save(); ctx.translate(bx, by); ctx.scale(sc, sc); ctx.translate(-bx, -by); ctx.globalAlpha = e; bubble(ctx, bx, by, lines[li]!, cw); ctx.restore(); } else bubble(ctx, bx, by, lines[li]!, cw);
   }

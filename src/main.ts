@@ -37,6 +37,7 @@ import { kidScale, kidHeight, lastKids, SPRITE_SCALE } from './ui/map';
 import { rankLabel, displayName } from './sim/career';
 import { yearsOf } from './sim/age';
 import { DAY_REAL_MIN } from './sim/constants';
+import { isGhostClick, invisibleBox, staleFlag } from './ui/guard';
 import { ambience, installClickSounds, isMuted, setMuted, sfx, musicOn, setMusic, setMusicMood, musicMood } from './ui/sound';
 import { needTarget, myPos } from './sim/v16';
 import { findPath, WALK_SPEED, walkEnd, doorSpot, distToBuilding, REACH, PERSON_REACH, type Pt } from './sim/move';
@@ -76,13 +77,15 @@ function floatText(text: string, cls = ''): void { if (lowGfx) return; const el 
 
 // ---------------- login ----------------
 function loginScreen(): void {
-  app.replaceChildren();
+  app.replaceChildren(); document.body.classList.add('on-login');
   let mode: 'giris' | 'kayit' = 'giris';
+  const keep = { email: '', pw: '', name: '' };
   let start_: 'yeni' | 'devral' = 'yeni'; let cands: Candidate[] = []; let pickId: string | null = null; let accessVal = '';
   const box = h('div', { class: 'box' });
   const render = (): void => {
     const email = h('input', { type: 'email', autocomplete: 'email' }); const pw = h('input', { type: 'password', autocomplete: mode === 'giris' ? 'current-password' : 'new-password' });
-    const access = h('input', { type: 'password', value: accessVal }); access.addEventListener('input', () => { accessVal = access.value; }); const name = h('input', { maxlength: '24' });
+    email.value = keep.email; pw.value = keep.pw; email.addEventListener('input', () => { keep.email = email.value; }); pw.addEventListener('input', () => { keep.pw = pw.value; }); // v2.0.3: typed values survive any re-render
+    const access = h('input', { type: 'password', value: accessVal }); access.addEventListener('input', () => { accessVal = access.value; }); const name = h('input', { maxlength: '24' }); name.value = keep.name; name.addEventListener('input', () => { keep.name = name.value; });
     const prof = select(PLAYER_PROFS.map((p): [string, string] => [p, PROF_LABEL[p]]), 'hamal');
     const err = h('div', { style: 'color:#ff8a7a;min-height:20px;margin-top:6px' });
     const go = async (): Promise<void> => {
@@ -186,15 +189,28 @@ function rerenderSheet(force = false, afterAct = false): void {
   if (afterAct) { sheetPointer = false; const fa = document.activeElement as HTMLElement | null; if (fa && sheet?.contains(fa)) fa.blur(); } // v2.0.1: an action just finished → always show its result (Elinizde, offers, kese)
   const ae = document.activeElement as HTMLElement | null; // v2.0.1: only typing blocks a refresh (a tapped button kept focus and froze the panel)
   if (!force && sheet && ae && sheet.contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+  if (sheet && !sheet.isConnected) sheet = null; // v2.0.3: a panel detached by a re-login/rebuild must not swallow every later panel (Menü did nothing)
+  if (sheetPointer && performance.now() - sheetPointerAt > 8000) sheetPointer = false; // v2.0.3: a press flag can never stick
   if (!force && sheetPointer) return;
   const scroll = sheet?.scrollTop ?? 0;
   const s = h('div', { class: 'sheet' }, h('button', { class: 'close icon', title: 'Kapat', onclick: closeSheet }, ic('close')), sheetRender());
+  s.dataset.born = sheet?.dataset.born ?? String(performance.now()); // v2.0.3: ghost-click guard (see below)
   if (sheet) sheet.replaceWith(s); else { s.classList.add('enter'); app.append(s); requestAnimationFrame(() => requestAnimationFrame(() => s.classList.remove('enter'))); }
   sheet = s; if (!force) s.scrollTop = scroll; document.body.classList.add('has-sheet');
-  s.addEventListener('pointerdown', () => { sheetPointer = true; }); s.addEventListener('pointerup', () => { setTimeout(() => { sheetPointer = false; }, 250); }); s.addEventListener('pointercancel', () => { sheetPointer = false; });
+  s.addEventListener('pointerdown', () => { sheetPointer = true; sheetPointerAt = performance.now(); }); s.addEventListener('pointerup', () => { setTimeout(() => { sheetPointer = false; }, 250); }); s.addEventListener('pointercancel', () => { sheetPointer = false; });
   s.addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest('button'); if (b) { b.classList.add('pressed'); setTimeout(() => b.classList.remove('pressed'), 180); } }, true);
 }
-let sheetPointer = false;
+let sheetPointer = false; let sheetPointerAt = 0;
+/* v2.0.3: a tap that OPENED a panel/window must not also land on it. On phones the click of that same tap arrived on the
+   new panel (its ✕ or a button under the finger) — panels at the Saray/Mahkeme "closed by themselves". A click whose press began
+   before the panel/window existed is swallowed. */
+let lastDownAt = 0;
+document.addEventListener('pointerdown', () => { lastDownAt = performance.now(); }, true);
+new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n instanceof HTMLElement && n.matches('.modal, .sheet, .app-dialog') && !n.dataset.born) n.dataset.born = String(performance.now()); }).observe(document.body, { childList: true, subtree: true });
+document.addEventListener('click', (e) => {
+  const ov = (e.target as HTMLElement | null)?.closest?.('.modal, .sheet, .app-dialog') as HTMLElement | null; const born = Number(ov?.dataset.born ?? 0);
+  if (ov && isGhostClick(born, lastDownAt, performance.now(), e.detail)) { e.stopPropagation(); e.preventDefault(); }
+}, true);
 window.addEventListener('pointerup', () => { setTimeout(() => { sheetPointer = false; }, 250); }); window.addEventListener('pointercancel', () => { sheetPointer = false; }); /* v2.0.1: a drag that ends outside the panel no longer freezes live prices */
 function closeSheet(): void { document.body.classList.remove('has-sheet'); sheetPointer = false; if (heldNpc) { const id = heldNpc; heldNpc = null; const p = world ? findPerson(world, id) : null; if (p) p.hold = undefined; void be.act({ t: 'holdNpc', personId: id, on: false } as never); } const s = sheet; if (s) { s.classList.add('leave'); s.style.pointerEvents = 'none'; s.inert = true; setTimeout(() => s.remove(), lowGfx ? 0 : 200); } /* v2.0.1: a closing panel can't take taps (accidental buys) */ sheet = null; sheetRender = null; selected = null; }
 function openPersonSheet(id: string): void {
@@ -334,7 +350,7 @@ function renderHud(): void {
   const chip = (icon: string, text: string, tip: string, cls = ''): HTMLElement => h('span', { class: `stat${cls ? ' ' + cls : ''}`, title: tip, onclick: () => toast(tip) }, ic(icon), h('span', {}, text));
   hudEl.replaceChildren(
     h('div', { class: 'hud-l' },
-      chip(night ? 'moon' : 'sun', `${weekday(w.day)} · Gün ${w.day} · ${String((w.hour + Math.max(0, Math.min(23, Math.floor((gameNow() - w.lastTickAt) / hourMs(w))))) % 24).padStart(2, '0')}:00${w.speed !== 1 ? ` · ${w.combat ? '🐢 ' : ''}${w.speed}x` : ''}`, `${weekday(w.day)}${isCuma(w.day) ? ' (Cuma namazı 13:00)' : ''} · 1 oyun günü = ${DAY_REAL_MIN} gerçek dakika (1x; gündüz 1 saat = 60 sn, gece 30 sn)${w.speed !== 1 ? ` · şu an ${w.speed}x${w.combat ? ' (saldırı sırasında otomatik yavaş)' : ''}` : ''}`, w.combat ? 'warn' : ''),
+      chip(night ? 'moon' : 'sun', `${weekday(w.day)} · Gün ${w.day} · ${String((w.hour + Math.max(0, Math.min(23, Math.floor((gameNow() - w.lastTickAt) / hourMs(w))))) % 24).padStart(2, '0')}:00${w.speed !== 1 ? ` · ${w.combat ? '🐢 ' : ''}${w.speed}x` : ''}`, `${weekday(w.day)}${isCuma(w.day) ? ' (Cuma namazı 13:00)' : ''} · 1 oyun günü = ${DAY_REAL_MIN} gerçek dakika (1x; gündüz 15 dk – saat ≈56 sn, akşam/gece 3 dk – saat ≈22 sn)${w.speed !== 1 ? ` · şu an ${w.speed}x${w.combat ? ' (saldırı sırasında otomatik yavaş)' : ''}` : ''}`, w.combat ? 'warn' : ''),
       chip(SEASON_IC[season(w)]!, SEASON_LABEL[season(w)].replace(/^\S+\s/, ''), 'Mevsim'),
       ...(m ? [
         meterI('heart', m.health, 'var(--red)', `❤️ Sağlık${m.wounded ? ' – yaralısınız, hekime gidin' : ' – hastalık/yara düşürür, hekim ve dinlenme iyileştirir'}`, m.health < 40 || m.wounded, 'hp'),
@@ -398,7 +414,7 @@ function badges(): Partial<Record<Section, number>> {
 }
 function renderDock(): void {
   const b = badges(); const total = Object.values(b).reduce((x, y) => x + (y ?? 0), 0);
-  dockEl.replaceChildren(h('button', { class: 'menu-btn', title: 'Yer bul', onclick: () => openPlaces() }, '📍', h('span', {}, 'Yer bul')), h('button', { class: 'primary menu-btn', onclick: () => openMenu(section) }, ic('menu'), h('span', {}, 'Menü'), total ? h('span', { class: 'badge' }, String(total)) : ''));
+  dockEl.replaceChildren(h('button', { class: 'menu-btn', title: 'Yer bul', onclick: () => openPlaces() }, '📍', h('span', {}, 'Yer bul')), h('button', { class: 'primary menu-btn', onclick: () => { unblockMenu(); openMenu(section); } }, ic('menu'), h('span', {}, 'Menü'), total ? h('span', { class: 'badge' }, String(total)) : ''));
 }
 function openMenu(sec: Section): void {
   section = sec; localStorage.setItem('imp-sec', sec); if (sec === 'mesaj') seenMsgs = msgs.length;
@@ -427,12 +443,15 @@ function openMenu(sec: Section): void {
       case 'olay': body = feedPanel(ctx()); break;
       case 'kural': body = h('div', {}, h('h2', {}, '📖 Kurallar ve kullanım'), ...RULES.flatMap(([t, ls]) => [h('details', {}, h('summary', {}, t), ...ls.map((l) => h('div', { class: 'msg' }, l)))])); break;
       default: body = h('div', { class: 'stack' }, h('h2', {}, 'Ayarlar'),
+        h('h3', {}, 'Ses'), h('div', { class: 'sound-set' },
+          h('button', { class: musicOn() ? 'primary' : '', onclick: () => { setMusic(!musicOn()); renderHud(); rerenderSheet(true); } }, `🎵 Müzik: ${musicOn() ? 'AÇIK' : 'kapalı'}`),
+          h('button', { class: !isMuted() ? 'primary' : '', onclick: () => { setMuted(!isMuted()); renderHud(); rerenderSheet(true); } }, `🔊 Ses efektleri: ${!isMuted() ? 'AÇIK' : 'kapalı'}`)),
         h('div', { class: 'row' }, h('button', { onclick: () => { lowGfx = !lowGfx; localStorage.setItem('imp-lowgfx', lowGfx ? '1' : '0'); document.body.classList.toggle('low', lowGfx); dispatchEvent(new Event('resize')); rerenderSheet(true); } }, lowGfx ? 'Düşük grafik: AÇIK' : 'Düşük grafik: kapalı'), h('button', { onclick: () => { closeSheet(); guide(0); } }, 'Rehber')),
         be.session()?.founder ? h('button', { onclick: openAdmin }, 'Kurucu paneli') : '',
         h('div', { class: 'row' }, h('button', { onclick: () => app.append(whatsNewModal(() => undefined)) }, `✨ Neler yeni? (${VERSION})`), be.session()?.founder || world?.kayzerId === me()?.id ? h('button', { onclick: () => app.append(empireNameModal(nameSend, world?.empireName)) }, '👑 Devletin adını değiştir') : ''),
         h('h3', {}, 'Kurallar ve kullanım'), ...RULES.map(([t, ls]) => h('details', {}, h('summary', {}, t), ...ls.map((l) => h('div', { class: 'msg' }, l)))),
         h('h3', {}, 'Emeği geçenler'), h('div', { class: 'muted' }, CREDITS),
-        h('div', {}, h('button', { class: 'danger', onclick: () => { void be.logout().then(loginScreen); } }, 'Çıkış')));
+        h('div', {}, h('button', { class: 'danger', onclick: () => { void be.logout().then(() => location.reload()); /* v2.0.3: a clean page for the next login — no stale panel/listeners/timers from this session */ } }, 'Çıkış')));
     }
     return h('div', {}, bar_, body);
   });
@@ -802,7 +821,8 @@ function useSlot(k: SlotItem): void {
 }
 function ctlMove(dx: number, dy: number): void {
   joyVec = { x: dx, y: dy }; if (aim.on) { if (joyTimer) { clearInterval(joyTimer); joyTimer = null; } return; } // aiming: the stick turns the bow, no walking
-  const stepMove = (): void => { const w = world; const m = me(); if (!w || !m) return; if (!joyVec.x && !joyVec.y) return; const p = myPos(w, m, gameNow()); walkTo({ x: Math.max(0.5, Math.min(MAP_W - 0.5, p.x + joyVec.x * 2.4)), y: Math.max(0.5, Math.min(MAP_H - 0.5, p.y + joyVec.y * 2.4)) }, true); pendingB = null; };
+  if (!dx && !dy) joyHalt = false; // releasing the stick ends an NPC-talk halt; the next push walks again
+  const stepMove = (): void => { const w = world; const m = me(); if (!w || !m) return; if (!joyVec.x && !joyVec.y) return; if (joyHalt) return; const p = myPos(w, m, gameNow()); walkTo({ x: Math.max(0.5, Math.min(MAP_W - 0.5, p.x + joyVec.x * 2.4)), y: Math.max(0.5, Math.min(MAP_H - 0.5, p.y + joyVec.y * 2.4)) }, true); pendingB = null; };
   if (dx || dy) { if (!joyTimer) { stepMove(); joyTimer = setInterval(stepMove, 220); } }
   else if (joyTimer) { clearInterval(joyTimer); joyTimer = null; const w = world; const m = me(); if (w && m) { const p = myPos(w, m, gameNow()); walkTo(p, true); } }
 }
@@ -811,8 +831,22 @@ function goBuilding(id: string): void {
   if (distToBuilding(b, myPos(w, m, gameNow())) <= REACH) { openSheet(() => bPanel(b)); return; }
   pendingB = id; walkTo(doorSpot(b)); toast(`🚶 ${b.name} yoluna çıktınız – varınca açılacak.`);
 }
+/** v2.0.3: an NPC walks up to talk → the player stops (until the stick is released and pushed again, or a new tap). */
+let joyHalt = false; const haltedTalks = new Set<string>();
+function npcTalkHalt(w: World, m: Person): void {
+  const now = gameNow();
+  for (const tk of w.talks ?? []) {
+    if (!tk.toPlayer || tk.a !== m.id || !tk.at || now < tk.at || now > tk.at + 20_000) continue;
+    const key = `${tk.b}:${tk.at}`; if (haltedTalks.has(key)) continue; haltedTalks.add(key); if (haltedTalks.size > 50) haltedTalks.clear();
+    const q = myPlaced(); const npc = findPerson(w, tk.b);
+    if (joyVec.x || joyVec.y) joyHalt = true;
+    if (q && q.moving) { walkTo({ x: q.x, y: q.y }, true); pendingB = null; }
+    toast(`💬 ${npc?.name ?? 'Biri'} size doğru geliyor, konuşmak istiyor.`);
+  }
+}
 function frameExtras(): void {
   const w = world; const m = me(); if (!w || !m) return;
+  npcTalkHalt(w, m);
   if (pendingB) { const b = w.buildings.find((x) => x.id === pendingB); const q = myPlaced(); if (!b) pendingB = null; else if (q && distToBuilding(b, q) <= REACH) { pendingB = null; openSheet(() => bPanel(b)); } }
   // name + health label above a tapped person
   if (selPerson && performance.now() < selUntil) {
@@ -902,6 +936,7 @@ function openPlaces(): void {
     m?.home ? h('div', {}, h('h3', {}, 'Ev'), h('button', { onclick: () => { closeSheet(); goBuilding(m.home); } }, `🏠 Evim (${w.buildings.find((b) => b.id === m.home)?.name ?? m.home})`)) : ''); });
 }
 function frame(): void {
+  lastFrameAt = performance.now();
   try { frameInner(); } catch (e) { frameErr(e); }
   requestAnimationFrame(frame);
 }
@@ -936,7 +971,7 @@ function frameInner(): void {
   const pc = performance.now() - prof0; profAcc.n += 1; profAcc.sum += pc; if (pc > profAcc.max) profAcc.max = pc;
 }
 
-let ticking = false; let tickAt = 0;
+let ticking = false; let tickAt = 0; let lastWorldAt = 0; let started = false; let lastFrameAt = 0;
 /** v2.0.2: a heartbeat can never hang the client (the live battle froze when one request never returned: the world stopped updating). */
 const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('zaman aşımı')), ms))]);
 async function tick(): Promise<void> {
@@ -948,11 +983,13 @@ async function tick(): Promise<void> {
     const mm = me(); if (localWalk && mm && mm.id === localWalk.id && gameNow() < walkEnd(localWalk.walk) + 15_000) mm.walk = localWalk.walk;
     if (first) { stat = buildStatic(world); const m = me(); const b = m ? world.buildings.find((x) => x.id === m.home) : undefined; if (b) { cam.x = b.x - canvas.width / (cam.z * T) / 2; cam.y = b.y - canvas.height / (cam.z * T) / 2; clampCam(); } }
     if (r.summary) modal(maecenas(r.summary));
-    renderDock(); stateNotices(); liveNotices(first); statToasts(first); if (sheet && !sheetPointer) rerenderSheet(); const onb = onboarding(); events(first, onb); trialPopup(); if (!onb) { disasterPopup(); v2Popups(); }
+    renderDock(); stateNotices(); liveNotices(first); statToasts(first); if (sheet && !sheetPointer) rerenderSheet(); lastWorldAt = performance.now(); const onb = onboarding(); events(first, onb); trialPopup(); if (!onb) { disasterPopup(); v2Popups(); }
   } catch (e) { console.warn('heartbeat', e); } finally { ticking = false; }
 }
 
 async function start(): Promise<void> {
+  if (started) { location.reload(); return; } // v2.0.3: never install a second set of listeners/timers/frame loops (re-login froze Menü)
+  started = true; document.body.classList.remove('on-login');
   app.replaceChildren(canvas); hudEl = h('div', { class: 'hud' }); dockEl = h('div', { class: 'dock' }); app.append(hudEl, dockEl); installClickSounds(app);
   setupInput(); setupControls(); addEventListener('imp-refresh', () => { rerenderSheet(true); ctl?.refresh(); });
   await tick();
@@ -960,6 +997,33 @@ async function start(): Promise<void> {
   setInterval(() => { void be.messages().then((m) => { msgs = m; renderDock(); }); }, 5000);
   setInterval(() => rerenderSheet(), 4000);
   requestAnimationFrame(frame);
+  setInterval(uiWatchdog, 4000);
+}
+
+/** v2.0.3 watchdog: the game can never stay frozen or input-blocked. */
+function uiWatchdog(): void {
+  try {
+    if (sheet && !sheet.isConnected) sheet = null;
+    if (staleFlag(sheetPointer, sheetPointerAt, performance.now(), 8000)) sheetPointer = false;
+    if (onbOpen && !document.querySelector('.modal')) onbOpen = false;
+    if (lookOpen && !document.querySelector('.modal')) lookOpen = false;
+    unblockMenu();
+    if (be.session() && performance.now() - lastWorldAt > 20_000) { ticking = false; void tick(); } // no world for 20 s → refetch
+    if (performance.now() - lastFrameAt > 3000 && document.visibilityState === 'visible') { lastFrameAt = performance.now(); requestAnimationFrame(frame); } // the draw loop died → restart it
+  } catch (e) { console.warn('watchdog', e); }
+}
+/** Remove anything invisible that covers the Menü button (a modal without a visible box, a stray layer). */
+function unblockMenu(): void {
+  for (const m of document.querySelectorAll<HTMLElement>('.modal')) {
+    const box = m.firstElementChild as HTMLElement | null; const r = box?.getBoundingClientRect(); const cs = box ? getComputedStyle(box) : null;
+    if (!box || !cs || invisibleBox(r, cs.display, cs.visibility, cs.opacity)) { m.remove(); console.warn('watchdog: removed invisible modal'); }
+  }
+  const mb = dockEl?.querySelector<HTMLElement>('.menu-btn.primary'); if (!mb || !mb.isConnected) return;
+  const r = mb.getBoundingClientRect(); if (r.width < 2) return;
+  const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) as HTMLElement | null;
+  if (!top || mb.contains(top) || top.closest('.modal, .sheet, .app-dialog, .rotate-ov, .controls, .hud, .dock')) return;
+  if (!top.textContent?.trim() && !top.querySelector('button, input, canvas')) { top.style.pointerEvents = 'none'; console.warn('watchdog: unblocked', top.className); }
+  ((window as unknown as { __uiBlock?: string[] }).__uiBlock ??= []).push(String(top.className || top.tagName));
 }
 
 // ---------------- the Kayzer's citizen register (only at the Saray) ----------------
@@ -1023,7 +1087,7 @@ function events(first: boolean, onb = false): void {
 }
 function soundscape(): void {
   const w = world; if (!w) return;
-  setMusicMood(w.hour >= 19 || w.hour < 6 ? 'gece' : 'gun');
+  setMusicMood(w.hour >= 19 || w.hour < 6 ? 'gece' : w.hour < 10 ? 'sabah' : 'gun'); // v2.0.3: dawn music 06–10
   if (w.isyan) ambience('isyan'); else if ((w.festivalUntil ?? 0) >= w.day && w.hour >= 12 && w.hour < 22) ambience('festival');
   else if (w.hour >= 5 && w.hour < 10) ambience('sabah'); else if (w.hour >= 19 && w.hour < 23) ambience('aksam'); else if (w.hour >= 23 || w.hour < 5) ambience('gece'); else ambience('gun');
 }
@@ -1111,6 +1175,13 @@ void be.restore().then((s) => (s ? start() : loginScreen()));
 
 // ---- v1.9 landscape: rotate overlay (phones in portrait) + low-graphics class ----
 document.body.classList.toggle('low', lowGfx);
+/* v2.0.3: soft keyboard — keep the focused field on screen and never treat the shrunken viewport as "portrait" */
+const isField = (t: EventTarget | null): boolean => t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+let typingOff: ReturnType<typeof setTimeout> | null = null;
+document.addEventListener('focusin', (e) => { if (isField(e.target)) { if (typingOff) clearTimeout(typingOff); document.body.classList.add('typing'); } });
+document.addEventListener('focusout', (e) => { if (isField(e.target)) { if (typingOff) clearTimeout(typingOff); typingOff = setTimeout(() => { if (!isField(document.activeElement)) document.body.classList.remove('typing'); }, 600); } });
+const keepFieldVisible = (): void => { const a = document.activeElement; if (isField(a)) setTimeout(() => (a as HTMLElement).scrollIntoView({ block: 'center', inline: 'nearest' }), 60); };
+window.visualViewport?.addEventListener('resize', keepFieldVisible); addEventListener('resize', keepFieldVisible);
 document.body.append(h('div', { class: 'rotate-ov' }, ic('phone'), h('b', {}, 'Telefonu yatay çevirin'), h('div', { class: 'muted' }, 'Medieval Empire yatay ekranda oynanır.')));
 try { void (screen.orientation as unknown as { lock?: (o: string) => Promise<void> }).lock?.('landscape').catch(() => {}); } catch { /* only in fullscreen / installed PWA */ }
 // ---- v1.8 PWA: service worker (static only) + "Ana ekrana ekle" hint ----

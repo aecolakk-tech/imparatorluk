@@ -1,13 +1,16 @@
 import type { Good, Profession } from './types';
 // ---- v2.0.1 world clock: the ONE place to set the day length ----
-export const DAY_REAL_MIN = 20; // 1 game day = 20 real minutes at 1x
-export const NIGHT_FASTER = 2; // night (22:00–06:00) hours run this many times faster than daytime hours
+// v2.0.3: daytime (06:00–22:00) = 15 real minutes, night (22:00–06:00) = 3 real minutes → 1 game day = 18 real minutes at 1x
+// (v2.0.1–v2.0.2: 16 + 4 = 20 minutes). Kayzer speed 0.5x / 2x divides these via hourMs().
+export const DAY_PART_MIN = 15, NIGHT_PART_MIN = 3;
+export const DAY_REAL_MIN = DAY_PART_MIN + NIGHT_PART_MIN; // 18
 export const DAY_FROM = 6, NIGHT_FROM = 22; // daytime = [06:00, 22:00)
 export const DAY_MS = DAY_REAL_MIN * 60 * 1000;
 const DAY_HOURS = NIGHT_FROM - DAY_FROM, NIGHT_HOURS = 24 - DAY_HOURS;
-/** Real ms of one daytime game hour at 1x (60 s with the settings above); a night hour is DAY_HOUR_MS / NIGHT_FASTER (30 s). */
-export const DAY_HOUR_MS = DAY_MS / (DAY_HOURS + NIGHT_HOURS / NIGHT_FASTER);
-export const NIGHT_HOUR_MS = DAY_HOUR_MS / NIGHT_FASTER;
+/** Real ms of one daytime game hour at 1x (56.25 s); a night hour lasts 22.5 s. */
+export const DAY_HOUR_MS = (DAY_PART_MIN * 60_000) / DAY_HOURS;
+export const NIGHT_HOUR_MS = (NIGHT_PART_MIN * 60_000) / NIGHT_HOURS;
+export const NIGHT_FASTER = DAY_HOUR_MS / NIGHT_HOUR_MS;
 export const isDayHour = (h: number): boolean => h >= DAY_FROM && h < NIGHT_FROM;
 /** Real ms of game hour h at 1x. */
 export const hourLen = (h: number): number => (isDayHour(((h % 24) + 24) % 24) ? DAY_HOUR_MS : NIGHT_HOUR_MS);

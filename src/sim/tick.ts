@@ -28,7 +28,7 @@ import { needsDrain, seasonDay, animalsDay, hayvanciDay, nobilityDay, intrigueDa
 import { chatHour } from './chat';
 import { loansDay } from './extras';
 
-/** Real ms of the CURRENT game hour (w.hour, running since lastTickAt) at the world's speed: daytime 60 s, night 30 s at 1x (see constants). */
+/** Real ms of the CURRENT game hour (w.hour, running since lastTickAt) at the world's speed: daytime 56.25 s, night 22.5 s at 1x (see constants). */
 export const hourMs = (w: World): number => hourLen(w.hour) / (w.speed > 0 ? w.speed : 1);
 /** Real ms of game hour h at the world's speed. */
 export const hourMsAt = (w: World, h: number): number => hourLen(h) / (w.speed > 0 ? w.speed : 1);

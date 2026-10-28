@@ -106,7 +106,7 @@ export interface Job {
 }
 export interface Arrest { id: string; criminalId: string; catcherId: string; crime: CrimeKind; victimId: string | null; amount: number; day: number; hour: number; offer: number; status: 'bekliyor' | 'kabul' | 'ret'; at?: number; evidence?: number; eyewitnesses?: number; basis?: string; eyeIds?: string[]; complainantId?: string | null }
 export type CrimeKind = 'hirsizlik' | 'rusvet' | 'zimmet' | 'isyan' | 'saldiri' | 'cinayet' | 'kacakcilik';
-export interface Talk { a: string; b: string; text: string; day: number; hour: number; at?: number; lines?: string[]; ai?: boolean }
+export interface Talk { a: string; b: string; text: string; day: number; hour: number; at?: number; lines?: string[]; ai?: boolean; toPlayer?: boolean }
 export interface Corpse { id: string; personId: string; name: string; look: { hairColor: number; skin: number; shirt: number; female: boolean; prof: Profession }; x: number; y: number; at: number; killerId: string | null; witnesses: string[]; stage: 'yerde' | 'ihbar' | 'inceleme' | 'kapandi'; reportedBy?: string; reportedAt?: number; bekciId?: string; bekciFrom?: { x: number; y: number }; note?: string }
 export interface Escort { personId: string; bekciId: string; from: { x: number; y: number }; at: number }
 export interface TrialMsg { who: 'hakim' | 'savci' | 'sanik' | 'tanik' | 'suclanan'; name: string; text: string; at: number }

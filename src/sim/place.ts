@@ -33,6 +33,20 @@ export function along(path: Pt[], f: number): Pt {
   return path[path.length - 1]!;
 }
 
+/** v2.0.3 natural walking: walkers cut corners on a curve, keep their own lane on the road and sway a little (no robot lines). */
+export function naturalAlong(path: Pt[], walked: number, len: number, h: number, now: number): Pt {
+  if (len <= 0) return path[path.length - 1]!;
+  const R = 0.6; const at = (d: number): Pt => along(path, Math.max(0, Math.min(1, d / len)));
+  const a = at(walked - R), b = at(walked), c = at(walked + R);
+  const fade = Math.max(0, Math.min(1, walked / 1.5, (len - walked) / 1.5)); // exact start/end spots
+  const dx = c.x - a.x, dy = c.y - a.y; const L = Math.hypot(dx, dy) || 1;
+  const lane = (((h >> 4) % 100) / 100 - 0.5) * 0.7 + Math.sin(now / 900 + (h % 97)) * 0.05;
+  const sx = (a.x + 2 * b.x + c.x) / 4, sy = (a.y + 2 * b.y + c.y) / 4;
+  return { x: b.x + (sx - b.x + (-dy / L) * lane) * fade, y: b.y + (sy - b.y + (dx / L) * lane) * fade };
+}
+/** Everybody has their own pace (0.85×–1.15× NPC_SPEED). */
+export const paceOf = (h: number): number => NPC_SPEED * (0.85 + (h % 31) / 100);
+
 const MARKETS = ['pazar', 'gida', 'zanaat', 'yeni', 'kahve'];
 const dayPlan = new Map<string, { pious: boolean; eve: string }>();
 export const NPC_SPEED = 2.4; // tiles per real second (players walk 3.6)
@@ -60,7 +74,7 @@ function scheduled(w: World, p: Person, now: number, ctx: Ctx): Placed {
   const wanderX = Math.sin(now / 2300 + h) * 0.9 + Math.sin(now / 5100 + h * 3) * 0.6;
   const wanderY = Math.cos(now / 3100 + h * 2) * 0.35;
   const walking = Math.abs(Math.cos(now / 2300 + h)) > 0.35;
-  if (p.prof === 'asker') { const at = h % 3 === 0 ? 'saray' : 'kisla'; pos = door(B.has(at) ? at : 'saray', p, 2.4); pos.x += wanderX * 0.3; moving = false; visible = at === 'saray' || !night || h % 2 === 0; } // soldiers: kışla or Saray guard, no patrols
+  if (p.prof === 'asker') { const at = h % 3 === 0 ? 'saray' : 'kisla'; pos = door(B.has(at) ? at : 'saray', p, 2.4); pos.x += wanderX * 0.3; moving = false; /* v2.0.3: a guard paces his post */ visible = at === 'saray' || !night || h % 2 === 0; } // soldiers: kışla or Saray guard, no patrols
   else if (p.prof === 'bekci' && (bekciShift(p) === 'gece') === night) { const k = (now / 50000 + (h % 10) / 10) % 1; const route2 = night ? [{ x: 6, y: 29.5 }, { x: 80, y: 29.5 }, { x: 80, y: 35.5 }, { x: 6, y: 35.5 }, { x: 6, y: 29.5 }] : [{ x: 30, y: 20.5 }, { x: 80, y: 20.5 }, { x: 80, y: 29.5 }, { x: 30, y: 29.5 }, { x: 30, y: 20.5 }]; pos = along(route2, k); moving = true; }
   else if (p.prof === 'bekci' && false) { const k = (now / 50000 + (h % 10) / 10) % 1; pos = along([{ x: 6, y: 29.5 }, { x: 80, y: 29.5 }, { x: 80, y: 35.5 }, { x: 6, y: 35.5 }, { x: 6, y: 29.5 }], k); moving = true; }
   else if (p.nightOut && night) { const k = (now / 60000 + (h % 10) / 10) % 1; const bb = B.get('bar')!; pos = along([{ x: bb.door.x, y: bb.door.y + 0.5 }, { x: bb.door.x, y: 20.5 }, { x: 44, y: 20.5 }, { x: 44, y: 29.5 }, { x: bb.door.x, y: 29.5 }, { x: bb.door.x, y: bb.door.y + 0.5 }], k); moving = true; }
@@ -88,16 +102,16 @@ function scheduled(w: World, p: Person, now: number, ctx: Ctx): Placed {
       const t0 = Math.max(start, free); if (t < t0) { break; }
       let from = cur; if (rad > 0) { const st = stroll(p, now - (t - t0) * hs * 1000, rad); from = { x: cur.x + st.dx, y: cur.y + st.dy }; } // leave from where you were strolling
       const path = route(from, dest); let len = 0; for (let i = 1; i < path.length; i += 1) len += Math.abs(path[i]!.x - path[i - 1]!.x) + Math.abs(path[i]!.y - path[i - 1]!.y);
-      const walked = (t - t0) * hs * NPC_SPEED;
-      if (walked < len) { pos = along(path, walked / len); moving = true; arrived = false; rad = -1; break; }
-      cur = dest; free = t0 + len / NPC_SPEED / hs; rad = r; arrived = true;
+      const sp = paceOf(h); const walked = (t - t0) * hs * sp;
+      if (walked < len) { pos = naturalAlong(path, walked, len, h, now); moving = true; arrived = false; rad = -1; break; }
+      cur = dest; free = t0 + len / sp / hs; rad = r; arrived = true;
     }
     if (rad >= 0) { if (rad > 0) idle(cur, rad); else pos = cur; }
     if (!arrived) visible = true; // still on the way home after 22:00 – walk in, don't vanish
     void lunch;
     void wanderY; void walking;
   }
-  if (p.id === w.kayzerId || p.prof === 'naip' || (p.soylu && p.home === 'saray')) { pos = door('saray', p, 2); pos.x += wanderX * 0.7; moving = walking; visible = !night || !!p.nightOut; }
+  if (p.id === w.kayzerId || p.prof === 'naip' || (p.soylu && p.home === 'saray')) { pos = door('saray', p, 2); const st = stroll(p, now, 1.6); pos.x += st.dx; pos.y += st.dy * 0.6; moving = st.moving; void wanderX; visible = !night || !!p.nightOut; }
   return { p, x: pos.x, y: pos.y, moving, visible, dir: 1 };
 }
 
@@ -165,14 +179,15 @@ export function placePeople(w: World, now: number): Placed[] {
   }
   // map conversations: b walks up to a, both stand and talk
   for (const tk of w.talks ?? []) {
-    if (!tk.at || now - tk.at > TALK_MS || now < tk.at) continue;
+    if (!tk.at || now - tk.at > TALK_MS + 6000 || now < tk.at) continue;
     if (w.raid?.phase === 'gece' || w.foreign?.landed) continue; // v1.9.9: nobody chats on the street during a raid/war
     const a = out.get(tk.a), b = out.get(tk.b); if (!a || !b || a.p.jailedDays || b.p.jailedDays) continue;
-    if (playerWalking(w, a.p, now) || playerWalking(w, b.p, now)) continue;
-    const k = Math.min(1, (now - tk.at) / 6000);
+    if ((tk.toPlayer ? a.moving : playerWalking(w, a.p, now)) || playerWalking(w, b.p, now)) continue; // v2.0.3: an NPC walks up to a standing player
     const tx = a.x + 0.95, ty = a.y;
-    b.x = b.x + (tx - b.x) * k; b.y = b.y + (ty - b.y) * k; b.moving = k < 1; b.visible = true; b.dir = -1;
-    a.moving = false; a.visible = true; a.talking = true; b.talking = k >= 1;
+    if (now - tk.at > TALK_MS) { const k2 = (now - tk.at - TALK_MS) / 6000; const e = k2 * k2 * (3 - 2 * k2); b.x = tx + (b.x - tx) * e; b.y = ty + (b.y - ty) * e; b.moving = true; b.visible = true; continue; } // v2.0.3: walk away after the chat, no snapping back
+    const k0 = Math.min(1, (now - tk.at) / 6000); const k = k0 * k0 * (3 - 2 * k0); // eased approach
+    b.x = b.x + (tx - b.x) * k; b.y = b.y + (ty - b.y) * k; b.moving = k0 < 1; b.visible = true; b.dir = -1;
+    a.moving = false; a.visible = true; a.talking = true; b.talking = k0 >= 1;
   }
   // bekçi walks to a reported corpse and stays for the investigation
   for (const co of w.corpses ?? []) {
@@ -194,7 +209,7 @@ export function placePeople(w: World, now: number): Placed[] {
   // a hearing: the accused, the kadı and the savcı stand at the courthouse
   const mh = c.B.get('mahkeme');
   if (mh) for (const cs of w.cases) {
-    if (!cs.trial || cs.trial.done) continue;
+    if (!cs.trial || cs.trial.done || now < cs.trial.at - 60_000 || now > cs.trial.until + 120_000) continue; // v2.0.3: only during the hearing
     const put = (id: string | null, dx: number): void => { const q = id ? out.get(id) : undefined; if (q && !playerWalking(w, q.p, now)) { q.x = mh.door.x + 0.5 + dx; q.y = mh.door.y + 0.8; q.visible = true; q.moving = false; } };
     put(cs.accusedId, 0); put(cs.trial.judgeId, -1.2); put(cs.trial.prosecutorId, 1.2);
   }

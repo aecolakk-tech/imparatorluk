@@ -18,8 +18,8 @@ function run(w: World, days: number, start = T0, online = true): number {
 const npc = (w: World, prof: string): Person => w.people.find((p) => p.prof === prof && !p.playerId)!;
 
 describe('clock & speed', () => {
-  it('one game day takes 20 real minutes at 1x (day hours 60 s, night hours 30 s); only the Kayzer changes speed', () => {
-    expect(DAY_MS).toBe(1_200_000);
+  it('one game day takes 18 real minutes at 1x (15 min day, 3 min night); only the Kayzer changes speed', () => {
+    expect(DAY_MS).toBe(1_080_000);
     const w = setup(); joinWorld(w, 'u2', 'Alparslan', 'hamal', false, T0);
     expect(applyAction(w, 'u2', { t: 'setSpeed', speed: 2 }, T0).ok).toBe(false);
     expect(applyAction(w, 'f', { t: 'setSpeed', speed: 2 }, T0).ok).toBe(true);

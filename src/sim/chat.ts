@@ -125,23 +125,26 @@ export function chatHour(w: World, now: number, online: (p: Person) => boolean):
 }
 
 function approach(w: World, n: Person, p: Person, now: number): void {
+  // v2.0.3: the NPC really walks up to the player (the player stops; the NPC speaks first)
+  const walkUp = (line: string): void => { (w.talks ??= []).push({ a: p.id, b: n.id, text: line.slice(0, 80), lines: [line.slice(0, 120)], day: w.day, hour: w.hour, at: now, toPlayer: true }); };
+  const sayP = (w2: World, from: Person, to: string | null, text: string, at: number): void => { say(w2, from, to, text, at); if (to === p.id) walkUp(text.replace(/\s*\((Aile\/)?Teklifler\)$/, '')); };
   const kind = pick(w, ['sohbet', 'sohbet', 'rica', 'mal', 'davet', 'rusvet'] as const);
   if (kind === 'rica' && n.money < 20) {
     w.offers.push({ id: nextId(w, 'O'), from: n.id, to: p.id, kind: 'borc', amount: 10, day: w.day, text: `${n.name} 10 Dinar borç istiyor` });
-    say(w, n, p.id, `${p.name.split(' ')[0]}, ayıptır söylemesi kesem boş. 10 Dinar verir misin? Geri öderim, bu iyiliği unutmam. (Aile/Teklifler)`, now); return;
+    sayP(w, n, p.id, `${p.name.split(' ')[0]}, ayıptır söylemesi kesem boş. 10 Dinar verir misin? Geri öderim, bu iyiliği unutmam. (Aile/Teklifler)`, now); return;
   }
   const g = PRODUCES[n.prof]?.good;
   if (kind === 'mal' && g && n.inv[g] + w.listings.filter((l) => l.sellerId === n.id && l.good === g).reduce((s, l) => s + l.qty, 0) > 2) {
     const price = Math.round(marketPrice(w, g) * 0.9 * 100) / 100;
     w.offers.push({ id: nextId(w, 'O'), from: n.id, to: p.id, kind: 'mal', good: g, qty: 3, price, day: w.day, text: `3 ${GOOD_LABEL[g]}, tanesi ${price}` });
-    say(w, n, p.id, `Sana özel: 3 ${GOOD_LABEL[g]} tanesi ${price} Dinar, pazardan ucuz. İster misin? (Teklifler)`, now); return;
+    sayP(w, n, p.id, `Sana özel: 3 ${GOOD_LABEL[g]} tanesi ${price} Dinar, pazardan ucuz. İster misin? (Teklifler)`, now); return;
   }
   if (kind === 'rusvet' && ['bekci', 'tahsildar', 'savci', 'hakim', 'memur'].includes(p.prof) && n.honesty < 45 && n.money > 40) {
     w.offers.push({ id: nextId(w, 'O'), from: n.id, to: p.id, kind: 'rusvet', amount: 15, day: w.day, text: `${n.name} 15 Dinar karşılığı göz yummanızı istiyor` });
-    say(w, n, p.id, `Psst… ${PROF_LABEL[p.prof]} efendi, 15 Dinar'ım var; benim işlere biraz göz yumsan? (Teklifler)`, now); return;
+    sayP(w, n, p.id, `Psst… ${PROF_LABEL[p.prof]} efendi, 15 Dinar'ım var; benim işlere biraz göz yumsan? (Teklifler)`, now); return;
   }
-  if (kind === 'davet') { say(w, n, p.id, n.din > 55 ? 'Öğle namazında camide buluşalım mı?' : 'Akşam meyhanede bir kadeh içelim mi? Benden!', now); return; }
-  say(w, n, p.id, `${pick(w, GREET)}! ${opinion(w, n)}`, now);
+  if (kind === 'davet') { sayP(w, n, p.id, n.din > 55 ? 'Öğle namazında camide buluşalım mı?' : 'Akşam meyhanede bir kadeh içelim mi? Benden!', now); return; }
+  sayP(w, n, p.id, `${pick(w, GREET)}! ${opinion(w, n)}`, now);
   void clamp;
 }
 

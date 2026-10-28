@@ -17,7 +17,7 @@ import { assignSlot, hotbarSlots } from './controls';
 import { marketPrice } from '../sim/economy';
 
 export const APP_NAME = 'Medieval Empire';
-export const VERSION = 'v2.0.2';
+export const VERSION = 'v2.0.3';
 const EAT: Good[] = ['ekmek', 'et', 'balik', 'yumurta', 'sut', 'su'];
 
 /** 🎒 Çanta: carried weapons (draw / holster), food & water (use), and the house chest. */
@@ -100,6 +100,14 @@ export function eventOptions(kind: string, env: PopupEnv, close: () => void): HT
 export function eventTitle(kind: string): string { return `${ICON[kind] ?? '⚠'} ${TITLE[kind] ?? 'OLAY'}`; }
 
 export const WHATS_NEW: string[] = [
+  '🛠 Donma düzeltildi: çıkış yapıp tekrar girince Menü ve düğmeler artık hep çalışıyor; görünmez bir pencere ekranı kilitleyemez, oyun 20 sn güncellenmezse kendini toparlıyor.',
+  '🪟 Saray, Mahkeme ve diğer pencereler açıldığı dokunuşla kendiliğinden kapanmıyor; siz kapatana kadar açık kalıyor.',
+  '⌨️ Giriş ekranında klavye açılınca form kaybolmuyor; yazdıklarınız silinmiyor.',
+  '🔊 Müzik ve Ses efektleri düğmeleri üst çubukta hep görünür; Menü → Ayarlar → Ses’ten de açıp kapatabilirsiniz.',
+  '💬 Bir kişi sizinle konuşmaya gelince karakteriniz duruyor; tekrar yürümek için joystick’i bırakıp yeniden itin ya da bir yere dokunun.',
+  '🚶 Halk daha doğal yürüyor: köşeleri dönerek, kendi şeridinde ve kendi hızında; sohbet bitince ışınlanmadan yürüyüp gidiyorlar.',
+  '⏱ Gün artık 18 dakika: gündüz (06–22) 15 dk, akşam/gece 3 dk.',
+  '🌅 Yeni sabah müziği (06–10): ney, saz, dem ve hafif def ile Hüseyni bir şafak ezgisi; gündüz ve gece müziğine yumuşak geçiş.',
   '⚓ Çıkarma artık dalga dalga: askerler gemiden 3’erli gruplar halinde iniyor (“N asker daha gemiden iniyor”).',
   '⚔ Kılıç ve hançer elde görünüyor; “Saldır” her an basılabilir ve savuruş animasyonu oynar. Yakın dövüş menzili 0,5 m (1 kare = 1,2 m); uzaktaki savuruş ıskalar.',
   '🏹 Yay: “Saldır”ı basılı tutun → nişan çizgisi ve menzil (kare) görünür; joystick ile nişan alın, bırakınca ok uçar. Düşman okçularının okları da görünür.',

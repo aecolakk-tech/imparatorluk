@@ -23,5 +23,10 @@ await p.mouse.move(ab[0], ab[1]); await p.mouse.down(); await sleep(1100); await
 await p.mouse.up(); await sleep(250); await p.screenshot({ path: `${OUT}/arrow-flight.png` }); await sleep(1500);
 log('combat-log', JSON.stringify(await I(() => document.querySelector('.combat-log')?.innerText ?? '')), 'toasts', JSON.stringify(await T.toasts()));
 log('my hits', await I(() => { const s = window.__imp(); const w = s.world; const pid = Object.values(w.players).find((x) => x.name === s.me).personId; return JSON.stringify((w.combat?.hits ?? []).filter((h) => h.from === pid).map((h) => [h.k, h.dmg, h.arrow])); }));
+// v2.0.3: after the battle, the Menü button must still be on top and open a panel
+await T.W("if (w.raid) { w.raid.phase = 'bitti'; } w.combat = undefined;"); await sleep(4000); await T.dismiss();
+log('menu-hit after battle', await I(() => { const b = [...document.querySelectorAll('.dock button')].find((x) => /Menü/.test(x.textContent)); const r = b.getBoundingClientRect(); const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return b.contains(t) ? 'menu-on-top' : 'BLOCKED by ' + (t?.className || t?.tagName); }));
+await p.touchscreen.tap(...(await I(() => { const b = [...document.querySelectorAll('.dock button')].find((x) => /Menü/.test(x.textContent)); const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }))); await sleep(800);
+log('menu opens by real tap after battle', await I(() => !!document.querySelector('.sheet:not(.leave)')));
 log('errors', JSON.stringify(T.errors.slice(0, 6)));
 await T.b.close();

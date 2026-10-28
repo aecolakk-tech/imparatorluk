@@ -87,12 +87,12 @@ describe('v2.0.1 map', () => {
   });
 });
 describe('v2.0.1 clock (20 real min/day, night 2x)', () => {
-  it('a full day at 1x takes 20 real minutes; the night part 4 minutes; 0.5x doubles it', () => {
+  it('a full day at 1x takes 18 real minutes (v2.0.3); the night part 3 minutes; 0.5x doubles it', () => {
     const w = setup(); w.hour = 6; let now = T0 + 1; touchPlayer(w, 'u2', now); advanceWorld(w, now); w.lastTickAt = now; const d0 = w.day;
     let nightStart = 0;
     while (w.day === d0 || w.hour < 6) { now += 1000; touchPlayer(w, 'u2', now); advanceWorld(w, now); if (w.hour === 22 && !nightStart) nightStart = now; }
-    expect(Math.round((now - T0) / 1000)).toBe(1200); expect(Math.round((now - nightStart) / 1000)).toBe(240);
-    w.speed = 0.5; const t1 = now; while (w.hour === 6) { now += 1000; touchPlayer(w, 'u2', now); advanceWorld(w, now); } expect(Math.round((now - t1) / 1000)).toBe(120);
+    expect(Math.round((now - T0) / 1000)).toBe(1080); expect(Math.round((now - nightStart) / 1000)).toBe(180);
+    w.speed = 0.5; const t1 = now; while (w.hour === 6) { now += 1000; touchPlayer(w, 'u2', now); advanceWorld(w, now); } expect(Math.abs((now - t1) / 1000 - 112.5)).toBeLessThanOrEqual(1); // 0.5x doubles the 56.25 s hour
   });
   it('3 meals + 3 drinks a day keep a player healthy (no end-of-day penalty)', () => {
     const w = setup(); const me = findPerson(w, w.players.u2!.personId)!; me.onboardUntil = 0; me.inv.ekmek = 10; me.inv.su = 10; me.health = 100; rules.reach = false;

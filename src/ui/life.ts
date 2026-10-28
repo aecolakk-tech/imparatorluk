@@ -39,7 +39,7 @@ export function activeEvents(w: World): { text: string; tip: string }[] {
 /** HUD chips: clock + speed, my needs, events. */
 export function hudChips(c: Ctx): HTMLElement[] {
   const w = c.w; const m = c.me; const out: HTMLElement[] = [];
-  out.push(chip(`${dayPart(w.hour)} · Gün ${w.day} · ${String(w.hour).padStart(2, '0')}:00${w.speed !== 1 ? ` · ${w.speed}x` : ''}`, '1 oyun günü = 20 gerçek dakika (1x): gündüz (06–22) 1 oyun saati = 1 dakika, gece (22–06) 30 saniye. Kimse çevrimiçi değilken saat durur. Hızı sadece Kayzer değiştirir.'));
+  out.push(chip(`${dayPart(w.hour)} · Gün ${w.day} · ${String(w.hour).padStart(2, '0')}:00${w.speed !== 1 ? ` · ${w.speed}x` : ''}`, '1 oyun günü = 18 gerçek dakika (1x): gündüz (06–22) 15 dakika (saat ≈56 sn), gece (22–06) 3 dakika (saat ≈22 sn). Kimse çevrimiçi değilken saat durur. Hızı sadece Kayzer değiştirir.'));
   if (m) {
     const mealOk = m.meals >= 3, waterOk = m.drinks >= 3;
     out.push(chip(`🍞 Öğün ${Math.min(m.meals, 3)}/3`, 'Bugün yediğiniz öğün sayısı (günde 3 gerekli). 3 olmazsa gün sonunda −10 sağlık.', mealOk ? 'ok' : 'warn'));

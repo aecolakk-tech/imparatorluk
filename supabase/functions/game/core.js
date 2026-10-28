@@ -56,15 +56,17 @@ function use(w, key, p) {
 }
 
 // src/sim/constants.ts
-var DAY_REAL_MIN = 20;
-var NIGHT_FASTER = 2;
+var DAY_PART_MIN = 15;
+var NIGHT_PART_MIN = 3;
+var DAY_REAL_MIN = DAY_PART_MIN + NIGHT_PART_MIN;
 var DAY_FROM = 6;
 var NIGHT_FROM = 22;
 var DAY_MS = DAY_REAL_MIN * 60 * 1e3;
 var DAY_HOURS = NIGHT_FROM - DAY_FROM;
 var NIGHT_HOURS = 24 - DAY_HOURS;
-var DAY_HOUR_MS = DAY_MS / (DAY_HOURS + NIGHT_HOURS / NIGHT_FASTER);
-var NIGHT_HOUR_MS = DAY_HOUR_MS / NIGHT_FASTER;
+var DAY_HOUR_MS = DAY_PART_MIN * 6e4 / DAY_HOURS;
+var NIGHT_HOUR_MS = NIGHT_PART_MIN * 6e4 / NIGHT_HOURS;
+var NIGHT_FASTER = DAY_HOUR_MS / NIGHT_HOUR_MS;
 var isDayHour = (h) => h >= DAY_FROM && h < NIGHT_FROM;
 var hourLen = (h) => isDayHour((h % 24 + 24) % 24) ? DAY_HOUR_MS : NIGHT_HOUR_MS;
 var DAYS_PER_YEAR = 5;
@@ -3780,29 +3782,36 @@ function chatHour(w, now, online) {
   }
 }
 function approach(w, n2, p, now) {
+  const walkUp = (line) => {
+    (w.talks ??= []).push({ a: p.id, b: n2.id, text: line.slice(0, 80), lines: [line.slice(0, 120)], day: w.day, hour: w.hour, at: now, toPlayer: true });
+  };
+  const sayP = (w2, from, to, text, at) => {
+    say(w2, from, to, text, at);
+    if (to === p.id) walkUp(text.replace(/\s*\((Aile\/)?Teklifler\)$/, ""));
+  };
   const kind = pick(w, ["sohbet", "sohbet", "rica", "mal", "davet", "rusvet"]);
   if (kind === "rica" && n2.money < 20) {
     w.offers.push({ id: nextId(w, "O"), from: n2.id, to: p.id, kind: "borc", amount: 10, day: w.day, text: `${n2.name} 10 Dinar bor\xE7 istiyor` });
-    say(w, n2, p.id, `${p.name.split(" ")[0]}, ay\u0131pt\u0131r s\xF6ylemesi kesem bo\u015F. 10 Dinar verir misin? Geri \xF6derim, bu iyili\u011Fi unutmam. (Aile/Teklifler)`, now);
+    sayP(w, n2, p.id, `${p.name.split(" ")[0]}, ay\u0131pt\u0131r s\xF6ylemesi kesem bo\u015F. 10 Dinar verir misin? Geri \xF6derim, bu iyili\u011Fi unutmam. (Aile/Teklifler)`, now);
     return;
   }
   const g = PRODUCES[n2.prof]?.good;
   if (kind === "mal" && g && n2.inv[g] + w.listings.filter((l) => l.sellerId === n2.id && l.good === g).reduce((s, l) => s + l.qty, 0) > 2) {
     const price2 = Math.round(marketPrice(w, g) * 0.9 * 100) / 100;
     w.offers.push({ id: nextId(w, "O"), from: n2.id, to: p.id, kind: "mal", good: g, qty: 3, price: price2, day: w.day, text: `3 ${GOOD_LABEL[g]}, tanesi ${price2}` });
-    say(w, n2, p.id, `Sana \xF6zel: 3 ${GOOD_LABEL[g]} tanesi ${price2} Dinar, pazardan ucuz. \u0130ster misin? (Teklifler)`, now);
+    sayP(w, n2, p.id, `Sana \xF6zel: 3 ${GOOD_LABEL[g]} tanesi ${price2} Dinar, pazardan ucuz. \u0130ster misin? (Teklifler)`, now);
     return;
   }
   if (kind === "rusvet" && ["bekci", "tahsildar", "savci", "hakim", "memur"].includes(p.prof) && n2.honesty < 45 && n2.money > 40) {
     w.offers.push({ id: nextId(w, "O"), from: n2.id, to: p.id, kind: "rusvet", amount: 15, day: w.day, text: `${n2.name} 15 Dinar kar\u015F\u0131l\u0131\u011F\u0131 g\xF6z yumman\u0131z\u0131 istiyor` });
-    say(w, n2, p.id, `Psst\u2026 ${PROF_LABEL[p.prof]} efendi, 15 Dinar'\u0131m var; benim i\u015Flere biraz g\xF6z yumsan? (Teklifler)`, now);
+    sayP(w, n2, p.id, `Psst\u2026 ${PROF_LABEL[p.prof]} efendi, 15 Dinar'\u0131m var; benim i\u015Flere biraz g\xF6z yumsan? (Teklifler)`, now);
     return;
   }
   if (kind === "davet") {
-    say(w, n2, p.id, n2.din > 55 ? "\xD6\u011Fle namaz\u0131nda camide bulu\u015Fal\u0131m m\u0131?" : "Ak\u015Fam meyhanede bir kadeh i\xE7elim mi? Benden!", now);
+    sayP(w, n2, p.id, n2.din > 55 ? "\xD6\u011Fle namaz\u0131nda camide bulu\u015Fal\u0131m m\u0131?" : "Ak\u015Fam meyhanede bir kadeh i\xE7elim mi? Benden!", now);
     return;
   }
-  say(w, n2, p.id, `${pick(w, GREET)}! ${opinion(w, n2)}`, now);
+  sayP(w, n2, p.id, `${pick(w, GREET)}! ${opinion(w, n2)}`, now);
   void clamp;
 }
 function playerSaid(w, from, text, toPersonId, now, defer = false) {
@@ -4575,6 +4584,19 @@ function along(path, f) {
   }
   return path[path.length - 1];
 }
+function naturalAlong(path, walked, len, h, now) {
+  if (len <= 0) return path[path.length - 1];
+  const R = 0.6;
+  const at = (d) => along(path, Math.max(0, Math.min(1, d / len)));
+  const a = at(walked - R), b2 = at(walked), c = at(walked + R);
+  const fade = Math.max(0, Math.min(1, walked / 1.5, (len - walked) / 1.5));
+  const dx = c.x - a.x, dy = c.y - a.y;
+  const L = Math.hypot(dx, dy) || 1;
+  const lane = ((h >> 4) % 100 / 100 - 0.5) * 0.7 + Math.sin(now / 900 + h % 97) * 0.05;
+  const sx = (a.x + 2 * b2.x + c.x) / 4, sy = (a.y + 2 * b2.y + c.y) / 4;
+  return { x: b2.x + (sx - b2.x + -dy / L * lane) * fade, y: b2.y + (sy - b2.y + dx / L * lane) * fade };
+}
+var paceOf = (h) => NPC_SPEED * (0.85 + h % 31 / 100);
 var MARKETS = ["pazar", "gida", "zanaat", "yeni", "kahve"];
 var dayPlan = /* @__PURE__ */ new Map();
 var NPC_SPEED = 2.4;
@@ -4665,16 +4687,17 @@ function scheduled(w, p, now, ctx) {
       const path = route(from, dest);
       let len = 0;
       for (let i = 1; i < path.length; i += 1) len += Math.abs(path[i].x - path[i - 1].x) + Math.abs(path[i].y - path[i - 1].y);
-      const walked = (t - t0) * hs * NPC_SPEED;
+      const sp = paceOf(h);
+      const walked = (t - t0) * hs * sp;
       if (walked < len) {
-        pos = along(path, walked / len);
+        pos = naturalAlong(path, walked, len, h, now);
         moving = true;
         arrived = false;
         rad = -1;
         break;
       }
       cur = dest;
-      free = t0 + len / NPC_SPEED / hs;
+      free = t0 + len / sp / hs;
       rad = r;
       arrived = true;
     }
@@ -4689,8 +4712,11 @@ function scheduled(w, p, now, ctx) {
   }
   if (p.id === w.kayzerId || p.prof === "naip" || p.soylu && p.home === "saray") {
     pos = door("saray", p, 2);
-    pos.x += wanderX * 0.7;
-    moving = walking;
+    const st = stroll(p, now, 1.6);
+    pos.x += st.dx;
+    pos.y += st.dy * 0.6;
+    moving = st.moving;
+    void wanderX;
     visible = !night || !!p.nightOut;
   }
   return { p, x: pos.x, y: pos.y, moving, visible, dir: 1 };
@@ -4827,22 +4853,32 @@ function placePeople(w, now) {
     out.set(p.id, q);
   }
   for (const tk of w.talks ?? []) {
-    if (!tk.at || now - tk.at > TALK_MS || now < tk.at) continue;
+    if (!tk.at || now - tk.at > TALK_MS + 6e3 || now < tk.at) continue;
     if (w.raid?.phase === "gece" || w.foreign?.landed) continue;
     const a = out.get(tk.a), b2 = out.get(tk.b);
     if (!a || !b2 || a.p.jailedDays || b2.p.jailedDays) continue;
-    if (playerWalking(w, a.p, now) || playerWalking(w, b2.p, now)) continue;
-    const k = Math.min(1, (now - tk.at) / 6e3);
+    if ((tk.toPlayer ? a.moving : playerWalking(w, a.p, now)) || playerWalking(w, b2.p, now)) continue;
     const tx = a.x + 0.95, ty = a.y;
+    if (now - tk.at > TALK_MS) {
+      const k2 = (now - tk.at - TALK_MS) / 6e3;
+      const e = k2 * k2 * (3 - 2 * k2);
+      b2.x = tx + (b2.x - tx) * e;
+      b2.y = ty + (b2.y - ty) * e;
+      b2.moving = true;
+      b2.visible = true;
+      continue;
+    }
+    const k0 = Math.min(1, (now - tk.at) / 6e3);
+    const k = k0 * k0 * (3 - 2 * k0);
     b2.x = b2.x + (tx - b2.x) * k;
     b2.y = b2.y + (ty - b2.y) * k;
-    b2.moving = k < 1;
+    b2.moving = k0 < 1;
     b2.visible = true;
     b2.dir = -1;
     a.moving = false;
     a.visible = true;
     a.talking = true;
-    b2.talking = k >= 1;
+    b2.talking = k0 >= 1;
   }
   for (const co of w.corpses ?? []) {
     if (!co.bekciId || !co.reportedAt || !co.bekciFrom || co.stage !== "ihbar" && co.stage !== "inceleme") continue;
@@ -4877,7 +4913,7 @@ function placePeople(w, now) {
   }
   const mh = c.B.get("mahkeme");
   if (mh) for (const cs3 of w.cases) {
-    if (!cs3.trial || cs3.trial.done) continue;
+    if (!cs3.trial || cs3.trial.done || now < cs3.trial.at - 6e4 || now > cs3.trial.until + 12e4) continue;
     const put = (id, dx) => {
       const q = id ? out.get(id) : void 0;
       if (q && !playerWalking(w, q.p, now)) {

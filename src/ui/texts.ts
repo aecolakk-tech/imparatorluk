@@ -33,7 +33,7 @@ export const RULES: [string, string[]][] = [
     'Lider rol dağıtır (yardımcı, propagandacı, gözcü) ve eylem seçer: propaganda, soygun (lonca), sabotaj, gece toplantısı ve en az 8 üyeyle ayaklanma. Her eylem şüpheyi artırır; muhbir, casus, baskın ve sorgu sizi ele verebilir.',
   ]],
   ['Dünya', [
-    'Tek bir ortak dünya var, hiç sıfırlanmaz. 1 oyun günü = 20 gerçek dakika (1x): gündüz (06:00–22:00) her oyun saati 1 dakika, gece (22:00–06:00) 30 saniye sürer; kısa bir yürüyüş birkaç saniye sürer (yürümek saat atlatmaz, sadece iş ve namaz gibi uzun işler zaman alır). Kimse çevrimiçi değilken saat durur. Hızı sadece Kayzer 0,5x / 1x / 2x yapabilir (üst çubuktan, her yerden). Eşkıya baskını ve savaş sırasında oyun otomatik 0,25x yavaşlar, bitince eski hıza döner.',
+    'Tek bir ortak dünya var, hiç sıfırlanmaz. 1 oyun günü = 18 gerçek dakika (1x): gündüz (06:00–22:00) toplam 15 dakika (her oyun saati ≈56 saniye), akşam/gece (22:00–06:00) toplam 3 dakika (her saat ≈22 saniye); kısa bir yürüyüş birkaç saniye sürer (yürümek saat atlatmaz, sadece iş ve namaz gibi uzun işler zaman alır). Kimse çevrimiçi değilken saat durur. Hızı sadece Kayzer 0,5x / 1x / 2x yapabilir (üst çubuktan, her yerden). Eşkıya baskını ve savaş sırasında oyun otomatik 0,25x yavaşlar, bitince eski hıza döner.',
     'Kimse çevrimiçi değilken dünya donar; biri girince kaldığı yerden devam eder.',
     'Siz yokken karakterinizi oyunun yapay zekâsı SADECE hayatta tutar: 3 öğün yer, 3 kez su içer, gerekirse hekime gider. Çalışmaz, satmaz, para biriktirmez, suç işlemez. Girdiğiniz an kontrol size geçer.',
     'Üç hafta hiç girmeyen oyuncunun karakteri tamamen bağımsız bir vatandaşa döner (geri gelince yine sizin olur).',
