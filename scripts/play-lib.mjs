@@ -16,7 +16,7 @@ export async function boot(name = 'Oyuncu Test', extra = '') {
     p, b, I, errors,
     dismiss: async () => { for (let i = 0; i < 12; i++) { const ok = await I(() => { const x = [...document.querySelectorAll('.modal:not(.trial-modal) button, .a2hs button')].find((x) => /Tamam|Kapat|Atla|Geç|Harika|Sonra|Anladım|✕/.test(x.textContent)); x?.click(); return !!x; }); if (!ok) break; await sleep(200); } },
     W: (code, arg) => I((code, arg) => { const k = 'imparatorluk-mock-v1'; const st = JSON.parse(localStorage.getItem(k)); const r = new Function('w', 'arg', code)(st.world, arg); localStorage.setItem(k, JSON.stringify(st)); return r; }, code, arg),
-    me: () => I(() => { const S = window.__imp(); const w = S.world; const pid = Object.values(w.players).find((x) => x.name === S.me)?.personId; return w.people.find((q) => q.id === pid); }),
+    me: () => I((nm) => { const S = window.__imp(); const w = S.world; const pid = Object.values(w.players).find((x) => x.name === nm || x.name?.endsWith(' ' + nm))?.personId ?? Object.values(w.players).find((x) => S.me && x.name === S.me)?.personId; return w.people.find((q) => q.id === pid); }, name),
     act: async (a, wait = 1200) => { await I((a) => window.__imp().act(a), a); await sleep(wait); },
     sheet: () => I(() => document.querySelector('.sheet')?.innerText ?? ''),
     toasts: () => I(() => [...document.querySelectorAll('.toast')].map((x) => x.innerText).join(' | ')),

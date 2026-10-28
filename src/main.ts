@@ -224,7 +224,7 @@ function guide(step = 0, done?: () => void): void {
 let lookSaved = false; let onbOpen = false; let onbDoneSent = false;
 function onboarding(): boolean {
   const w = world; const m = me(); const s = be.session();
-  if (w && s && !m && w.players[s.playerId]?.dead) { if (!document.querySelector('.funeral-modal')) app.append(funeralModal(w, s.playerId)); return true; }
+  if (w && s && !m && w.players[s.playerId]?.dead) { if (!document.querySelector('.funeral-modal')) { document.querySelectorAll('.look-modal').forEach((x) => x.remove()); lookOpen = false; app.append(funeralModal(w, s.playerId)); } return true; } // v2.0.2: the funeral replaces any open character form
   if (!w || !m || !s) return false;
   if (lookOpen || onbOpen) return true;
   const next = (): void => { onbOpen = false; setTimeout(() => { onboarding(); }, 50); };
@@ -1107,7 +1107,7 @@ void ({} as Corpse);
 installIconify();
 void be.restore().then((s) => (s ? start() : loginScreen()));
 // expose for headless smoke tests
-(window as unknown as { __imp: () => unknown }).__imp = () => ({ profile: () => ({ frameCpuAvgMs: +(profAcc.sum / Math.max(1, profAcc.n)).toFixed(2), frameCpuMaxMs: +profAcc.max.toFixed(1) }), mood: musicMood, mute: setMuted, sel: () => ({ b: selB, p: selPerson }), look: (x: number, y: number) => { followCam = false; cam.x = x - canvas.width / (cam.z * T) / 2; cam.y = y - canvas.height / (cam.z * T) / 2; }, act: doAct, openB: (id: string) => { const b = world!.buildings.find((x) => x.id === id); if (b) openSheet(() => bPanel(b)); }, menu: openMenu, admin: openAdmin, world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1)), r.top + (y - cam.y) * cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1))]; } });
+(window as unknown as { __imp: () => unknown }).__imp = () => ({ profile: () => ({ frameCpuAvgMs: +(profAcc.sum / Math.max(1, profAcc.n)).toFixed(2), frameCpuMaxMs: +profAcc.max.toFixed(1) }), mood: musicMood, mute: setMuted, sel: () => ({ b: selB, p: selPerson }), look: (x: number, y: number) => { followCam = false; cam.x = x - canvas.width / (cam.z * T) / 2; cam.y = y - canvas.height / (cam.z * T) / 2; }, act: doAct, openB: (id: string) => { const b = world!.buildings.find((x) => x.id === id); if (b) openSheet(() => bPanel(b)); }, menu: openMenu, admin: openAdmin, openP: openPersonSheet, gosterge: openGosterge, purse: openPurse, places: openPlaces, world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1)), r.top + (y - cam.y) * cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1))]; } });
 
 // ---- v1.9 landscape: rotate overlay (phones in portrait) + low-graphics class ----
 document.body.classList.toggle('low', lowGfx);

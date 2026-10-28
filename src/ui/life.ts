@@ -25,6 +25,7 @@ export function activeEvents(w: World): { text: string; tip: string }[] {
   const out: { text: string; tip: string }[] = [];
   if (w.nature && w.day <= w.nature.until) out.push({ text: `${NATURE_LABEL[w.nature.kind]} (${w.nature.until}. güne dek)`, tip: 'Doğal olay: üretimi etkiler. Kurallar → Doğa.' });
   if ((w.festivalUntil ?? 0) >= w.day) out.push({ text: '🎉 Festival', tip: 'Festival Alanı açık: oraya gidin, mutluluk artar.' });
+  if (w.panayir === w.day) out.push({ text: '🎪 Panayır', tip: 'Bugün Panayır: kervanlar nadir mallar getirdi, Pazar’da fiyatlar soğuyor.' }); // v2.0.2 E7
   if (w.caravan && w.day <= w.caravan.until) out.push({ text: `🐪 ${w.caravan.name}`, tip: 'Limanda kervan: pahalı ama bol mal; şehrin fazlasını da alır.' });
   if (w.raid) out.push({ text: w.raid.phase === 'gece' ? `🗡 Eşkıya baskını! (${(w.raid.robbers ?? []).filter((r) => r.hp > 0).length} eşkıya)` : '🗡 Bu gece eşkıya bekleniyor', tip: 'Gece dışarıda kalmayın; asker ve bekçiler savaşır.' });
   if (w.foreign) out.push({ text: w.foreign.landed ? (w.combat && !w.combat.spawned ? `⛵ ${w.foreign.name} gemileri Liman’a yanaşıyor` : `⚔ ${w.foreign.name}: ${w.combat ? w.combat.foes.filter((f) => f.hp > 0).length : w.foreign.alive} düşman askeri şehirde`) : w.foreign.phase === 'savas' ? `⚔ ${w.foreign.name} ${w.foreign.landDay}. gün çıkarma yapacak` : `📜 ${w.foreign.name} elçisi cevap bekliyor`, tip: 'Yabancı devlet.' });
