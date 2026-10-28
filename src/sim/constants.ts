@@ -1,5 +1,5 @@
 import type { Good, Profession } from './types';
-export const DAY_MS = 5 * 60 * 1000; // 1 game day = 5 real minutes (at 1x)
+export const DAY_MS = 6 * 60 * 1000; // 1 game day = 6 real minutes (at 1x)
 export const HOUR_MS = DAY_MS / 24;
 export const ONLINE_WINDOW_MS = 60 * 1000; // heartbeat considered online for 60s
 export const MAX_CATCHUP_HOURS = 48; // safety cap per tick call

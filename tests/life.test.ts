@@ -18,8 +18,8 @@ function run(w: World, days: number, start = T0, online = true): number {
 const npc = (w: World, prof: string): Person => w.people.find((p) => p.prof === prof && !p.playerId)!;
 
 describe('clock & speed', () => {
-  it('one game day takes 5 real minutes at 1x; only the Kayzer changes speed', () => {
-    expect(DAY_MS).toBe(300_000);
+  it('one game day takes 6 real minutes at 1x; only the Kayzer changes speed', () => {
+    expect(DAY_MS).toBe(360_000);
     const w = setup(); joinWorld(w, 'u2', 'Ali', 'hamal', false, T0);
     expect(applyAction(w, 'u2', { t: 'setSpeed', speed: 2 }, T0).ok).toBe(false);
     expect(applyAction(w, 'f', { t: 'setSpeed', speed: 2 }, T0).ok).toBe(true);
@@ -147,7 +147,7 @@ describe('migration', () => {
   it.skipIf(!existsSync(path))('the live day-3 world migrates and keeps running', () => {
     const raw = JSON.parse(readFileSync(path, 'utf8')); const w: World = (Array.isArray(raw) ? raw[0] : raw).state;
     const ids = w.people.map((p) => p.id); migrateWorld(w);
-    expect(w.schema).toBe(5); expect(w.people.map((p) => p.id)).toEqual(ids);
+    expect(w.schema).toBe(7); expect(w.people.map((p) => p.id)).toEqual(ids);
     for (const p of w.people) if (p.spouse) { const s = findPerson(w, p.spouse); if (s) expect(s.female).not.toBe(p.female); }
     const m0 = totalMoney(w); let now = w.lastTickAt;
     for (let i = 0; i < 24 * 10; i++) { now += DAY_MS / 24; advanceWorld(w, now); }

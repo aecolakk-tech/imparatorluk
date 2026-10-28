@@ -6,16 +6,17 @@ import { findPerson } from './sim/world';
 import { makeBackend } from './backend';
 import type { Backend } from './backend/api';
 import { MOCK_FOUNDER_EMAIL } from './backend/mock';
-import { buildStatic, drawFrame, hitTest, placePeople, T, type Camera, type Placed } from './ui/map';
+import { buildStatic, drawFrame, hitTest, placePeople, T, tapFx, type Camera, type Placed } from './ui/map';
 import { bar, fmt, h, select } from './ui/dom';
-import { avatar, buildingPanel, familyPanel, isyanBar, personCard, type Ctx } from './ui/panels';
+import { ic, CREDITS, iconify } from './ui/icons';
+import { electionCard, avatar, buildingPanel, familyPanel, isyanBar, personCard, type Ctx } from './ui/panels';
 import { GUIDE, RULES } from './ui/texts';
 import { feedPanel, hudChips, quickPanel } from './ui/life';
 import { rulerScreen } from './ui/ruler';
 import type { Candidate, ChatMsg } from './server/core';
 import { makeSprite } from './ui/sprites';
 import { GOALS } from './sim/goals';
-import { season, SEASON_LABEL, ANIMALS, ANIMAL_LABEL, ANIMAL_PRICE, ANIMAL_FEED, FARM_PRICE, RANKS_N, RANK_INFO, FIEFS, ORG_LABEL, type OrgKind, type Rank } from './sim/realm';
+import { season, SEASON_LABEL, ANIMALS, ANIMAL_LABEL, ANIMAL_PRICE, ANIMAL_FEED, FARM_PRICE, BARN, RANKS_N, RANK_INFO, FIEFS, ORG_LABEL, ORG_GOAL, orgGoalProgress, ROLE_LABEL, type OrgRole, type OrgKind, type Rank } from './sim/realm';
 import type { GoalId } from './sim/types';
 import { ambience, installClickSounds, isMuted, setMuted, sfx, musicOn, setMusic } from './ui/sound';
 import { needTarget, myPos } from './sim/v16';
@@ -35,12 +36,14 @@ let selected: string | null = null;
 let sheet: HTMLElement | null = null;
 let sheetRender: (() => HTMLElement) | null = null;
 let hudEl: HTMLElement; let dockEl: HTMLElement;
-let msgs: ChatMsg[] = []; let seenMsgs = 0; let dmTarget: string | null = null;
+let msgs: ChatMsg[] = []; let seenMsgs = 0; let dmTarget: string | null = null; let pendingSay: string | null = null;
 let skew = 0; // server clock minus client clock, so the map animation never freezes on a wrong local clock
 const gameNow = (): number => Date.now() + skew;
 
 function me(): Person | null { const s = be.session(); if (!world || !s) return null; const pl = world.players[s.playerId]; return pl ? findPerson(world, pl.personId) ?? null : null; }
-function toast(text: string): void { const t = h('div', { class: 'toast' }, text); app.append(t); setTimeout(() => t.remove(), 2600); }
+function toast(text: string): void { document.querySelectorAll('.toast').forEach((x) => x.remove()); const t = h('div', { class: 'toast' }, text); app.append(t); setTimeout(() => t.classList.add('out'), 2300); setTimeout(() => t.remove(), 2600); }
+/** Floating action feedback over the map (e.g. +12 D, -5 D). */
+function floatText(text: string, cls = ''): void { if (lowGfx) return; const el = h('div', { class: `float-text ${cls}` }, text); document.body.append(el); setTimeout(() => el.remove(), 1300); }
 
 // ---------------- login ----------------
 function loginScreen(): void {
@@ -99,7 +102,7 @@ const canvas = h('canvas', { id: 'map' });
 const ctx2d = canvas.getContext('2d')!;
 
 function ctx(): Ctx {
-  return { w: world!, me: me(), founder: !!be.session()?.founder, act: (a) => void doAct(a), dm: (id) => { dmTarget = id; openChat(); }, openPerson: (id) => openPersonSheet(id), openCitizens: () => openCitizens(), atSaray: atSaray() };
+  return { w: world!, me: me(), founder: !!be.session()?.founder, act: (a) => void doAct(a), dm: (id) => { dmTarget = id; openChat(); }, openPerson: (id) => openPersonSheet(id), openCitizens: () => openCitizens(), atSaray: atSaray(), say: (id, text) => { dmTarget = id; pendingSay = text; openChat(); } };
 }
 let pending: { a: Action; label: string; since: number; retarget: number } | null = null;
 let walkTarget: Pt | null = null;
@@ -108,10 +111,12 @@ let localWalk: { walk: NonNullable<Person['walk']>; id: string } | null = null; 
 let followCam = true; let lastMoveSent = 0; let moveTimer: ReturnType<typeof setTimeout> | null = null; let pendingOpen: string | null = null; let openTries = 0;
 function atSaray(): boolean { const w = world; const m = me(); const b = w?.buildings.find((x) => x.id === 'saray'); return !!(w && m && b && w.kayzerId === m.id && distToBuilding(b, myPos(w, m, gameNow())) <= REACH + 0.6); }
 async function send(a: Action): Promise<void> {
+  const before = me()?.money ?? 0;
   const r = await be.act(a);
   if (r.msg) toast(r.msg);
+  if (r.ok) { await tick(); const d = Math.round(((me()?.money ?? 0) - before) * 10) / 10; if (Math.abs(d) >= 0.5) floatText(`${d > 0 ? '+' : ''}${d} D`, `coin${d < 0 ? ' neg' : ''}`); else floatText('✓'); }
   if (!r.ok && r.msg) sfx('error'); else if (a.t === 'buy' || a.t === 'sell' || a.t === 'give' || a.t === 'borrow' || a.t === 'repay') sfx('coins'); else if (a.t === 'kill' && r.ok) sfx('death'); else if (a.t === 'report' && r.ok) sfx('bell');
-  await tick(); rerenderSheet();
+  if (!r.ok) await tick(); rerenderSheet();
 }
 /** Do an action; if it has to be done somewhere else, walk there first (no teleporting). */
 async function doAct(a: Action): Promise<void> {
@@ -119,14 +124,14 @@ async function doAct(a: Action): Promise<void> {
   const nt = needTarget(world, m, a, gameNow());
   if (nt.ok || !nt.to) { pending = null; return send(a); }
   walkTo(nt.to); pending = { a, label: nt.label ?? '', since: Date.now(), retarget: Date.now() };
-  toast(`🚶 ${nt.label === 'yanına' ? 'Yanına' : nt.label} yürüyorsunuz…`);
+  toast(`${nt.label === 'yanına' ? 'Yanına' : nt.label} yürüyorsunuz…`);
 }
 function walkTo(to: Pt): void {
   const w = world; const m = me(); if (!w || !m) return;
   if (m.jailedDays > 0) { toast('Zindandasınız.'); return; }
   const now = gameNow(); const from = myPos(w, m, now);
-  m.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * ((m.animals?.at ?? 0) > 0 ? 1.5 : 1) }; // local prediction; the server computes the same path
-  localWalk = { walk: m.walk, id: m.id }; followCam = true;
+  m.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * (m.riding && (m.animals?.at ?? 0) > 0 ? 1.5 : 1) }; // local prediction; the server computes the same path
+  localWalk = { walk: m.walk, id: m.id }; followCam = true; if (!lowGfx) { tapFx.x = to.x; tapFx.y = to.y; tapFx.t = performance.now(); }
   const pl = Object.values(w.players).find((x) => x.personId === m.id); if (pl) pl.lastSeen = Date.now();
   walkTarget = m.walk.path[m.walk.path.length - 1] ?? to;
   // throttle server syncs: at most one move per 400 ms, the last target wins
@@ -149,11 +154,11 @@ function rerenderSheet(force = false): void {
   if (!sheetRender) return;
   if (!force && sheet && (sheet.contains(document.activeElement) && document.activeElement !== document.body)) return; // don't clobber typing
   const scroll = sheet?.scrollTop ?? 0;
-  const s = h('div', { class: 'sheet' }, h('button', { class: 'close', onclick: closeSheet }, '✕'), sheetRender());
-  if (sheet) sheet.replaceWith(s); else app.append(s);
+  const s = h('div', { class: 'sheet' }, h('button', { class: 'close icon', title: 'Kapat', onclick: closeSheet }, ic('close')), sheetRender());
+  if (sheet) sheet.replaceWith(s); else { s.classList.add('enter'); app.append(s); requestAnimationFrame(() => requestAnimationFrame(() => s.classList.remove('enter'))); }
   sheet = s; if (!force) s.scrollTop = scroll;
 }
-function closeSheet(): void { sheet?.remove(); sheet = null; sheetRender = null; selected = null; }
+function closeSheet(): void { const s = sheet; if (s) { s.classList.add('leave'); setTimeout(() => s.remove(), lowGfx ? 0 : 200); } sheet = null; sheetRender = null; selected = null; }
 function openPersonSheet(id: string): void {
   selected = id;
   openSheet(() => { const p = findPerson(world!, id); return p ? personCard(ctx(), p) : h('div', {}, 'Kişi yok.'); });
@@ -171,37 +176,65 @@ function guide(step = 0): void {
   modal(maecenas(`${GUIDE[step]!}\n\n(${step + 1}/${GUIDE.length})`), () => guide(step + 1));
 }
 
-function meter(label: string, v: number, color: string, tip: string, warn = false): HTMLElement {
-  return h('span', { class: `stat meter${warn ? ' warn' : ''}`, title: tip }, label, ' ', bar(v, color), h('small', {}, ` ${Math.round(v)}`));
-}
+const SEASON_IC: Record<string, string> = { ilkbahar: 'spring', yaz: 'summer', sonbahar: 'autumn', kis: 'winter' };
 function renderHud(): void {
   const w = world; if (!w) return; const m = me();
   const k = findPerson(w, w.kayzerId); const ruler = !!m && w.kayzerId === m.id;
   const chips = hudChips(ctx()); // [clock, meals, water, health, mood, din, ...events]
   const events = chips.slice(m ? 6 : 1);
+  const night = w.hour < 6 || w.hour >= 21;
+  const chip = (icon: string, text: string, tip: string, cls = ''): HTMLElement => h('span', { class: `stat${cls ? ' ' + cls : ''}`, title: tip }, ic(icon), h('span', {}, text));
   hudEl.replaceChildren(
-    chips[0]!, h('span', { class: 'stat', title: 'Mevsim' }, SEASON_LABEL[season(w)]),
-    ...(m ? [
-      meter('❤️', m.health, '#c8483a', `Sağlık${m.wounded ? ' – yaralısınız, hekime gidin' : ''}`, m.health < 40 || m.wounded),
-      meter('🍞', 100 - m.hunger, '#d9a441', `Tokluk – açlık ${Math.round(m.hunger)}/100. Boşalınca sağlık düşer.`, m.hunger >= 75),
-      meter('💧', 100 - m.thirst, '#4aa3df', `Su – susuzluk ${Math.round(m.thirst)}/100. Boşalınca sağlık düşer.`, m.thirst >= 75),
-      meter('😊', m.mood, '#5fae5a', 'Mutluluk'),
-      h('span', { class: 'stat', title: 'Keseniz' }, `👛 ${fmt(m.money)}`),
-    ] : []),
-    ruler ? h('span', { class: 'stat', title: 'Hazine' }, `🏦 ${fmt(w.treasury)}`) : '',
-    ruler && w.regime === 'imparatorluk' ? h('span', { class: `stat${w.cumhuriyet > 50 ? ' warn' : ''}`, title: 'Cumhuriyet isteği' }, `🗽 ${Math.round(w.cumhuriyet)}`) : '',
-    !ruler ? h('span', { class: 'stat', title: 'Devletin başı' }, w.regime === 'cumhuriyet' ? `🗽 ${k?.name ?? 'seçim'}` : `👑 ${k?.name ?? 'Naip'}`) : '',
-    ...events.slice(0, 2),
-    h('span', { class: 'grow' }),
-    ruler ? h('span', { class: 'speed', title: 'Oyun hızı (sadece Kayzer)' }, '⏱', ...[0.5, 1, 2].map((s) => h('button', { class: `mini${w.speed === s ? ' on' : ''}`, onclick: () => { void send({ t: 'setSpeed', speed: s }); } }, `${s === 0.5 ? '½' : s}x`))) : '',
-    h('button', { class: 'mini', title: musicOn() ? 'Müziği kapat' : 'Müziği aç', onclick: () => { setMusic(!musicOn()); renderHud(); } }, musicOn() ? '🎵' : '🎵̸'),
-    h('button', { class: 'mini', title: isMuted() ? 'Sesi aç' : 'Sesi kapat', onclick: () => { setMuted(!isMuted()); renderHud(); } }, isMuted() ? '🔇' : '🔊'),
+    h('div', { class: 'hud-l' },
+      chip(night ? 'moon' : 'sun', `Gün ${w.day} · ${String(w.hour).padStart(2, '0')}:00`, '1 oyun günü = 6 gerçek dakika (1x)'),
+      chip(SEASON_IC[season(w)]!, SEASON_LABEL[season(w)].replace(/^\S+\s/, ''), 'Mevsim'),
+      ...(m ? [
+        meterI('heart', m.health, 'var(--red)', `Sağlık${m.wounded ? ' – yaralısınız, hekime gidin' : ''}`, m.health < 40 || m.wounded, 'hp'),
+        meterI('bread', 100 - m.hunger, 'var(--gold)', `Tokluk – açlık ${Math.round(m.hunger)}/100`, m.hunger >= 85, 'hunger'),
+        meterI('water', 100 - m.thirst, 'var(--blue)', `Su – susuzluk ${Math.round(m.thirst)}/100`, m.thirst >= 85, 'thirst'),
+        meterI('moon', m.energy ?? 80, '#b59cf0', `Enerji ${Math.round(m.energy ?? 80)}/100 – evinizde uyuyarak yenilenir`, (m.energy ?? 80) < 15, 'energy'),
+        chip('coin', fmt(m.money), 'Keseniz'),
+      ] : []),
+      ruler ? chip('castle', fmt(w.treasury), 'Hazine') : '',
+      ruler && w.regime === 'imparatorluk' ? chip('banner', String(Math.round(w.cumhuriyet)), 'Cumhuriyet isteği', w.cumhuriyet > 50 ? 'warn' : '') : '',
+      !ruler ? chip('crown', w.regime === 'cumhuriyet' ? (k?.name ?? 'seçim') : (k?.name ?? 'Naip'), 'Devletin başı') : '',
+      ...events.slice(0, 1)),
+    h('div', { class: 'hud-r' },
+      ruler ? h('span', { class: 'speed seg', title: 'Oyun hızı (Kayzer, her yerden)' }, ...[0.5, 1, 2].map((s) => h('button', { class: `mini${w.speed === s ? ' on' : ''}`, onclick: () => { void send({ t: 'setSpeed', speed: s }); } }, `${s === 0.5 ? '½' : s}x`))) : '',
+      h('button', { class: `mini icon${musicOn() ? ' on' : ''}`, title: musicOn() ? 'Müziği kapat' : 'Müziği aç', onclick: () => { setMusic(!musicOn()); renderHud(); } }, ic('music')),
+      h('button', { class: 'mini icon', title: isMuted() ? 'Sesi aç' : 'Sesi kapat', onclick: () => { setMuted(!isMuted()); renderHud(); } }, ic(isMuted() ? 'mute' : 'sound'))),
   );
   const ib = isyanBar(ctx()); if (ib) hudEl.append(ib);
+  iconify(hudEl); needAlerts(m);
+}
+function meterI(icon: string, v: number, color: string, tip: string, warn: boolean, key: string): HTMLElement {
+  return h('span', { class: `stat meter${warn ? ' warn' : ''}${flashKey === key && performance.now() < flashUntil ? ' flash' : ''}`, title: tip, 'data-k': key }, ic(icon), bar(v, color));
+}
+// v1.9: hunger / thirst alarms – one popup + vibration per threshold crossing (≤15 left), with a cooldown
+let flashKey = ''; let flashUntil = 0; const alarmArmed: Record<string, boolean> = { hunger: true, thirst: true }; const alarmAt: Record<string, number> = { hunger: -1e9, thirst: -1e9 };
+function needAlerts(m: ReturnType<typeof me>): void {
+  if (!m) return;
+  for (const key of ['hunger', 'thirst'] as const) {
+    const left = 100 - (key === 'hunger' ? m.hunger : m.thirst);
+    if (left > 25) alarmArmed[key] = true; // re-arm once the bar is refilled
+    if (left <= 15 && alarmArmed[key] && performance.now() - alarmAt[key]! > 90_000) {
+      alarmArmed[key] = false; alarmAt[key] = performance.now(); flashKey = key; flashUntil = performance.now() + 4000;
+      const msg = key === 'hunger' ? `Açlığınız kritik! Tokluk ${Math.round(left)}’e düştü – bir şeyler yiyin.` : `Susuzluğunuz kritik! Su ${Math.round(left)}’e düştü – su için.`;
+      alertPop(key === 'hunger' ? 'bread' : 'water', msg, key);
+      try { navigator.vibrate?.([180, 90, 180]); } catch { /* not supported */ }
+      sfx('error'); setTimeout(renderHud, 4100);
+    }
+  }
+}
+function alertPop(icon: string, text: string, key: string): void {
+  document.querySelector('.alert-pop')?.remove();
+  const el = h('div', { class: `alert-pop ${key}`, role: 'alert' }, h('span', { class: 'big' }, ic(icon)), h('div', { class: 'grow' }, h('b', {}, key === 'hunger' ? 'Açlık' : 'Susuzluk'), h('div', {}, text)),
+    h('button', { class: 'primary sm', onclick: () => { el.remove(); void send({ t: key === 'hunger' ? 'eat' : 'drinkWater' } as never); } }, key === 'hunger' ? 'Ye' : 'Su iç'), h('button', { class: 'sm', onclick: () => el.remove() }, ic('close')));
+  document.body.append(el); setTimeout(() => el.classList.add('out'), 7000); setTimeout(() => el.remove(), 7600);
 }
 
 // ---------------- one menu with sections ----------------
-type Section = 'yap' | 'hedef' | 'cemiyet' | 'soylu' | 'tarih' | 'ben' | 'mesaj' | 'divan' | 'saray' | 'meclis' | 'aile' | 'gazete' | 'olay' | 'kural' | 'ayar';
+type Section = 'yap' | 'hedef' | 'cemiyet' | 'soylu' | 'ben' | 'mesaj' | 'divan' | 'aile' | 'gazete' | 'ayar' | 'saray' | 'meclis' | 'tarih' | 'olay' | 'kural';
 let section: Section = (localStorage.getItem('imp-sec') as Section) || 'yap';
 function badges(): Partial<Record<Section, number>> {
   const w = world; const m = me(); if (!w || !m) return {};
@@ -211,18 +244,20 @@ function badges(): Partial<Record<Section, number>> {
 }
 function renderDock(): void {
   const b = badges(); const total = Object.values(b).reduce((x, y) => x + (y ?? 0), 0);
-  dockEl.replaceChildren(h('button', { class: 'primary menu-btn', onclick: () => openMenu(section) }, '☰ Menü', total ? h('span', { class: 'badge' }, String(total)) : ''));
+  dockEl.replaceChildren(h('button', { class: 'primary menu-btn', onclick: () => openMenu(section) }, ic('menu'), h('span', {}, 'Menü'), total ? h('span', { class: 'badge' }, String(total)) : ''));
 }
 function openMenu(sec: Section): void {
   section = sec; localStorage.setItem('imp-sec', sec); if (sec === 'mesaj') seenMsgs = msgs.length;
   selected = null;
   openSheet(() => {
     const w = world!; const m = me(); const ruler = !!m && w.kayzerId === m.id; const b = badges();
-    const tabs: [Section, string][] = [['yap', '⚡ Yap'], ['ben', '👤 Ben'], ['hedef', '🎯 Hedef'], ['cemiyet', '🕯 Cemiyet'], ...(ruler ? [['soylu', '⚜ Soylular'] as [Section, string]] : []), ['tarih', '📖 Tarih'], ['mesaj', '💬 Mesaj'], ...(ruler ? [['divan', w.regime === 'cumhuriyet' ? '🗽 Makam' : '👑 Divan'] as [Section, string]] : []), ['saray', '🏰 Saray'], ['meclis', '🏛 Meclis'], ['aile', '👪 Aile'], ['gazete', '📜 Gazete'], ['olay', '📣 Olaylar'], ['kural', '📖 Kurallar'], ['ayar', '⚙️']];
-    const bar_ = h('div', { class: 'tabs' }, ...tabs.map(([id, label]) => h('button', { class: `tab${section === id ? ' on' : ''}`, onclick: () => openMenu(id) }, label, b[id] ? h('span', { class: 'badge' }, String(b[id])) : '')));
+    const tabs: [Section, string, string][] = [['yap', 'bolt', 'Yap'], ['ben', 'person', 'Ben'], ['hedef', 'goal', 'Hedef'], ['cemiyet', 'candle', 'Cemiyet'], ...(ruler ? [['soylu', 'noble', 'Soylular'] as [Section, string, string], ['divan', w.regime === 'cumhuriyet' ? 'banner' : 'crown', w.regime === 'cumhuriyet' ? 'Makam' : 'Divan'] as [Section, string, string]] : []), ...(m?.meclis ? [['meclis', 'scales', 'Meclis'] as [Section, string, string]] : []), ['mesaj', 'talk', 'Mesaj'], ['aile', 'family', 'Aile'], ['gazete', 'scroll', 'Haberler'], ['ayar', 'cog', 'Ayarlar']];
+    if (!tabs.some((t) => t[0] === section)) section = 'yap';
+    const bar_ = h('div', { class: 'tabs' }, ...tabs.map(([id, icon, label]) => h('button', { class: `tab${section === id ? ' on' : ''}`, onclick: () => openMenu(id) }, ic(icon), h('span', {}, label), b[id] ? h('span', { class: 'badge' }, String(b[id])) : '')));
     let body: HTMLElement;
     switch (section) {
-      case 'yap': { body = quickPanel(ctx()); const mm = me(); if (mm && (mm.inv.sut > 0 || mm.inv.yumurta > 0)) body.append(h('div', { class: 'row' }, mm.inv.sut > 0 ? h('button', { onclick: () => void send({ t: 'drinkMilk' }) }, `🥛 Süt iç (${mm.inv.sut})`) : '', mm.inv.yumurta > 0 ? h('button', { onclick: () => void send({ t: 'eatEgg' }) }, `🥚 Yumurta ye (${mm.inv.yumurta})`) : '')); if (mm?.farm || (mm?.animals && Object.values(mm.animals).some((n) => n > 0))) body.append(farmBody()); break; }
+      case 'yap': { body = quickPanel(ctx()); const mm = me(); if (mm && (mm.inv.sut > 0 || mm.inv.yumurta > 0)) body.append(h('div', { class: 'row' }, mm.inv.sut > 0 ? h('button', { onclick: () => void send({ t: 'drinkMilk' }) }, ic('milk'), ` Süt iç (${mm.inv.sut})`) : '', mm.inv.yumurta > 0 ? h('button', { onclick: () => void send({ t: 'eatEgg' }) }, ic('egg'), ` Yumurta ye (${mm.inv.yumurta})`) : '')); if (mm && mm.home && mm.home.startsWith('ev')) body.append(h('div', { class: 'row' }, h('button', { onclick: () => void doAct({ t: 'goHome', sleep: true }) }, ic('moon'), ' Eve git, uyu'))); else if (mm && !mm.home) body.append(h('div', { class: 'card muted' }, 'Eviniz yok. Boş yeri olan bir eve dokunun: yer satın alın ya da kiralayın.'));
+        if ((mm?.animals?.at ?? 0) > 0) body.append(h('div', { class: 'row' }, h('button', { onclick: () => void send({ t: 'ride', on: !mm!.riding }) }, ic('horse'), mm!.riding ? ' Attan in' : ' Ata bin'))); break; }
       case 'ben': body = m ? personCard(ctx(), m) : h('div', {}, '—'); break;
       case 'mesaj': body = chatBody(); break;
       case 'hedef': body = goalsBody(); break;
@@ -233,14 +268,15 @@ function openMenu(sec: Section): void {
       case 'saray': body = bPanel(w.buildings.find((x) => x.id === 'saray')!); break;
       case 'meclis': body = buildingPanel(ctx(), w.buildings.find((x) => x.id === 'meclis')!); break;
       case 'aile': body = familyPanel(ctx()); break;
-      case 'gazete': body = gazetteBody(); break;
+      case 'gazete': body = h('div', { class: 'stack' }, gazetteBody(), h('details', {}, h('summary', {}, 'Son olaylar'), feedPanel(ctx())), h('details', {}, h('summary', {}, 'Tarih Kitabı'), historyBody())); break;
       case 'olay': body = feedPanel(ctx()); break;
       case 'kural': body = h('div', {}, h('h2', {}, '📖 Kurallar ve kullanım'), ...RULES.flatMap(([t, ls]) => [h('details', {}, h('summary', {}, t), ...ls.map((l) => h('div', { class: 'msg' }, l)))])); break;
-      default: body = h('div', {}, h('h2', {}, '⚙️ Ayarlar'),
-        h('div', { class: 'row' }, h('button', { onclick: () => { setMuted(!isMuted()); rerenderSheet(true); } }, isMuted() ? '🔇 Ses kapalı (aç)' : '🔊 Ses açık (kapat)'), h('button', { onclick: () => { closeSheet(); guide(0); } }, '❓ Rehber')),
-        h('div', { class: 'row' }, h('button', { onclick: () => { setMusic(!musicOn()); rerenderSheet(true); } }, musicOn() ? '🎵 Müzik açık (kapat)' : '🎵 Müzik kapalı (aç)'), h('button', { onclick: () => { lowGfx = !lowGfx; localStorage.setItem('imp-lowgfx', lowGfx ? '1' : '0'); dispatchEvent(new Event('resize')); rerenderSheet(true); } }, lowGfx ? '🐢 Düşük grafik: AÇIK' : '✨ Düşük grafik: kapalı')),
-        be.session()?.founder ? h('button', { onclick: openAdmin }, '🛠 Kurucu paneli') : '',
-        h('div', { style: 'margin-top:10px' }, h('button', { class: 'danger', onclick: () => { void be.logout().then(loginScreen); } }, '🚪 Çıkış')));
+      default: body = h('div', { class: 'stack' }, h('h2', {}, 'Ayarlar'),
+        h('div', { class: 'row' }, h('button', { onclick: () => { lowGfx = !lowGfx; localStorage.setItem('imp-lowgfx', lowGfx ? '1' : '0'); document.body.classList.toggle('low', lowGfx); dispatchEvent(new Event('resize')); rerenderSheet(true); } }, lowGfx ? 'Düşük grafik: AÇIK' : 'Düşük grafik: kapalı'), h('button', { onclick: () => { closeSheet(); guide(0); } }, 'Rehber')),
+        be.session()?.founder ? h('button', { onclick: openAdmin }, 'Kurucu paneli') : '',
+        h('h3', {}, 'Kurallar ve kullanım'), ...RULES.map(([t, ls]) => h('details', {}, h('summary', {}, t), ...ls.map((l) => h('div', { class: 'msg' }, l)))),
+        h('h3', {}, 'Emeği geçenler'), h('div', { class: 'muted' }, CREDITS),
+        h('div', {}, h('button', { class: 'danger', onclick: () => { void be.logout().then(loginScreen); } }, 'Çıkış')));
     }
     return h('div', {}, bar_, body);
   });
@@ -250,6 +286,7 @@ function bPanel(b: import('./sim/types').Building): HTMLElement {
   const box = buildingPanel(ctx(), b);
   if (b.id === 'saray' || b.id === 'okul') box.append(h('button', { onclick: () => openSheet(historyBody) }, '📖 Tarih Kitabı’nı oku'));
   if (b.id === 'ciftlik') box.append(farmBody());
+  if (b.id === 'hayvan') box.append(animalMarketBody());
   return box;
 }
 function historyBody(): HTMLElement {
@@ -267,8 +304,17 @@ function orgsBody(): HTMLElement {
   if (mine) {
     const ld = mine.leaderId === m.id;
     box.append(h('div', { class: 'card' }, h('b', {}, `${ORG_LABEL[mine.kind]} – “${mine.name}”`), h('div', {}, `Lider: ${findPerson(w, mine.leaderId)?.name ?? '—'} · ${mine.members.length} üye · şüphe `, bar(mine.suspicion, '#c8483a'), ` ${Math.round(mine.suspicion)}${mine.known ? ' · ⚠️ Saray biliyor!' : ''}`),
-      h('div', { class: 'muted' }, `Üyeler: ${mine.members.map((id) => findPerson(w, id)?.name).filter(Boolean).join(', ')}`),
-      h('div', { class: 'row' }, ld ? h('button', { onclick: () => void send({ t: 'orgMeet' }) }, '🌙 Bu gece toplantı çağır') : '', h('button', { class: 'danger', onclick: () => void send({ t: 'orgLeave' }) }, 'Ayrıl'))));
+      h('div', {}, `🎯 Hedef: ${ORG_GOAL[mine.kind]} `, bar(orgGoalProgress(w, mine), '#6fbf73'), ` %${Math.round(orgGoalProgress(w, mine))}${mine.kind === 'hirsiz' ? ` · kasa ${Math.round(mine.funds ?? 0)} D` : ''}`),
+      h('h3', {}, 'Üyeler ve roller'),
+      ...mine.members.map((id) => { const p = findPerson(w, id); if (!p) return ''; const r = mine.roles?.[id] ?? (id === mine.leaderId ? 'lider' : 'uye');
+        const sel = ld && id !== m.id ? select((['yardimci', 'propagandaci', 'casus', 'uye'] as OrgRole[]).map((x): [string, string] => [x, ROLE_LABEL[x]])) : null; if (sel) { sel.value = r; sel.onchange = () => void send({ t: 'orgRole', personId: id, role: sel.value as OrgRole }); }
+        return h('div', { class: 'row member' }, h('span', { class: 'grow', style: 'cursor:pointer', onclick: () => openPersonSheet(id) }, `${p.name} · ${PROF_LABEL[p.prof]}${p.jailedDays > 0 ? ' · zindanda' : ''}`), sel ?? h('span', { class: 'pill' }, ROLE_LABEL[r])); }),
+      h('div', { class: 'muted' }, 'Yeni üye: birine 1 adım yaklaşın, kartından “Cemiyete davet et” deyin (yanına para da koyabilirsiniz). Üyeleriniz de tanıdıklarını kazanmaya çalışır.'),
+      h('h3', {}, 'Eylemler'),
+      h('div', { class: 'row' }, h('button', { onclick: () => void send({ t: 'orgAct', deed: 'propaganda' }) }, 'Propaganda (5 D)'),
+        mine.kind === 'hirsiz' ? h('button', { onclick: () => void send({ t: 'orgAct', deed: 'hirsizlik' }) }, 'Zengini soy') : h('button', { onclick: () => void send({ t: 'orgAct', deed: 'sabotaj' }) }, 'Sabotaj'),
+        mine.kind !== 'hirsiz' ? h('button', { class: 'danger', onclick: () => { if (confirm('Ayaklanma başlatılsın mı? Geri dönüşü yok.')) void send({ t: 'orgAct', deed: 'ayaklanma' }); } }, 'Ayaklanma') : '',
+        ld ? h('button', { onclick: () => void send({ t: 'orgMeet' }) }, 'Gece toplantısı') : '', h('button', { class: 'danger', onclick: () => void send({ t: 'orgLeave' }) }, 'Ayrıl'))));
   } else if (!ruler) {
     const kind = select((Object.keys(ORG_LABEL) as OrgKind[]).map((k): [string, string] => [k, ORG_LABEL[k]])); const nm = h('input', { placeholder: 'Örgütün adı' });
     box.append(h('h3', {}, 'Kur'), h('div', { class: 'row' }, kind, nm, h('button', { class: 'primary', onclick: () => void send({ t: 'orgFound', kind: kind.value as OrgKind, name: nm.value }) }, 'Kur')));
@@ -299,17 +345,28 @@ function noblesBody(): HTMLElement {
   box.append(h('h3', {}, '🗝 Muhbir ödülü'), h('div', { class: 'row' }, pay, h('button', { onclick: () => void doAct({ t: 'informantPay', amount: Number(pay.value) }) }, 'İlan et')));
   return box;
 }
-function farmBody(): HTMLElement {
-  const w = world!; const m = me(); const box = h('div', {}, h('h3', {}, '🐄 Hayvanlar ve çiftlik')); if (!m) return box;
-  const hd = m.animals ?? { inek: 0, koyun: 0, tavuk: 0, at: 0 }; const seller = w.people.find((p) => p.prof === 'hayvanci');
-  box.append(h('div', { class: 'muted' }, `${seller ? `Hayvan tüccarı: ${seller.name}. ` : ''}İnek → günde 3 süt (susuzluğu da giderir), koyun → yün, tavuk → yumurta, at → %50 daha hızlı yürüyüş. Yem: buğday. Kesilince et verir.`));
-  if (!m.farm) box.append(h('button', { class: 'primary', onclick: () => void doAct({ t: 'buyFarm' }) }, `🏡 Arsa al, çiftlik kur (${FARM_PRICE} D)`));
-  else box.append(h('div', {}, '🏡 Çiftliğiniz var.'));
-  box.append(h('div', {}, `Sürünüz: ${ANIMALS.map((a) => `${ANIMAL_LABEL[a]} ${hd[a]}`).join(' · ')} · günlük yem ${Math.ceil(ANIMALS.reduce((s, a) => s + hd[a] * ANIMAL_FEED[a], 0))} buğday`));
-  box.append(h('div', { class: 'row' }, ...ANIMALS.map((a) => h('button', { onclick: () => void doAct({ t: 'buyAnimal', animal: a }) }, `${ANIMAL_LABEL[a]} al (${ANIMAL_PRICE[a]} D)`))));
-  box.append(h('div', { class: 'row' }, ...ANIMALS.filter((a) => a !== 'at' && hd[a] > 0).map((a) => h('button', { class: 'danger', onclick: () => void send({ t: 'slaughter', animal: a }) }, `🔪 ${ANIMAL_LABEL[a]} kes`))));
+function animalMarketBody(): HTMLElement {
+  const w = world!; const m = me(); const box = h('div', { class: 'stack' }, h('h3', {}, ic('cow'), ' Hayvan Pazarı')); if (!m) return box;
+  const seller = w.people.find((p) => p.prof === 'hayvanci');
+  box.append(h('div', { class: 'muted' }, `${seller ? `Tüccar: ${seller.name}. ` : ''}Hayvanlar ağılda; aldığınız hayvan çiftliğinize gider.`));
+  box.append(h('table', { class: 'prices' }, ...ANIMALS.map((a) => h('tr', {}, h('td', {}, ic(ANIMAL_ICON[a]!), ' ', ANIMAL_LABEL[a]), h('td', {}, `${ANIMAL_PRICE[a]} D`), h('td', { class: 'muted' }, ANIMAL_INFO[a]), h('td', {}, h('button', { class: 'sm', onclick: () => void doAct({ t: 'buyAnimal', animal: a }) }, 'Satın al'))))));
+  if (!m.farm) box.append(h('button', { class: 'primary', onclick: () => void doAct({ t: 'buyFarm' }) }, ic('farm'), ` Çiftlik arsası al (${FARM_PRICE} D)`));
   return box;
 }
+function farmBody(): HTMLElement {
+  const w = world!; const m = me(); const box = h('div', { class: 'stack' }, h('h3', {}, ic('farm'), ' Çiftliğiniz')); if (!m) return box;
+  if (!m.farm) { box.append(h('div', { class: 'muted' }, 'Çiftliğiniz yok. Hayvan Pazarı’ndan bir arsa alın.')); return box; }
+  const hd = m.animals ?? { inek: 0, koyun: 0, tavuk: 0, at: 0 }; const bn = m.barn ?? { ahir: 0, kumes: 0 };
+  const feed = Math.ceil(ANIMALS.reduce((s, a) => s + hd[a] * ANIMAL_FEED[a], 0)); const st = m.farmStock ?? {};
+  box.append(h('div', { class: 'chips' }, ...ANIMALS.map((a) => h('span', { class: 'chip' }, ic(ANIMAL_ICON[a]!), ` ${hd[a]}`)), h('span', { class: 'chip' }, `Ahır ${bn.ahir} · Kümes ${bn.kumes}`)));
+  box.append(h('div', { class: 'row' }, h('button', { onclick: () => void doAct({ t: 'buildBarn', kind: 'ahir' }) }, `Ahır yap (${BARN.ahir.cost} D)`), h('button', { onclick: () => void doAct({ t: 'buildBarn', kind: 'kumes' }) }, `Kümes yap (${BARN.kumes.cost} D)`)));
+  box.append(h('div', { class: 'row' }, h('button', { class: m.fedDay === w.day ? '' : 'primary', disabled: feed === 0 || m.fedDay === w.day, onclick: () => void doAct({ t: 'feedAnimals' }) }, m.fedDay === w.day ? 'Bugün beslendi' : `Yem ver (${feed} buğday)`),
+    h('button', { onclick: () => void doAct({ t: 'collectFarm' }) }, `Topla (süt ${st.sut ?? 0} · yumurta ${st.yumurta ?? 0} · yün ${st.yun ?? 0})`)));
+  const kill = ANIMALS.filter((a) => a !== 'at' && hd[a] > 0); if (kill.length) box.append(h('div', { class: 'row' }, ...kill.map((a) => h('button', { class: 'danger sm', onclick: () => { if (confirm(`${ANIMAL_LABEL[a]} kesilsin mi?`)) void doAct({ t: 'slaughter', animal: a }); } }, `${ANIMAL_LABEL[a]} kes`))));
+  return box;
+}
+const ANIMAL_ICON: Record<string, string> = { inek: 'cow', koyun: 'sheep', tavuk: 'chicken', at: 'horse' };
+const ANIMAL_INFO: Record<string, string> = { inek: '3 süt/gün · 8 et', koyun: 'yün · 4 et', tavuk: '1 yumurta/gün', at: 'binek: %50 hızlı' };
 function goalsBody(): HTMLElement {
   const w = world!; const m = me(); const box = h('div', {}, h('h2', {}, '🎯 Hedefler ve görevler')); if (!m) return box;
   const ruler = w.kayzerId === m.id;
@@ -361,6 +418,7 @@ function chatBody(): HTMLElement {
   };
   inp.classList.add('chat-input');
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') void sendMsg(); });
+  if (pendingSay) { inp.value = pendingSay; pendingSay = null; setTimeout(() => void sendMsg(), 50); }
   const dms = [...new Set(msgs.filter((m) => m.toPersonId && (m.fromPersonId === meP?.id || m.toPersonId === meP?.id)).map((m) => (m.fromPersonId === meP?.id ? m.toPersonId! : m.fromPersonId)))];
   if (dmTarget && !dms.includes(dmTarget)) dms.unshift(dmTarget);
   setTimeout(() => { list.scrollTop = list.scrollHeight; }, 0);
@@ -454,12 +512,30 @@ function darkness(w: World): number {
 }
 
 let lastHud = 0; let lastDraw = 0; let lastFrame = performance.now();
+/** v1.9 NPC smoothing: the schedule/path target is computed from (server) time every frame; what we DRAW follows it
+ * with a time-based critically-damped chase, so snapshot corrections, schedule switches and overrides never snap. */
+const shown = new Map<string, { x: number; y: number; vx: number; vy: number; dir: number; t: number }>();
+function smoothPeople(list: Placed[], mine: string | null): Placed[] {
+  const t = performance.now();
+  for (const q of list) {
+    if (q.p.id === mine) continue; // own character: local prediction already
+    const s = shown.get(q.p.id);
+    if (!s || !q.visible || t - s.t > 1500 || Math.hypot(q.x - s.x, q.y - s.y) > 8) { shown.set(q.p.id, { x: q.x, y: q.y, vx: 0, vy: 0, dir: q.dir, t }); continue; }
+    const dt = Math.min(0.1, (t - s.t) / 1000); s.t = t;
+    const w0 = 7; // spring stiffness (critically damped)
+    const ax = w0 * w0 * (q.x - s.x) - 2 * w0 * s.vx, ay = w0 * w0 * (q.y - s.y) - 2 * w0 * s.vy;
+    s.vx += ax * dt; s.vy += ay * dt; s.x += s.vx * dt; s.y += s.vy * dt;
+    const sp = Math.hypot(s.vx, s.vy); if (sp > 0.25 && Math.abs(s.vx) > 0.15) s.dir = s.vx > 0 ? 1 : -1;
+    q.x = s.x; q.y = s.y; q.moving = q.moving || sp > 0.4; if (sp > 0.25) q.dir = s.dir;
+  }
+  return list;
+}
 function frame(): void {
   const pf = performance.now(); if (lowGfx && pf - lastDraw < 32) { requestAnimationFrame(frame); return; } lastDraw = pf;
   if (world && stat) {
     const now = gameNow();
-    placed = placePeople(world, now);
-    const meP = me(); const mq = meP ? placed.find((q) => q.p.id === meP.id) : undefined;
+    const meP0 = me(); placed = smoothPeople(placePeople(world, now), meP0?.id ?? null);
+    const meP = meP0; const mq = meP ? placed.find((q) => q.p.id === meP.id) : undefined;
     const dt = Math.min(0.1, (performance.now() - lastFrame) / 1000); lastFrame = performance.now();
     if (mq && followCam && !dragStart) { const vw = canvas.width / (cam.z * T), vh = canvas.height / (cam.z * T); const tx = mq.x - vw / 2, ty = mq.y - vh / 2 - 0.5; const k = Math.min(1, dt * 6); cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; clampCam(); }
     if (pendingOpen && mq) { const tq = placed.find((q) => q.p.id === pendingOpen); if (!tq) pendingOpen = null; else if (Math.hypot(tq.x - mq.x, tq.y - mq.y) <= PERSON_REACH + 0.4 || (openTries >= 2 && meP?.walk && now > walkEnd(meP.walk) && Math.hypot(tq.x - mq.x, tq.y - mq.y) <= PERSON_REACH + 0.85)) { const id = pendingOpen; pendingOpen = null; walkTarget = null; openPersonSheet(id); } else if (meP?.walk && now > walkEnd(meP.walk) - 200) { openTries += 1; walkTo({ x: tq.x + (openTries % 2 ? 0.7 : -0.7), y: tq.y + (openTries > 2 ? 0.6 : 0) }); if (openTries > 8) pendingOpen = null; } }
@@ -533,10 +609,10 @@ function electionInfo(w: World): HTMLElement {
   const d = electionDates(w); const ph = electionPhase(w);
   const row = (k: string, label: string, days: string): HTMLElement => h('tr', { class: ph.phase === k ? 'on' : '' }, h('td', {}, label), h('td', {}, days));
   return h('div', {}, h('h2', {}, '🗳 Meclis Seçim Tabelası'), h('div', { class: 'muted' }, `Bugün ${w.day}. gün. ${ph.label}.`),
-    h('table', { class: 'sign' }, row('aday', '1. Adaylık', `${d.adayFrom}–${d.adayTo}. gün (Meclis’e gidip aday olun)`), row('propaganda', '2. Propaganda', `${d.propFrom}–${d.propTo}. gün (afiş, meydan konuşması)`), row('oylama', '3. Seçim', `${d.vote}. gün (Meclis ya da Meydan’daki sandık)`)),
+    h('table', { class: 'sign' }, row('aday', '1. Adaylık', `${Math.max(1, d.adayFrom)}–${d.adayTo}. gün (Meclis’e gidip aday olun)`), row('propaganda', '2. Propaganda', `${d.propFrom}–${d.propTo}. gün (afiş, meydan konuşması)`), row('oylama', '3. Seçim', `${d.vote}. gün (Meclis ya da Meydan’daki sandık)`)),
     h('div', { class: 'muted' }, `Askerler ve bekçiler aday olamaz. ${w.election.seats} sandalye. Adaylar: ${w.election.candidates.map((id) => findPerson(w, id)?.name).filter(Boolean).join(', ') || 'henüz yok'}.`));
 }
-function openElectionSign(): void { openSheet(() => electionInfo(world!)); }
+function openElectionSign(): void { openSheet(() => h('div', { class: 'stack' }, electionInfo(world!), electionCard(ctx()))); }
 let lastCorpses = new Set<string>(); let lastJail = 0; let lastIsyan = false;
 function events(first: boolean): void {
   const w = world; const m = me(); if (!w) return;
@@ -558,10 +634,12 @@ function soundscape(): void {
   if (w.isyan) ambience('isyan'); else if ((w.festivalUntil ?? 0) >= w.day && w.hour >= 12 && w.hour < 22) ambience('festival');
   else if (w.hour >= 5 && w.hour < 10) ambience('sabah'); else if (w.hour >= 19 && w.hour < 23) ambience('aksam'); else if (w.hour >= 23 || w.hour < 5) ambience('gece'); else ambience('gun');
 }
-let trialEl: HTMLElement | null = null; let trialSeen = localStorage.getItem('imp-trial-seen') ?? '';
+let trialEl: HTMLElement | null = null; const trialSeen = new Set<string>((localStorage.getItem('imp-trial-seen') ?? '').split(',').filter(Boolean));
+const tKey = (id: string): string => `${world?.seed ?? 0}:${id}`; // case ids restart after a reset
+const markSeen = (id: string): void => { trialSeen.add(tKey(id)); localStorage.setItem('imp-trial-seen', [...trialSeen].slice(-60).join(',')); };
 function trialPopup(): void {
   const w = world; const m = me(); if (!w || !m) return;
-  const c: CourtCase | undefined = w.cases.find((x) => x.trial && (x.accusedId === m.id || x.trial.judgeId === m.id || x.trial.prosecutorId === m.id) && (!x.trial.done || trialSeen !== x.id));
+  const c: CourtCase | undefined = w.cases.find((x) => x.trial && (x.accusedId === m.id || x.trial.judgeId === m.id || x.trial.prosecutorId === m.id) && (!x.trial.done || (!trialSeen.has(tKey(x.id)) && x.stage !== 'kapandi' ? true : !trialSeen.has(tKey(x.id)) && gameNow() - (x.trial.doneAt ?? 0) < 120_000)) && !(x.trial.done && x.verdict === 'dusuruldu' && x.sentence?.startsWith('Aynı olay')));
   if (!c?.trial) { trialEl?.remove(); trialEl = null; return; }
   if (trialEl?.contains(document.activeElement) && document.activeElement?.tagName === 'INPUT') { const n = trialEl.querySelectorAll('.msg').length; if (n === c.trial.msgs.length) return; }
   const tr = c.trial; const role = (id: string | null, label: string): HTMLElement => { const p = findPerson(w, id); return h('div', { class: 'role' }, p ? av2(p, 56) : h('div', { class: 'avatar' }), h('b', {}, label), h('div', { class: 'muted' }, p?.name ?? '—')); };
@@ -574,7 +652,7 @@ function trialPopup(): void {
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') void go(); });
   const box = h('div', { class: 'box trial' }, h('h2', {}, `⚖ Duruşma: ${CRIME_LABEL[c.crime]} – ${acc?.name ?? ''}`),
     h('div', { class: 'roles' }, role(tr.judgeId, 'Kadı'), role(tr.prosecutorId, 'Savcı'), role(c.accusedId, 'Sanık')), list,
-    tr.done ? h('div', { class: 'card verdict' }, h('b', {}, tr.verdictText ?? 'Karar verildi.'), h('div', { style: 'margin-top:8px' }, h('button', { class: 'primary', onclick: () => { trialSeen = c.id; localStorage.setItem('imp-trial-seen', c.id); trialEl?.remove(); trialEl = null; } }, 'Tamam')))
+    tr.done ? h('div', { class: 'card verdict' }, h('b', {}, tr.verdictText ?? 'Karar verildi.'), h('div', { style: 'margin-top:8px' }, h('button', { class: 'primary', onclick: () => { markSeen(c.id); trialEl?.remove(); trialEl = null; } }, 'Tamam')))
       : c.accusedId === m.id ? h('div', {}, h('div', { class: 'row' }, inp, h('button', { class: 'primary', onclick: () => void go() }, 'Savun')), h('div', { class: 'row' }, h('span', { class: 'muted' }, `Kalan süre ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} · en fazla 5 söz`), h('button', { onclick: () => void send({ t: 'restCase', caseId: c.id }) }, 'Savunmam bitti, karar verilsin')))
         : h('div', { class: 'muted' }, 'Duruşmayı izliyorsunuz.'));
   const wasDone = trialEl?.dataset.done === '1';
@@ -587,8 +665,12 @@ void ({} as Corpse);
 
 void be.restore().then((s) => (s ? start() : loginScreen()));
 // expose for headless smoke tests
-(window as unknown as { __imp: () => unknown }).__imp = () => ({ mute: setMuted, world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (lowGfx ? 1 : window.devicePixelRatio || 1), r.top + (y - cam.y) * cam.z * T / (lowGfx ? 1 : window.devicePixelRatio || 1)]; } });
+(window as unknown as { __imp: () => unknown }).__imp = () => ({ mute: setMuted, act: doAct, openB: (id: string) => { const b = world!.buildings.find((x) => x.id === id); if (b) openSheet(() => bPanel(b)); }, menu: openMenu, admin: openAdmin, world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (lowGfx ? 1 : window.devicePixelRatio || 1), r.top + (y - cam.y) * cam.z * T / (lowGfx ? 1 : window.devicePixelRatio || 1)]; } });
 
+// ---- v1.9 landscape: rotate overlay (phones in portrait) + low-graphics class ----
+document.body.classList.toggle('low', lowGfx);
+document.body.append(h('div', { class: 'rotate-ov' }, ic('phone'), h('b', {}, 'Telefonu yatay çevirin'), h('div', { class: 'muted' }, 'İmparatorluk yatay ekranda oynanır.')));
+try { void (screen.orientation as unknown as { lock?: (o: string) => Promise<void> }).lock?.('landscape').catch(() => {}); } catch { /* only in fullscreen / installed PWA */ }
 // ---- v1.8 PWA: service worker (static only) + "Ana ekrana ekle" hint ----
 if ('serviceWorker' in navigator && location.protocol === 'https:') void navigator.serviceWorker.register('./sw.js').catch(() => {});
 let installEvt: (Event & { prompt?: () => void }) | null = null;
@@ -598,8 +680,8 @@ function showInstallHint(): void {
   if (standalone || localStorage.getItem('imp-a2hs') === '1' || document.querySelector('.a2hs')) return;
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent); if (!ios && !installEvt) return;
   const close = (): void => { localStorage.setItem('imp-a2hs', '1'); el.remove(); };
-  const el = h('div', { class: 'a2hs' }, ios ? '📲 Tam ekran oynamak için: Safari’de Paylaş ⬆️ → “Ana Ekrana Ekle”.' : '📲 Oyunu ana ekrana ekleyip tam ekran oynayabilirsiniz.',
+  const el = h('div', { class: 'a2hs' }, ios ? 'Tam ekran için: Safari’de Paylaş → “Ana Ekrana Ekle”.' : 'Oyunu ana ekrana ekleyip tam ekran oynayabilirsiniz.',
     !ios && installEvt ? h('button', { class: 'primary', onclick: () => { installEvt?.prompt?.(); close(); } }, 'Ana ekrana ekle') : '', h('button', { onclick: close }, '✕'));
-  document.body.append(el);
+  document.body.append(el); setTimeout(close, 15000);
 }
 setTimeout(showInstallHint, 8000);

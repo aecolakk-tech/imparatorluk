@@ -12,12 +12,12 @@ export type Office = 'meclis';
 export type BuildingKind =
   | 'saray' | 'mahkeme' | 'kisla' | 'cami' | 'meclis' | 'okul' | 'hekimhane' | 'liman'
   | 'kasap' | 'degirmen' | 'firin' | 'kuyu' | 'atolye' | 'pazar' | 'ev' | 'santiye' | 'zindan' | 'kahve'
-  | 'bar' | 'festival' | 'ciftlik' | 'dokuma' | 'mobilyahane' | 'ambar' | 'arsa' | 'yapi';
+  | 'bar' | 'festival' | 'ciftlik' | 'dokuma' | 'mobilyahane' | 'ambar' | 'arsa' | 'yapi' | 'hayvan';
 
 export interface Building {
   id: string;
   name: string;
-  kind: BuildingKind;
+  kind: BuildingKind; ownerId?: string;
   x: number; y: number; w: number; h: number; // tiles
   door: { x: number; y: number };
   market?: boolean;
@@ -25,7 +25,7 @@ export interface Building {
 
 export interface Person {
   goal?: GoalId; goalsDone?: GoalId[];
-  rank?: import('./realm').Rank | null; fief?: string | null; favor?: number; farm?: boolean; animals?: Record<import('./realm').Animal, number>;
+  rank?: import('./realm').Rank | null; fief?: string | null; favor?: number; homeUntil?: number; sleeping?: boolean; renting?: string | null; energy?: number; farm?: boolean; barn?: { ahir: number; kumes: number }; farmStock?: Partial<Record<Good, number>>; fedDay?: number; riding?: boolean; animals?: Record<import('./realm').Animal, number>;
   task?: import('./orders').Task; // v1.7: an order the NPC is carrying out
   orderedBy?: { by: string; crime: CrimeKind; victimId: string | null; day: number };
   id: string;
@@ -84,7 +84,7 @@ export interface Talk { a: string; b: string; text: string; day: number; hour: n
 export interface Corpse { id: string; personId: string; name: string; look: { hairColor: number; skin: number; shirt: number; female: boolean; prof: Profession }; x: number; y: number; at: number; killerId: string | null; witnesses: string[]; stage: 'yerde' | 'ihbar' | 'inceleme' | 'kapandi'; reportedBy?: string; reportedAt?: number; bekciId?: string; bekciFrom?: { x: number; y: number }; note?: string }
 export interface Escort { personId: string; bekciId: string; from: { x: number; y: number }; at: number }
 export interface TrialMsg { who: 'hakim' | 'savci' | 'sanik'; name: string; text: string; at: number }
-export interface Trial { at: number; until: number; judgeId: string | null; prosecutorId: string | null; msgs: TrialMsg[]; persuasion: number; done: boolean; verdictText?: string; pending?: boolean }
+export interface Trial { at: number; until: number; judgeId: string | null; prosecutorId: string | null; msgs: TrialMsg[]; persuasion: number; done: boolean; doneAt?: number; verdictText?: string; pending?: boolean }
 export interface NpcMsg { fromPersonId: string; fromName: string; toPersonId: string | null; text: string; at: number }
 export interface Offer { id: string; from: string; to: string; kind: 'mal' | 'borc' | 'is' | 'rusvet'; good?: Good; qty?: number; price?: number; amount?: number; arrestId?: string; day: number; text: string }
 export interface Nature { kind: 'kuraklik' | 'salgin' | 'sel' | 'bereket' | 'balik'; start: number; until: number }
@@ -126,7 +126,7 @@ export interface Law { id: string; name: string; desc: string; active: boolean; 
 
 export interface Project { id: string; name: string; site: string; kind?: string; plot?: string; cost: number; paid: number; progress: number; needed: number; done: boolean; }
 
-export interface Election { posters?: Record<string, number>; nextDay: number; candidates: string[]; votes: Record<string, string>; seats: number; baskanNextDay: number; baskanCandidates: string[]; baskanVotes: Record<string, string>; }
+export interface Election { last?: { day: number; results: { id: string; votes: number; won: boolean }[] }; posters?: Record<string, number>; nextDay: number; candidates: string[]; votes: Record<string, string>; seats: number; baskanNextDay: number; baskanCandidates: string[]; baskanVotes: Record<string, string>; }
 
 export interface Gazette { day: number; headline: string; lines: string[]; meclis?: string[]; }
 
@@ -138,15 +138,15 @@ export interface PlayerInfo {
 
 export type Ideology = 'saltanatci' | 'cumhuriyetci' | 'esnaf' | 'halkci';
 export interface Faction { id: string; name: string; ideology: Ideology; leaderId: string | null; color: string; }
-export interface Seat { id: string; label: string; kind: 'bolge' | 'meslek'; key: string; holder: string | null; }
-export type BillKind = 'ozel' | 'vergi' | 'fiyat' | 'maas' | 'butce' | 'kanun' | 'insaat' | 'af' | 'gensoru' | 'sorusturma' | 'dokunulmazlik' | 'azil';
+export interface Seat { id: string; label: string; kind: 'bolge' | 'meslek' | 'genel'; key: string; holder: string | null; }
+export type BillKind = 'ozel' | 'vergi' | 'fiyat' | 'maas' | 'butce' | 'kanun' | 'insaat' | 'af' | 'gensoru' | 'sorusturma' | 'dokunulmazlik' | 'azil' | 'genelge';
 export type VoteChoice = 'evet' | 'hayir' | 'cekimser';
 export interface Bill {
   id: string; kind: BillKind; title: string; proposerId: string; value: number; target: string;
   day: number; debateUntil: number; voteUntil: number;
   status: 'tartisma' | 'oylama' | 'onay' | 'kabul' | 'ret' | 'veto' | 'zamanasimi';
   law?: import('./laws').LawSpec;
-  votes: Record<string, VoteChoice>; speeches: { personId: string; text: string; day: number }[]; result?: string;
+  votes: Record<string, VoteChoice>; speeches: { personId: string; text: string; day: number; ai?: boolean }[]; result?: string; fromKayzer?: boolean;
 }
 export interface MeclisState {
   seats: Seat[]; factions: Faction[]; bills: Bill[]; log: { day: number; text: string }[];
@@ -209,7 +209,7 @@ export interface World {
   chatOut: NpcMsg[];
   talks: Talk[];
   corpses?: Corpse[]; escorts?: Escort[];
-  llm?: { day: string; n: number; talkAt: number };
+  llm?: { day: string; n: number; talkAt: number; speechAt?: number };
   offers: Offer[];
   rumors: { day: number; text: string; about: string }[];
   caravan: Caravan | null; threat: Threat | null;
@@ -284,9 +284,10 @@ export type Action =
   | { t: 'fateVote'; fate: Fate }
   | { t: 'setSpeed'; speed: number }
   | { t: 'setGoal'; goal: GoalId }
-  | { t: 'drinkMilk' } | { t: 'eatEgg' } | { t: 'buyFarm' } | { t: 'buyAnimal'; animal: import('./realm').Animal; n?: number } | { t: 'slaughter'; animal: import('./realm').Animal }
+  | { t: 'buyHome'; houseId: string } | { t: 'rentHome'; houseId: string } | { t: 'goHome'; sleep?: boolean } | { t: 'leaveHome' } | { t: 'foundFaction'; name: string }
+  | { t: 'drinkMilk' } | { t: 'eatEgg' } | { t: 'buyFarm' } | { t: 'buildBarn'; kind: 'ahir' | 'kumes' } | { t: 'feedAnimals' } | { t: 'collectFarm' } | { t: 'ride'; on: boolean } | { t: 'buyAnimal'; animal: import('./realm').Animal; n?: number } | { t: 'slaughter'; animal: import('./realm').Animal }
   | { t: 'grantTitle'; personId: string; rank: import('./realm').Rank; fief?: string | null } | { t: 'stripTitle'; personId: string }
-  | { t: 'orgFound'; kind: import('./realm').OrgKind; name: string } | { t: 'orgJoin'; orgId: string } | { t: 'orgLeave' } | { t: 'orgMeet' }
+  | { t: 'orgFound'; kind: import('./realm').OrgKind; name: string } | { t: 'orgJoin'; orgId: string } | { t: 'orgLeave' } | { t: 'orgMeet' } | { t: 'orgRole'; personId: string; role: import('./realm').OrgRole } | { t: 'orgAct'; deed: import('./realm').OrgDeed }
   | { t: 'assignSpy'; spyId: string; targetId: string } | { t: 'warrant'; personId: string } | { t: 'searchHouse'; personId: string } | { t: 'raidOrg'; orgId: string } | { t: 'informantPay'; amount: number }
   | { t: 'missionCreate'; text: string; reward: number; to: string | null }
   | { t: 'missionClaim'; id: string }

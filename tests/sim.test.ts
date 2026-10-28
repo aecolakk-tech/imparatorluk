@@ -55,7 +55,7 @@ describe('clock', () => {
     const n2 = advanceWorld(w, T0 + DAY_MS / 2);
     expect(n1).toBeGreaterThan(0); expect(n2).toBe(0); expect(JSON.stringify(w)).toBe(snap);
   });
-  it('1 game day = 5 real minutes', () => { expect(DAY_MS).toBe(300_000); });
+  it('1 game day = 6 real minutes', () => { expect(DAY_MS).toBe(360_000); });
 });
 
 describe('economy', () => {
@@ -184,12 +184,12 @@ function runBill(w: World, b: Bill, decides: (id: string) => boolean = () => fal
 }
 
 describe('Meclis', () => {
-  it('fills 7 seats by district and profession, every member has a faction and immunity', () => {
+  it('v1.9: fills 16 at-large seats, every member has a faction and immunity; no soldiers', () => {
     const w = withMeclis();
-    expect(w.meclis.seats.length).toBe(7);
-    expect(w.meclis.seats.filter((s) => s.kind === 'bolge').length).toBe(4);
+    expect(w.meclis.seats.length).toBe(16);
     const ms = members(w);
-    expect(ms.length).toBeGreaterThanOrEqual(6);
+    expect(ms.length).toBe(16); expect(ms.some((m) => m.prof === 'asker' || m.prof === 'bekci')).toBe(false);
+    expect(w.election.last?.results.length).toBeGreaterThan(16);
     for (const m of ms) { expect(m.faction).not.toBeNull(); expect(m.immune).toBe(true); }
     expect(w.meclis.factions.some((f) => f.leaderId)).toBe(true);
   });

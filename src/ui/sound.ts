@@ -66,6 +66,7 @@ export function installClickSounds(root: HTMLElement): void {
   void root; // v1.7: one global delegated handler – every button, icon, tab, menu item, link and map tap clicks
   document.addEventListener('pointerdown', (e) => {
     const t = e.target as HTMLElement; startMusic();
+    const bt = t.closest('button') as HTMLElement | null; if (bt) { const r = bt.getBoundingClientRect(); bt.style.setProperty('--rx', `${e.clientX - r.left}px`); bt.style.setProperty('--ry', `${e.clientY - r.top}px`); }
     const el = t.closest('button, [role="button"], .tab, select, summary, a, label, input[type="checkbox"], input[type="radio"], .stat, .icon, tr[style*="pointer"], .card[onclick]') as HTMLElement | null;
     if (t.tagName === 'CANVAS') { sfx('tap'); return; }
     if (!el) return;

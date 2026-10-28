@@ -9,7 +9,7 @@ import { advanceWorld } from '../sim/tick';
 import { applyAction, filterProfanity, joinWorld, rateOk, touchPlayer, personOf, takeoverCandidates, officeOf } from '../sim/actions';
 import { applyAdmin, type AdminOp } from '../sim/admin';
 import { createWorld } from '../sim/world';
-import { SNAPSHOT_EVERY_MS, PLAYER_PROFS } from '../sim/constants';
+import { SNAPSHOT_EVERY_MS, PLAYER_PROFS, PROF_LABEL } from '../sim/constants';
 import { migrateWorld } from '../sim/extras';
 import { playerSaid } from '../sim/chat';
 import { questReward } from '../sim/life';
@@ -89,6 +89,16 @@ export function applyTalks(w: World, idx: number[], out: { talks?: string[][]; g
     const ppl = w.people.filter((p) => !p.playerId && p.prof !== 'naip' && p.jailedDays === 0); const a = ppl[Math.floor(Math.random() * ppl.length)];
     if (a) w.chatOut.push({ fromPersonId: a.id, fromName: a.name, toPersonId: null, text: `🗣 ${out.gossip.slice(0, 200)}`, at: now });
   }
+}
+/** v1.9: up to 3 NPC Meclis speeches rewritten by the model (same stance, in character). */
+export function speechBatch(w: World): { refs: [string, number][]; prompt: { system: string; user: string } } | null {
+  const refs: [string, number][] = []; const lines: string[] = [];
+  for (const b of w.meclis.bills) { if (b.status !== 'tartisma' && b.status !== 'oylama') continue; b.speeches.forEach((s, i) => { const p = findPerson(w, s.personId); if (refs.length < 3 && !s.ai && p && !p.playerId) { refs.push([b.id, i]); const f = w.meclis.factions.find((x) => x.id === p.faction); lines.push(`${refs.length}. ${p.name} (${PROF_LABEL[p.prof]}, ${f?.name ?? 'bağımsız'}) – teklif: “${b.title}” – tavrı: ${/hayır|karşıyız|reddediyoruz/.test(s.text) ? 'KARŞI' : /destekliyoruz|evet/.test(s.text) ? 'DESTEK' : 'ÇEKİMSER'}`); } }); }
+  if (!refs.length) return null;
+  return { refs, prompt: { system: 'Ortaçağ-Osmanlı esintili bir şehir oyununda Meclis milletvekillerinin kürsü konuşmalarını yazıyorsun. Türkçe, her biri en fazla 2 kısa cümle, karakterine ve tavrına uygun, ad veya modern kavram uydurma.', user: `${lines.join('\n')}\nSADECE JSON döndür: {"konusmalar": ["1. konuşma", "2. konuşma", ...]}` } };
+}
+export function applySpeeches(w: World, refs: [string, number][], out: { konusmalar?: unknown[] } | null): void {
+  refs.forEach(([bid, i], k) => { const b = w.meclis.bills.find((x) => x.id === bid); const s = b?.speeches[i]; const t = out?.konusmalar?.[k]; if (s && typeof t === 'string' && t.length > 8) { s.text = t.slice(0, 220); s.ai = true; } });
 }
 export function judgeRequest(w: World, caseId: string): { system: string; user: string } | null { const c = w.cases.find((x) => x.id === caseId); return c?.trial?.pending ? judgePrompt(w, c) : null; }
 export function judgeReply(w: World, caseId: string, out: { cevap?: string; ikna?: number } | null, now: number): void {

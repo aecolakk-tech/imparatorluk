@@ -120,14 +120,17 @@ Deno.serve(async (req) => {
     switch (body.op) {
       case 'me': return json({ playerId: uid, founder: pl.is_founder });
       case 'heartbeat': {
-        let due = false; let batch: { idx: number[]; prompt: { system: string; user: string } } | null = null;
+        let due = false; let batch: { idx: number[]; prompt: { system: string; user: string } } | null = null; let sbatch: unknown = null;
         const out = await mutate((w) => {
           const r = core.heartbeat(w, uid, now); due = r.snapshotDue; batch = null;
           if (LLM_KEY && now - (w.llm?.talkAt ?? 0) > TALK_EVERY_MS && core.llmBudget(w, today(), Math.floor(PER_DAY * 0.15))) { const b = core.talkBatch(w, now); if (b) { batch = b; w.llm!.talkAt = now; core.llmSpend(w, today()); } }
+          if (LLM_KEY && now - (w.llm?.speechAt ?? 0) > 10 * 60_000 && core.llmBudget(w, today(), Math.floor(PER_DAY * 0.2))) { const b = core.speechBatch(w); if (b) { sbatch = b; w.llm!.speechAt = now; core.llmSpend(w, today()); } }
           return { world: w, summary: r.summary };
         });
+        const sb = sbatch as { refs: [string, number][]; prompt: { system: string; user: string } } | null;
         if (due) await db.rpc('snapshot_world', { force: false });
         const bt = batch as { idx: number[]; prompt: { system: string; user: string } } | null;
+        if (sb) background((async () => { const o = parseJson(await llm(sb.prompt, true, 300)); if (o) await mutate((w) => core.applySpeeches(w, sb.refs, o)); })().catch(() => {}));
         if (bt) background((async () => { const o = parseJson(await llm(bt.prompt, true, 400)); if (o) await mutate((w) => core.applyTalks(w, bt.idx, o, Date.now())); })().catch(() => {}));
         return json(out);
       }

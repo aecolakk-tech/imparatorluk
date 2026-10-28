@@ -31,7 +31,7 @@ export function activeEvents(w: World): { text: string; tip: string }[] {
 /** HUD chips: clock + speed, my needs, events. */
 export function hudChips(c: Ctx): HTMLElement[] {
   const w = c.w; const m = c.me; const out: HTMLElement[] = [];
-  out.push(chip(`${dayPart(w.hour)} · Gün ${w.day} · ${String(w.hour).padStart(2, '0')}:00${w.speed !== 1 ? ` · ${w.speed}x` : ''}`, '1 oyun günü = 5 gerçek dakika (1x). Hızı sadece Kayzer değiştirir.'));
+  out.push(chip(`${dayPart(w.hour)} · Gün ${w.day} · ${String(w.hour).padStart(2, '0')}:00${w.speed !== 1 ? ` · ${w.speed}x` : ''}`, '1 oyun günü = 6 gerçek dakika (1x). Hızı sadece Kayzer değiştirir.'));
   if (m) {
     const mealOk = m.meals >= 3, waterOk = m.drinks >= 5;
     out.push(chip(`🍞 ${m.meals}/3`, 'Bugünkü öğünler. 3 olmazsa gün sonunda −10 sağlık.', mealOk ? 'ok' : 'warn'));
@@ -134,8 +134,6 @@ export function personActions(c: Ctx, p: Person): HTMLElement {
 /** Saray additions for the ruler. */
 export function sarayExtras(c: Ctx): HTMLElement {
   const w = c.w; const box = h('div', {});
-  box.append(h('h3', {}, '⏩ Oyun hızı'), h('div', { class: 'row' }, ...[0.5, 1, 2].map((s) => h('button', { class: w.speed === s ? 'primary' : '', onclick: () => c.act({ t: 'setSpeed', speed: s }) }, `${s}x`))),
-    h('div', { class: 'muted' }, '1x = günde 5 dakika. Bütün oyuncular için geçerlidir.'));
   // treasury breakdown
   const soldiers = w.people.filter((p) => p.prof === 'asker').length; const upkeep = soldiers * (w.salaries.asker ?? 0);
   box.append(h('h3', {}, '⚔️ Ordu'), h('div', { class: 'muted' }, `${soldiers} asker · günlük gider ${fmt(upkeep)} D · güç ${Math.round(armyPower(w))}${w.isyan ? ' · İSYAN sürüyor: hazineden saatte 4 D seferberlik' : ''}`));
@@ -200,7 +198,7 @@ export function caseRoles(c: Ctx, caseId: string, accusedId: string): HTMLElemen
 export function electionBlock(c: Ctx): HTMLElement {
   const w = c.w; const ph = electionPhase(w); const n = w.election.nextDay; const d = electionDates(w);
   const step = (k: string, label: string, days: string): HTMLElement => h('div', { class: `phase ${ph.phase === k ? 'on' : ''}` }, h('b', {}, label), h('div', { class: 'muted' }, days));
-  const box = h('div', { class: 'card' }, h('b', {}, '🗳 Seçim takvimi'), h('div', { class: 'row' }, step('aday', '1. Adaylık', `${d.adayFrom}–${d.adayTo}. gün`), step('propaganda', '2. Propaganda', `${d.propFrom}–${d.propTo}. gün`), step('oylama', '3. Oylama', `${n}. gün`)), h('div', { class: 'muted' }, ph.label));
+  const box = h('div', { class: 'card' }, h('b', {}, '🗳 Seçim takvimi'), h('div', { class: 'row' }, step('aday', '1. Adaylık', `${Math.max(1, d.adayFrom)}–${d.adayTo}. gün`), step('propaganda', '2. Propaganda', `${d.propFrom}–${d.propTo}. gün`), step('oylama', '3. Oylama', `${n}. gün`)), h('div', { class: 'muted' }, ph.label));
   if (c.me && w.election.candidates.includes(c.me.id) && (ph.phase === 'propaganda' || ph.phase === 'aday')) {
     const sp = h('input', { placeholder: 'Seçim konuşması…', maxlength: '160', style: 'flex:1' });
     box.append(h('div', { class: 'row' }, h('button', { onclick: () => c.act({ t: 'poster' }) }, '📜 Afiş as (5 D)'), sp, h('button', { onclick: () => c.act({ t: 'campaign', text: sp.value }) }, '🎤 Konuş')));

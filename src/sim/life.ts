@@ -1,3 +1,4 @@
+import { atHomeSafe } from './housing';
 import { interrogate } from './realm';
 import { revealOrder } from './orders';
 import { makeCorpse } from './v16';
@@ -363,7 +364,7 @@ function resolveArrests(w: World): void {
   }
 }
 export function steal(w: World, thief: Person, victim: Person): number {
-  if (isProtected(w, victim)) return 0;
+  if (isProtected(w, victim) || atHomeSafe(w, victim)) return 0;
   const amt = Math.min(Math.round(victim.money * 0.15), 30); if (amt <= 0) return 0;
   transfer(w, victim.id, thief.id, amt, 'hırsızlık');
   victim.mood = clamp(victim.mood - 10); rel(victim, thief, -50, 'beni soydu'); thief.lastAction = 'hırsızlık';
@@ -373,6 +374,7 @@ export function steal(w: World, thief: Person, victim: Person): number {
 }
 export function assault(w: World, a: Person, v: Person): string {
   if (isProtected(w, v)) return `${v.name} şehre yeni geldi; ona dokunulmaz (koruma süresi).`;
+  if (atHomeSafe(w, v)) return `${v.name} evinde; kapı kilitli, dışarıdan ulaşamazsınız.`;
   v.health = clamp(v.health - 35); v.wounded = true; v.mood = clamp(v.mood - 10); rel(v, a, -60, 'beni dövdü');
   for (const x of w.people) if (x.relations[v.id] && (x.relations[v.id] ?? 0) > 40) rel(x, a, -20, `${v.name}'ı dövdü`);
   log(w, `${a.name}, ${v.name}'a saldırdı ve yaraladı! Yaralı hekime gitmeli.`, v.id);
@@ -381,6 +383,7 @@ export function assault(w: World, a: Person, v: Person): string {
 }
 export function murder(w: World, a: Person, v: Person): string {
   if (isProtected(w, v)) return `${v.name}'a dokunulmaz.`;
+  if (atHomeSafe(w, v)) return `${v.name} evinde; kapı kilitli, dışarıdan ulaşamazsınız.`;
   if (v.playerId || v.prof === 'asker' && chance(w, 0.7)) { v.health = 5; v.wounded = true; log(w, `${a.name}, ${v.name}'ı öldürmeye kalktı; ağır yaralı kurtuldu!`, v.id); arrest(w, a, 'cinayet', v.id, 0); return `${v.name} ağır yaralı kurtuldu.`; }
   const co = makeCorpse(w, v, a, w.serverNow ?? w.lastTickAt);
   for (const x of w.people) if ((x.relations[v.id] ?? 0) > 20 && co.witnesses.includes(x.id)) rel(x, a, -70, `${v.name}'ı öldürdü`);

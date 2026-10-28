@@ -1,3 +1,6 @@
+import { rehouse } from './housing';
+import { migrateMeclis16 } from './meclis';
+import { startIsyanHook } from './hooks';
 /**
  * v1.8 "realm": nobility & palace intrigue, secret organizations & detection, seasons, animals & farms,
  * continuous hunger/thirst, and the Tarih Kitabı (chronicle). All server-authoritative, shared with the mock.
@@ -54,7 +57,7 @@ export function seasonDay(w: World): void {
 // ======================= animals & farms =======================
 export type Animal = 'inek' | 'koyun' | 'tavuk' | 'at';
 export const ANIMALS: Animal[] = ['inek', 'koyun', 'tavuk', 'at'];
-export const ANIMAL_LABEL: Record<Animal, string> = { inek: '🐄 İnek', koyun: '🐑 Koyun', tavuk: '🐔 Tavuk', at: '🐎 At' };
+export const ANIMAL_LABEL: Record<Animal, string> = { inek: 'İnek', koyun: 'Koyun', tavuk: 'Tavuk', at: 'At' };
 export const ANIMAL_PRICE: Record<Animal, number> = { inek: 120, koyun: 45, tavuk: 6, at: 150 };
 export const ANIMAL_FEED: Record<Animal, number> = { inek: 2, koyun: 1, tavuk: 0.2, at: 2 }; // buğday per day
 export const ANIMAL_MEAT: Record<Animal, number> = { inek: 8, koyun: 4, tavuk: 1, at: 0 };
@@ -63,14 +66,40 @@ export const needsFarm = (a: Animal): boolean => a === 'inek' || a === 'koyun';
 export const herd = (p: Person): Record<Animal, number> => (p.animals ??= { inek: 0, koyun: 0, tavuk: 0, at: 0 });
 export const hasHorse = (p: Person): boolean => (p.animals?.at ?? 0) > 0;
 
+export const BARN: Record<'ahir' | 'kumes', { cost: number; cap: number; label: string; odun: number }> = { ahir: { cost: 120, cap: 6, label: 'Ahır', odun: 6 }, kumes: { cost: 50, cap: 15, label: 'Kümes', odun: 2 } };
+export function barnRoom(p: Person, a: Animal): number {
+  const b = p.barn ?? { ahir: 0, kumes: 0 }; const hd = herd(p);
+  if (a === 'tavuk') return b.kumes * BARN.kumes.cap - hd.tavuk;
+  if (a === 'at' && !p.farm) return hd.at > 0 ? 0 : 1; // one horse can be stabled at the han without a farm
+  return b.ahir * BARN.ahir.cap - hd.inek - hd.koyun - hd.at;
+}
+export function buildBarn(w: World, p: Person, kind: 'ahir' | 'kumes'): string {
+  if (!p.farm) return 'Önce Hayvan Pazarı’ndan bir çiftlik arsası alın.'; const B = BARN[kind]; if (!B) return 'Böyle yapı yok.';
+  const b = (p.barn ??= { ahir: 0, kumes: 0 }); if (b[kind] >= 3) return `En fazla 3 ${B.label}.`;
+  if (!transfer(w, p.id, 'saray', B.cost, `${B.label} yapımı`)) return `${B.label} ${B.cost} Dinar.`;
+  b[kind] += 1; return `${B.label} yapıldı! (${kind === 'ahir' ? `inek/koyun/at için ${B.cap}` : `${B.cap} tavuk`} yer)`;
+}
+export function feedAnimals(w: World, p: Person): string {
+  const hd = herd(p); const need = Math.ceil(ANIMALS.reduce((s, a) => s + hd[a] * ANIMAL_FEED[a], 0)); if (need <= 0) return 'Hayvanınız yok.';
+  if (p.fedDay === w.day) return 'Hayvanlarınız bugün zaten doydu.';
+  if (p.inv.bugday < need) buy(w, p.id, 'bugday', need - p.inv.bugday, p.money);
+  if (p.inv.bugday < need && (w.granary ?? 0) > 0) { const q = Math.min(need - p.inv.bugday, Math.floor(w.granary)); const cost = Math.round(q * (w.prices.bugday ?? 1) * 1.1 * 100) / 100; if (q > 0 && transfer(w, p.id, 'saray', cost, 'ambardan yem')) { w.granary -= q; p.inv.bugday += q; } }
+  if (p.inv.bugday < need) return `${need} buğday yem gerekiyor; alamadınız.`;
+  p.inv.bugday -= need; p.fedDay = w.day; return `Hayvanlar ${need} buğdayla beslendi. Yarın süt/yumurta/yün toplayabilirsiniz.`;
+}
+export function collectFarm(p: Person): string {
+  const st = p.farmStock ?? {}; const got = Object.entries(st).filter(([, q]) => (q ?? 0) > 0) as [Good, number][]; if (!got.length) return 'Toplanacak ürün yok. Hayvanları her gün besleyin.';
+  for (const [g, q] of got) p.inv[g] += q; p.farmStock = {}; return `Toplandı: ${got.map(([g, q]) => `${q} ${({ sut: 'süt', yumurta: 'yumurta', yun: 'yün' } as Record<string, string>)[g] ?? g}`).join(', ')}.`;
+}
 export function buyFarm(w: World, p: Person): string {
   if (p.farm) return 'Zaten bir çiftliğiniz var.';
   if (!transfer(w, p.id, 'saray', FARM_PRICE, 'arsa / çiftlik tapusu')) return `Çiftlik arsası ${FARM_PRICE} Dinar.`;
-  p.farm = true; log(w, `🏡 ${p.name} bir arsa alıp çiftlik kurdu.`, p.id); return 'Çiftlik kurdunuz! Artık inek ve koyun besleyebilirsiniz.';
+  p.farm = true; p.barn ??= { ahir: 0, kumes: 0 }; log(w, `🏡 ${p.name} bir arsa alıp çiftlik kurdu.`, p.id); return 'Çiftlik arsanız hazır (Buğday Tarlaları’nın yanında). Şimdi ahır ya da kümes yapın, sonra hayvan alın.';
 }
 export function buyAnimal(w: World, p: Person, a: Animal, n = 1): string {
   if (!ANIMALS.includes(a)) return 'Böyle hayvan yok.';
-  if (needsFarm(a) && !p.farm) return `${ANIMAL_LABEL[a]} için önce bir çiftlik (arsa) almalısınız.`;
+  if (needsFarm(a) && !p.farm) return `${ANIMAL_LABEL[a]} için önce bir çiftlik arsası almalısınız.`;
+  if (p.prof !== 'hayvanci') { const room = barnRoom(p, a); if (room < n) return a === 'tavuk' ? `Kümesinizde yer yok (${room}). Çiftliğinize kümes yapın.` : a === 'at' && !p.farm ? 'Çiftliksiz yalnızca bir at besleyebilirsiniz (handa).' : `Ahırınızda yer yok (${room}). Çiftliğinize ahır yapın.`; }
   const seller = w.people.find((x) => x.prof === 'hayvanci' && x.jailedDays === 0 && x.id !== p.id);
   const cost = ANIMAL_PRICE[a] * n;
   if (!transfer(w, p.id, seller?.id ?? 'saray', cost, `${a} alımı`)) return `${n} ${ANIMAL_LABEL[a]} ${cost} Dinar; paranız yetmiyor.`;
@@ -86,14 +115,15 @@ export function animalsDay(w: World): void {
   for (const p of w.people) {
     const hd = p.animals; if (!hd) continue;
     const feed = ANIMALS.reduce((s, a) => s + hd[a] * ANIMAL_FEED[a], 0); if (feed <= 0) continue;
-    const need = Math.ceil(feed);
-    if (p.inv.bugday < need) buy(w, p.id, 'bugday', need - p.inv.bugday, p.money * 0.5);
-    const fed = p.inv.bugday >= need; p.inv.bugday = Math.max(0, p.inv.bugday - need);
-    if (!fed) { for (const a of ANIMALS) if (hd[a] > 0 && chance(w, 0.08)) { hd[a] -= 1; if (p.playerId) personal(w, p.playerId, `${ANIMAL_LABEL[a]} açlıktan öldü! Yem (buğday) alın.`); } continue; }
+    const need = Math.ceil(feed); const human = !!p.playerId && !p.npc;
+    let fed: boolean;
+    if (human) fed = p.fedDay === w.day; // players feed by hand (or the animals go hungry)
+    else { if (p.inv.bugday < need) buy(w, p.id, 'bugday', need - p.inv.bugday, p.money * 0.5); fed = p.inv.bugday >= need; p.inv.bugday = Math.max(0, p.inv.bugday - need); }
+    if (!fed) { for (const a of ANIMALS) if (hd[a] > 0 && chance(w, human ? 0.04 : 0.08)) { hd[a] -= 1; if (p.playerId) personal(w, p.playerId, `${ANIMAL_LABEL[a]} açlıktan öldü! Yem (buğday) alın.`); } continue; }
     const out: Partial<Record<Good, number>> = { sut: hd.inek * 3, yun: Math.floor(hd.koyun * 0.5 + (w.day % 2 ? 0.5 : 0)) * 1, yumurta: hd.tavuk };
     for (const [g, q] of Object.entries(out) as [Good, number][]) {
       if (!q) continue;
-      if (p.npc || !p.playerId) addListing(w, p, g, q, sellerPrice(w, p, g), 'gida'); else p.inv[g] += q;
+      if (p.npc || !p.playerId) addListing(w, p, g, q, sellerPrice(w, p, g), 'gida'); else { const st = (p.farmStock ??= {}); st[g] = Math.min(60, (st[g] ?? 0) + q); }
     }
   }
 }
@@ -168,7 +198,22 @@ export function intrigueDay(w: World): void {
 // ======================= spies, informants, secret organizations =======================
 export type OrgKind = 'hirsiz' | 'cumhuriyet' | 'tarikat';
 export const ORG_LABEL: Record<OrgKind, string> = { hirsiz: '🗝 Hırsızlar Loncası', cumhuriyet: '🗽 Cumhuriyet Cemiyeti', tarikat: '📿 Tarikat' };
-export interface Org { id: string; kind: OrgKind; name: string; leaderId: string; members: string[]; suspicion: number; known: boolean; knownMembers: string[]; meetTonight?: boolean; founded: number }
+export type OrgRole = 'lider' | 'yardimci' | 'propagandaci' | 'casus' | 'uye';
+export const ROLE_LABEL: Record<OrgRole, string> = { lider: 'Lider', yardimci: 'Yardımcı', propagandaci: 'Propagandacı', casus: 'Gözcü', uye: 'Üye' };
+export interface Org { id: string; kind: OrgKind; name: string; leaderId: string; members: string[]; suspicion: number; known: boolean; knownMembers: string[]; meetTonight?: boolean; founded: number; roles?: Record<string, OrgRole>; funds?: number; actedDay?: number }
+export const ORG_GOAL: Record<OrgKind, string> = { hirsiz: 'Lonca kasasında 500 Dinar biriktirin', cumhuriyet: 'Halkı kazanıp Cumhuriyet’i ilan edin (cumhuriyet ≥ 60, 8+ üye → ayaklanma)', tarikat: 'Şehrin dindarlığını 70’e çıkarın ve 10 mürit toplayın' };
+export function orgGoalProgress(w: World, o: Org): number {
+  if (o.kind === 'hirsiz') return clamp((o.funds ?? 0) / 5);
+  if (o.kind === 'cumhuriyet') return w.regime === 'cumhuriyet' ? 100 : clamp(Math.min(w.cumhuriyet / 60, o.members.length / 8) * 100);
+  const din = w.people.reduce((s, p) => s + p.din, 0) / Math.max(1, w.people.length); return clamp(Math.min(din / 70, o.members.length / 10) * 100);
+}
+/** Would `p` join `o` when invited by `by` (optionally paid)? Ideology, relation, payment and risk. */
+export function joinScore(w: World, p: Person, o: Org, by: Person, pay = 0): number {
+  void w; const ideo = o.kind === 'hirsiz' ? (60 - p.honesty) * 0.8 + (p.money < 40 ? 15 : 0) : o.kind === 'cumhuriyet' ? (p.republic - 45) * 0.9 - (p.loyalty - 50) * 0.3 : (p.din - 55) * 0.9;
+  const rel = (p.relations[by.id] ?? 0) * 0.4; const money = Math.min(30, pay / 4);
+  const risk = o.suspicion * 0.3 + (o.known ? 15 : 0) + (STATE.includes(p.prof) ? 35 : 0) + (p.honesty > 75 && o.kind !== 'tarikat' ? 10 : 0);
+  return 40 + ideo + rel + money - risk;
+}
 export interface Spy { spyId: string; targetId: string; until: number }
 const orgOf = (w: World, pid: string): Org | undefined => (w.orgs ?? []).find((o) => o.members.includes(pid));
 const CRIME_OF: Record<OrgKind, CrimeKind> = { hirsiz: 'hirsizlik', cumhuriyet: 'isyan', tarikat: 'isyan' };
@@ -180,16 +225,77 @@ function reveal(w: World, o: Org, ids: string[], how: string): void {
   if (kp) personal(w, kp, txt); log(w, was ? txt : `🕵 Gizli bir örgüt ortaya çıktı: ${o.name}!`); if (!was) chronicle(w, 'orgut', `Gizli örgüt “${o.name}” deşifre oldu.`);
 }
 export function orgFound(w: World, p: Person, kind: OrgKind, name: string): string {
+  void 0;
   if (!ORG_LABEL[kind]) return 'Böyle bir örgüt türü yok.'; if (orgOf(w, p.id)) return 'Zaten bir örgüttesiniz.';
   if (p.id === w.kayzerId) return 'Kayzer gizli örgüt kuramaz.';
-  const o: Org = { id: nextId(w, 'O'), kind, name: name.trim().slice(0, 30) || ORG_LABEL[kind], leaderId: p.id, members: [p.id], suspicion: 5, known: false, knownMembers: [], founded: w.day };
+  const o: Org = { id: nextId(w, 'O'), kind, name: name.trim().slice(0, 30) || ORG_LABEL[kind], leaderId: p.id, members: [p.id], suspicion: 5, known: false, knownMembers: [], founded: w.day, roles: { [p.id]: 'lider' }, funds: 0 };
   (w.orgs ??= []).push(o); return `“${o.name}” kuruldu. Liderisiniz. Gece toplantıları güç verir ama bekçi baskını riski taşır.`;
 }
 export function orgJoin(w: World, p: Person, id: string): string {
   const o = (w.orgs ?? []).find((x) => x.id === id); if (!o) return 'Örgüt yok.'; if (orgOf(w, p.id)) return 'Zaten bir örgüttesiniz.'; if (p.id === w.kayzerId) return 'Olmaz.';
-  o.members.push(p.id); o.suspicion = clamp(o.suspicion + 1.5); const l = findPerson(w, o.leaderId); if (l) relate(l, p, 10, 'örgütümüze katıldı'); return `“${o.name}” örgütüne katıldınız.`;
+  o.members.push(p.id); (o.roles ??= {})[p.id] = 'uye'; o.suspicion = clamp(o.suspicion + 1.5); const l = findPerson(w, o.leaderId); if (l) relate(l, p, 10, 'örgütümüze katıldı'); return `“${o.name}” örgütüne katıldınız.`;
 }
-export function orgLeave(w: World, p: Person): string { const o = orgOf(w, p.id); if (!o) return 'Örgütte değilsiniz.'; o.members = o.members.filter((x) => x !== p.id); if (o.leaderId === p.id) o.leaderId = o.members[0] ?? ''; if (!o.members.length) w.orgs = w.orgs!.filter((x) => x !== o); return 'Örgütten ayrıldınız.'; }
+export function orgLeave(w: World, p: Person): string { const o = orgOf(w, p.id); if (!o) return 'Örgütte değilsiniz.'; o.members = o.members.filter((x) => x !== p.id); if (o.leaderId === p.id) { o.leaderId = o.members.find((x) => o.roles?.[x] === 'yardimci') ?? o.members[0] ?? ''; if (o.roles && o.leaderId) o.roles[o.leaderId] = 'lider'; } if (!o.members.length) w.orgs = w.orgs!.filter((x) => x !== o); return 'Örgütten ayrıldınız.'; }
+/** v1.9: invite someone (player → NPC directly). Returns code + reason; joins on success. */
+export function orgInvite(w: World, by: Person, p: Person, pay = 0): { ok: boolean; code: string; text: string } {
+  const o = orgOf(w, by.id); if (!o) return { ok: false, code: 'yok', text: 'Önce bir cemiyet kurun ya da birine katılın.' };
+  if (orgOf(w, p.id)) return { ok: false, code: 'zaten', text: `${p.name} zaten bir örgütte.` };
+  if (p.id === w.kayzerId || p.prof === 'naip') return { ok: false, code: 'kayzer', text: 'Saray’dan birini davet etmek intihar olur.' };
+  if (p.playerId && !p.npc) return { ok: false, code: 'oyuncu', text: 'Oyunculara mesajla teklif edin; kendileri katılır.' };
+  if (pay > 0 && by.money < pay) return { ok: false, code: 'para', text: 'O kadar paranız yok.' };
+  const s = joinScore(w, p, o, by, pay);
+  if (s >= 50) { if (pay > 0) transfer(w, by.id, p.id, pay, 'cemiyet daveti'); orgJoin(w, p, o.id); relate(p, by, 6, 'beni cemiyete aldı'); return { ok: true, code: 'ok', text: `${p.name} “${o.name}” cemiyetine katıldı.` }; }
+  // a refusal can be dangerous: an honest/loyal NPC may report you
+  if ((p.honesty > 65 || p.loyalty > 75) && chance(w, 0.25)) { reveal(w, o, [by.id], `${p.name} davet edildiği cemiyeti bekçilere bildirdi`); return { ok: false, code: 'ihbar', text: `${p.name} reddetti ve sizi ihbar etti!` }; }
+  relate(p, by, -3, 'beni gizli bir işe çağırdı');
+  return { ok: false, code: s < 25 ? 'asla' : 'istemem', text: `${p.name} teklifi reddetti.` };
+}
+export function orgRole(w: World, by: Person, pid: string, role: OrgRole): string {
+  const o = orgOf(w, by.id); if (!o || o.leaderId !== by.id) return 'Rolleri lider dağıtır.'; if (!o.members.includes(pid) || pid === by.id || role === 'lider') return 'Geçersiz.';
+  (o.roles ??= {})[pid] = role; return `${findPerson(w, pid)?.name} artık ${ROLE_LABEL[role]}.`;
+}
+export type OrgDeed = 'propaganda' | 'hirsizlik' | 'sabotaj' | 'ayaklanma';
+export const DEED_LABEL: Record<OrgDeed, string> = { propaganda: 'Propaganda', hirsizlik: 'Soygun', sabotaj: 'Sabotaj', ayaklanma: 'Ayaklanma' };
+export function orgAct(w: World, by: Person, deed: OrgDeed): string {
+  const o = orgOf(w, by.id); if (!o) return 'Örgütte değilsiniz.'; const role = o.roles?.[by.id] ?? (o.leaderId === by.id ? 'lider' : 'uye');
+  if (deed !== 'propaganda' && role !== 'lider' && role !== 'yardimci') return 'Bunu lider ya da yardımcı emreder.';
+  if (o.actedDay === w.day && deed !== 'propaganda') return 'Bugün zaten bir eylem yaptınız; dikkat çekmeyin.';
+  const helpers = o.members.map((id) => findPerson(w, id)!).filter((p) => p && p.jailedDays === 0);
+  const prop = helpers.filter((p) => o.roles?.[p.id] === 'propagandaci').length;
+  if (deed === 'propaganda') {
+    if (!transfer(w, by.id, 'saray', 5, 'bildiri basımı')) return 'Bildiri için 5 Dinar gerekir.';
+    const reach = 6 + prop * 4 + (role === 'propagandaci' ? 4 : 0);
+    const ppl = w.people.filter((p) => !STATE.includes(p.prof)).sort(() => Math.random() - 0.5).slice(0, reach);
+    for (const p of ppl) { if (o.kind === 'cumhuriyet') p.republic = clamp(p.republic + 3); else if (o.kind === 'tarikat') p.din = clamp(p.din + 3); else p.honesty = clamp(p.honesty - 1); }
+    if (o.kind === 'cumhuriyet') w.cumhuriyet = clamp(w.cumhuriyet + 0.8);
+    o.suspicion = clamp(o.suspicion + 4); return `Gece duvarlara bildiriler asıldı (${ppl.length} kişi okudu). Şüphe arttı.`;
+  }
+  o.actedDay = w.day;
+  if (deed === 'hirsizlik') {
+    if (o.kind !== 'hirsiz') return 'Soygun hırsızlar loncasının işidir.';
+    const v = [...w.people].filter((p) => p.money > 120 && !o.members.includes(p.id)).sort((a, b) => b.money - a.money)[0]; if (!v) return 'Soyacak zengin yok.';
+    const amt = Math.round(Math.min(v.money * 0.15, 25 + helpers.length * 8)); transfer(w, v.id, by.id, amt, 'lonca soygunu'); o.funds = (o.funds ?? 0) + amt; o.suspicion = clamp(o.suspicion + 8);
+    rumor(w, `${v.name}'ın evi soyuldu! Gölgeler mi?`, v.id, 0);
+    if (chance(w, 0.12 + o.suspicion / 300)) { const c = pick(w, helpers); if (c) arrest(w, c, 'hirsizlik', v.id, amt); return `Soygun yapıldı (${amt} Dinar) ama ${c?.name ?? 'biri'} yakalandı!`; }
+    return `${v.name} soyuldu: ${amt} Dinar lonca kasasına.`;
+  }
+  if (deed === 'sabotaj') {
+    if (o.kind === 'hirsiz') return 'Lonca siyasete karışmaz.';
+    for (const p of w.people) if (p.prof === 'asker') p.loyalty = clamp(p.loyalty - 3);
+    w.treasury = Math.max(0, w.treasury); const proj = (w.projects ?? []).find((x) => !x.done); if (proj) proj.progress = Math.max(0, proj.progress - 2);
+    o.suspicion = clamp(o.suspicion + 12); log(w, '💥 Gece Kışla’nın ambarı ateşe verildi! Faili meçhul.');
+    if (chance(w, 0.2 + o.suspicion / 250)) reveal(w, o, [by.id], 'Sabotajcılar görüldü');
+    return 'Sabotaj başarılı: askerlerin morali düştü' + (proj ? ', şantiye gecikti.' : '.');
+  }
+  // ayaklanma
+  if (o.kind === 'hirsiz') return 'Lonca ayaklanmaz.';
+  if (o.members.length < 8) return `Ayaklanma için en az 8 üye gerekir (${o.members.length}).`;
+  if (o.kind === 'cumhuriyet' && w.cumhuriyet < 40) return `Halk henüz hazır değil (cumhuriyet ${Math.round(w.cumhuriyet)}/40).`;
+  if (w.isyan) return 'Zaten isyan var.';
+  for (const id of o.members) { const p = findPerson(w, id); if (p) { p.republic = clamp(p.republic + 25); p.plotting = 'revolution'; p.loyalty = clamp(p.loyalty - 30); } }
+  startIsyanHook.fn(w); const iz = w.isyan as World['isyan']; if (iz) { iz.leaderId = by.id; for (const id of o.members) if (!iz.rebels.includes(id)) iz.rebels.push(id); chronicle(w, 'isyan', `“${o.name}” ayaklanmayı başlattı.`); return '🔥 AYAKLANMA BAŞLADI! Saray’a yürüyün.'; }
+  return 'Ayaklanma başlatılamadı.';
+}
 export function orgMeet(w: World, p: Person): string { const o = orgOf(w, p.id); if (!o) return 'Örgütte değilsiniz.'; if (o.leaderId !== p.id) return 'Toplantıyı lider çağırır.'; o.meetTonight = true; return 'Bu gece gizli toplantı var. Dikkat: bekçiler baskın yapabilir.'; }
 export function assignSpy(w: World, k: Person, spy: Person, target: Person): string {
   if (k.id !== w.kayzerId) return 'Sadece Kayzer casus atar.'; if (spy.playerId && !spy.npc) return 'Oyunculara casusluk emri DM ile verilir.';
@@ -227,13 +333,20 @@ export function orgsDay(w: World): void {
   // NPCs found and join
   const fits = (p: Person, k: OrgKind): boolean => k === 'hirsiz' ? p.honesty < 30 : k === 'cumhuriyet' ? p.republic > 65 : p.din > 78;
   for (const k of ['hirsiz', 'cumhuriyet', 'tarikat'] as OrgKind[]) if (!orgs.some((o) => o.kind === k)) { const f = w.people.find((p) => !p.playerId && fits(p, k) && !orgOf(w, p.id) && p.ambition > 55 && p.jailedDays === 0); if (f && chance(w, 0.15)) orgFound(w, f, k, { hirsiz: 'Gölgeler', cumhuriyet: 'Hürriyet Ocağı', tarikat: 'Nur Halkası' }[k]); }
-  for (const p of w.people) if (!p.playerId && !orgOf(w, p.id) && p.jailedDays === 0 && p.id !== w.kayzerId && !STATE.includes(p.prof)) { const o = orgs.find((x) => fits(p, x.kind)); if (o && chance(w, 0.008 / (1 + o.members.length / 6))) orgJoin(w, p, o.id); }
+  // NPC members recruit friends (one try per org per day, harder as the org grows)
+  for (const o of orgs) {
+    const rec = findPerson(w, pick(w, o.members) ?? ''); if (!rec || rec.playerId || !chance(w, 0.35 / (1 + o.members.length / 5))) continue;
+    const cand = w.people.filter((p) => !p.playerId && !orgOf(w, p.id) && p.jailedDays === 0 && p.id !== w.kayzerId && !STATE.includes(p.prof) && (rec.relations[p.id] ?? 0) > 5);
+    const t = [...cand].sort((a, b) => joinScore(w, b, o, rec) - joinScore(w, a, o, rec))[0];
+    if (t && joinScore(w, t, o, rec) >= 55) { orgJoin(w, t, o.id); const lp = findPerson(w, o.leaderId)?.playerId; if (lp) personal(w, lp, `🕯 ${rec.name}, ${t.name}'ı “${o.name}” cemiyetine kazandı.`); }
+  }
   for (const o of orgs) {
     o.members = o.members.filter((id) => findPerson(w, id)); if (!findPerson(w, o.leaderId)) o.leaderId = o.members[0] ?? '';
     // effects
     for (const id of o.members) { const p = findPerson(w, id)!; if (o.kind === 'cumhuriyet') p.republic = clamp(p.republic + 0.25); if (o.kind === 'tarikat') p.din = clamp(p.din + 0.5); if (o.kind === 'hirsiz' && p.money < 30 && chance(w, 0.05)) { const v = pick(w, w.people.filter((x) => x.money > 80 && x.id !== p.id)); if (v) transfer(w, v.id, p.id, Math.min(15, v.money * 0.1), 'lonca hırsızlığı'); o.suspicion += 2; } }
     if (!w.people.some((p) => p.playerId && o.members.includes(p.id)) && chance(w, 0.25)) o.meetTonight = true; // NPC orgs meet now and then
-    o.suspicion = clamp(o.suspicion + o.members.length * 0.35 + (o.meetTonight ? 4 : 0) - 1);
+    const look = o.members.filter((id) => o.roles?.[id] === 'casus').length; // gözcüler cover tracks
+    o.suspicion = clamp(o.suspicion + o.members.length * 0.35 + (o.meetTonight ? 4 : 0) - 1 - look * 0.8);
     if (o.suspicion >= 60 && !o.known) reveal(w, o, [], 'Söylentiler yayıldı');
     // informants: paid, scared or conscience-driven
     for (const id of o.members) { const p = findPerson(w, id); if (!p || p.playerId) continue; const why = p.honesty > 70 && chance(w, 0.04) ? 'vicdanı rahat etmeyen bir muhbir' : o.known && chance(w, 0.04) ? 'korkan bir üye' : (w.informantPay ?? 0) > 0 && p.honesty < 45 && chance(w, 0.03) ? 'parayla konuşan bir muhbir' : null; if (why) { if (why.startsWith('parayla')) transfer(w, 'saray', p.id, w.informantPay ?? 10, 'muhbir ödülü'); reveal(w, o, [o.leaderId, ...o.members.filter((x) => x !== p.id).slice(0, 2)], `Muhbir (${why})`); break; } }
@@ -273,6 +386,23 @@ const MAJOR: [RegExp, string][] = [[/kanun|ferman|yasa(k|sı)|tasarı.*kabul/i, 
 export function maybeChronicle(w: World, text: string): void { if (/oylamaya açıldı|teklif verdi|→ RET|günlük bütçe|propaganda|protesto/.test(text)) return; for (const [r, k] of MAJOR) if (r.test(text)) { chronicle(w, k, text); return; } }
 
 // ======================= migration (schema 5) =======================
+export function migrate7(w: World): World {
+  w = migrate6(w); if ((w.schema ?? 1) >= 7) return w;
+  migrateMeclis16(w); rehouse(w); for (const p of w.people) if (p.playerId && p.energy === undefined) p.energy = 80;
+  w.schema = 7; return w;
+}
+export function migrate6(w: World): World {
+  w = migrate5(w); if ((w.schema ?? 1) >= 6) return w;
+  if (!w.buildings.some((b) => b.id === 'hayvan')) {
+    const free = (x: number, y: number): boolean => x >= 1 && y >= 1 && x + 8 < 99 && y + 5 < 54 && !w.buildings.some((o) => x < o.x + o.w + 1 && x + 9 > o.x && y < o.y + o.h + 2 && y + 7 > o.y) && ![13, 20, 29, 35, 44].some((ry) => ry >= y && ry < y + 6) && ![6, 17, 29, 44, 56, 68, 80, 92].some((rx) => rx >= x && rx < x + 8);
+    let spot: [number, number] | null = null;
+    for (let r = 0; r < 40 && !spot; r++) for (let dx = -r; dx <= r && !spot; dx++) for (const dy of [-r, r, ...Array.from({ length: 2 * r - 1 }, (_, i) => i - r + 1)]) { if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue; if (free(70 + dx, 37 + dy)) { spot = [70 + dx, 37 + dy]; break; } }
+    const [x, y] = spot ?? [70, 37];
+    w.buildings.push({ id: 'hayvan', name: 'Hayvan Pazarı', kind: 'hayvan', x, y, w: 8, h: 5, door: { x: x + 4, y: y + 5 }, market: false });
+  }
+  for (const p of w.people) { if (p.prof === 'hayvanci') p.work = 'hayvan'; if (p.farm && !p.barn) { const hd = herd(p); p.barn = { ahir: Math.ceil((hd.inek + hd.koyun + hd.at) / BARN.ahir.cap), kumes: Math.ceil(hd.tavuk / BARN.kumes.cap) }; } }
+  w.schema = 6; return w;
+}
 export function migrate5(w: World): World {
   if ((w.schema ?? 1) >= 5) return w;
   for (const g of GOODS) { if (w.prices[g] === undefined) w.prices[g] = ({ sut: 1, yumurta: 0.6 } as Partial<Record<Good, number>>)[g] ?? 1; if (w.market.sold[g] === undefined) w.market.sold[g] = 0; if (w.market.unmet[g] === undefined) w.market.unmet[g] = 0; }

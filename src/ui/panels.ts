@@ -1,3 +1,4 @@
+import { electionPhase } from '../sim/tick';
 import type { Action, Building, Good, Person, PetitionKind, Profession, World } from '../sim/types';
 import { GOODS } from '../sim/types';
 import { GOOD_LABEL, PLAYER_PROFS, PROF_LABEL, STATE_PROFS } from '../sim/constants';
@@ -19,7 +20,7 @@ import { buildingExtras, caseRoles, electionBlock, personActions, personExtras, 
 
 export interface Ctx {
   w: World; me: Person | null; founder: boolean;
-  act: (a: Action) => void; dm: (personId: string) => void; openPerson: (id: string) => void; openCitizens?: () => void; atSaray?: boolean;
+  act: (a: Action) => void; dm: (personId: string) => void; openPerson: (id: string) => void; openCitizens?: () => void; atSaray?: boolean; say?: (personId: string, text: string) => void;
 }
 
 const isK = (c: Ctx): boolean => !!c.me && canRule(c.w, c.me, Date.now(), ONLINE_WINDOW_MS);
@@ -72,6 +73,7 @@ export function personCard(c: Ctx, p: Person): HTMLElement {
     h('button', { onclick: () => c.act({ t: 'give', personId: p.id, amount: Number(amt.value) }) }, isK(c) ? '💰 Saraydan ver' : '💰 Para ver'),
     !isK(c) && !c.me.soylu && (STATE_PROFS.includes(p.prof) || p.meclis) ? h('button', { title: 'Sadece devlet görevlisine ya da Meclis üyesine. Suçtur.', onclick: () => c.act({ t: 'bribe', personId: p.id, amount: Number(amt.value) }) }, '🤫 Rüşvet') : '',
     h('button', { onclick: () => c.dm(p.id) }, '✉️ Mesaj'),
+    (c.w.orgs ?? []).some((o) => o.members.includes(c.me!.id)) && !(c.w.orgs ?? []).some((o) => o.members.includes(p.id)) && !p.playerId ? h('button', { title: 'Kabulü fikirlerine, size yakınlığına, verdiğiniz paraya ve riske bağlıdır. Reddeden ihbar edebilir!', onclick: () => { const n = Number(amt.value) || 0; const o = c.w.orgs!.find((x) => x.members.includes(c.me!.id))!; c.say?.(p.id, `Seni gizlice “${o.name}” cemiyetimize davet ediyorum, aramıza katıl.${n > 0 ? ` Sana ${n} Dinar veririm.` : ''}`); } }, '🕯 Cemiyete davet et') : '',
     !c.me.spouse && !p.spouse && p.prof !== 'naip' && stage(w, p) === 'yetiskin' && p.female !== c.me.female ? h('button', { onclick: () => c.act({ t: 'marry', personId: p.id }) }, '💍 Evlenme teklif et') : '',
   );
   box.append(h('h3', {}, 'Ne yapacaksınız?'), actions, personActions(c, p));
@@ -237,6 +239,19 @@ function billCard(c: Ctx, b: Bill, open: boolean): HTMLElement {
 
 export function pendingSanctions(c: Ctx): HTMLElement[] { return c.w.meclis.bills.filter((b) => b.status === 'onay').map((b) => billCard(c, b, false)); }
 
+export function electionCard(c: Ctx): HTMLElement {
+  const w = c.w; const ph = electionPhase(w); const me = c.me; const box = h('div', { class: 'card stack' });
+  box.append(h('b', {}, ph.label));
+  const isCand = !!me && w.election.candidates.includes(me.id);
+  const eligible = !!me && me.prof !== 'asker' && me.prof !== 'bekci' && me.id !== w.kayzerId && me.jailedDays === 0;
+  if (ph.phase === 'aday' && me) box.append(isCand ? h('span', { class: 'pill' }, 'Adaysınız') : eligible ? h('button', { class: 'primary', onclick: () => c.act({ t: 'runForMeclis' }) }, 'Aday ol') : h('div', { class: 'muted' }, 'Askerler, bekçiler ve Kayzer aday olamaz.'));
+  if (ph.phase === 'propaganda' && isCand) box.append(h('button', { onclick: () => c.act({ t: 'poster' } as never) }, 'Afiş as (propaganda)'));
+  const cands = w.election.candidates.map((id) => findPerson(w, id)).filter((p): p is NonNullable<typeof p> => !!p);
+  if (cands.length) box.append(h('div', { class: 'chips' }, ...cands.map((p) => h('span', { class: 'chip' }, `${p.name} · afiş ${w.election.posters?.[p.id] ?? 0}`, ph.phase === 'oylama' && me && w.election.votes[me.id] !== p.id ? h('button', { class: 'sm', onclick: () => c.act({ t: 'vote', candidateId: p.id }) }, 'Oy ver') : w.election.votes[me?.id ?? ''] === p.id ? ' (oyunuz)' : ''))));
+  const last = w.election.last;
+  if (last) box.append(h('details', {}, h('summary', {}, `Son seçim sonuçları (gün ${last.day})`), h('table', {}, ...last.results.slice(0, 24).map((r, i) => h('tr', { class: r.won ? 'won' : '' }, h('td', {}, String(i + 1)), h('td', {}, findPerson(w, r.id)?.name ?? '?'), h('td', {}, `${r.votes} oy`), h('td', {}, r.won ? 'seçildi' : ''))))));
+  return box;
+}
 function meclisPanel(c: Ctx): HTMLElement {
   const w = c.w; const box = h('div', {});
   const fac = (id: string | null) => w.meclis.factions.find((f) => f.id === id);
@@ -247,36 +262,32 @@ function meclisPanel(c: Ctx): HTMLElement {
     if (c.me) box.append(h('button', { class: 'primary', onclick: () => c.act({ t: 'runForBaskan' }) }, 'Başkan adayı ol'));
   } else box.append(h('div', { class: 'muted' }, 'İmparatorlukta Meclis’in kabul ettiği kararlar Kayzer’in onayına gider. Kayzer’in vetosu kesindir, aşılamaz.'));
   box.append(electionBlock(c));
-  // seat chart
-  box.append(h('h3', {}, `🪑 Sandalyeler · seçim ${w.election.nextDay}. gün · üye maaşı ${w.meclis.salary} D`));
-  const chart = h('div', { class: 'row' });
-  for (const s of w.meclis.seats) {
-    const p = findPerson(w, s.holder); const f = fac(p?.faction ?? null);
-    const seat = h('div', { class: 'card', style: `cursor:pointer;min-width:120px;border-left:6px solid ${f?.color ?? '#555'}`, onclick: () => p && c.openPerson(p.id) },
-      h('div', { class: 'muted' }, `${s.kind === 'bolge' ? '📍' : '🛠'} ${s.label}`), h('b', {}, p?.name ?? 'boş'), h('div', { class: 'muted' }, `${f?.name ?? '—'}${p && !p.immune ? ' · dokunulmazlık yok' : ''}`));
-    chart.append(seat);
-  }
-  box.append(chart);
-  box.append(h('h3', {}, '🎌 Partiler'));
+  box.append(electionCard(c));
+  // seat chart (16 milletvekili)
+  box.append(h('h3', {}, `Sandalyeler (${w.meclis.seats.filter((s) => s.holder).length}/${w.meclis.seats.length}) · üye maaşı ${w.meclis.salary} D/gün`));
+  box.append(h('div', { class: 'seats' }, ...w.meclis.seats.map((s) => { const p = findPerson(w, s.holder); const f = fac(p?.faction ?? null);
+    return h('div', { class: `seat${p ? '' : ' empty'}${p && p.id === c.me?.id ? ' me' : ''}`, style: `--fc:${f?.color ?? '#555'}`, title: p ? `${p.name} · ${f?.name ?? ''}` : 'boş', onclick: () => p && c.openPerson(p.id) }, h('b', {}, p?.name.split(' ').slice(-1)[0] ?? '—'), h('small', {}, f?.name.split(' ')[0] ?? '')); })));
+  const mp = !!c.me?.meclis;
+  box.append(h('h3', {}, 'Partiler'));
   for (const f of w.meclis.factions) {
     const n = w.people.filter((p) => p.meclis && p.faction === f.id).length;
-    box.append(h('div', { class: 'row card', style: `border-left:6px solid ${f.color}` }, h('b', {}, f.name), h('span', { class: 'muted' }, `${n} sandalye · lider: ${findPerson(w, f.leaderId)?.name ?? '—'}`),
-      c.me && c.me.faction !== f.id ? h('button', { onclick: () => c.act({ t: 'joinFaction', factionId: f.id }) }, 'Katıl') : c.me?.faction === f.id ? h('span', {}, '✓ üyesiniz') : ''));
+    box.append(h('div', { class: 'row card', style: `border-left:6px solid ${f.color}` }, h('b', { class: 'grow' }, f.name), h('span', { class: 'muted' }, `${n} sandalye · lider: ${findPerson(w, f.leaderId)?.name ?? '—'}`),
+      mp && c.me!.faction !== f.id ? h('button', { class: 'sm', onclick: () => c.act({ t: 'joinFaction', factionId: f.id }) }, 'Katıl') : c.me?.faction === f.id ? h('span', { class: 'pill' }, 'üyesiniz') : ''));
   }
-  // active bills
+  if (mp) { const nm = h('input', { placeholder: 'Yeni parti adı' }); box.append(h('div', { class: 'row' }, nm, h('button', { class: 'sm', onclick: () => c.act({ t: 'foundFaction', name: nm.value }) }, 'Parti kur'))); }
+  // agenda: public sessions for everyone; only MPs speak/vote/propose
   const active = w.meclis.bills.filter((b) => ['tartisma', 'oylama', 'onay'].includes(b.status));
-  box.append(h('h3', {}, `📜 Gündem (${active.length})`));
+  box.append(h('h3', {}, `Gündem (${active.length})${mp ? '' : ' · açık oturum (izleyici)'}`));
   if (!active.length) box.append(h('div', { class: 'muted' }, 'Görüşülen teklif yok.'));
-  for (const b of active) box.append(billCard(c, b, b.status !== 'onay'));
-  if (c.me?.meclis) {
-    const kind = select((Object.keys(BILL_LABEL) as BillKind[]).map((k): [string, string] => [k, BILL_LABEL[k]]));
-    const val = numIn(10, 0, 50000);
-    const target = select([['', '— hedef —'], ...w.laws.map((l): [string, string] => [l.id, `Kanun: ${l.name}`]), ...GOODS.map((g): [string, string] => [g, `Mal: ${GOOD_LABEL[g]}`]), ['meclis', 'Maaş: Meclis üyesi'], ...STATE_PROFS.map((p): [string, string] => [p, `Maaş: ${PROF_LABEL[p]}`]), ...w.people.filter((p) => p.prof !== 'naip').map((p): [string, string] => [p.id, `Kişi: ${p.name}`])]);
-    box.append(h('h3', {}, '✍️ Teklif ver'), h('div', { class: 'row' }, kind, 'değer', val, target, h('button', { class: 'primary', onclick: () => c.act({ t: 'propose', kind: kind.value as BillKind, value: Number(val.value), target: target.value }) }, 'Teklif et')),
-      h('div', { class: 'muted' }, 'Vergi/bütçe/inşaat için “değer”, narh için mal ve fiyat, maaş için görev ve tutar, gensoru/soruşturma/dokunulmazlık için kişi seçin.'),
-      h('h3', {}, '📜 Özel kanun teklifi'), lawBuilder(w, 'Meclise sun', (law) => c.act({ t: 'propose', kind: 'ozel', value: law.value, target: law.good ?? '', law })));
-  } else if (c.me && !isK(c)) box.append(h('button', { onclick: () => c.act({ t: 'runForMeclis' }) }, 'Meclise aday ol (sadece adaylık döneminde)'));
-  for (const id of w.election.candidates) { const p = findPerson(w, id); if (p) box.append(personLine(c, p, h('button', { onclick: (e) => { e.stopPropagation(); c.act({ t: 'vote', candidateId: id }); } }, 'Oy ver'))); }
+  for (const b of active) box.append(billCard(c, b, mp && b.status !== 'onay'));
+  if (mp) {
+    const kind = select((Object.keys(BILL_LABEL) as BillKind[]).filter((k) => k !== 'ozel').map((k): [string, string] => [k, BILL_LABEL[k]]));
+    const val = numIn(10, 0, 50000); const title = h('input', { placeholder: 'Başlık (genelge için metin)', maxlength: '60' });
+    const target = select([['', '— hedef —'], ...w.laws.map((l): [string, string] => [l.id, `Kanun: ${l.name}`]), ...GOODS.map((g): [string, string] => [g, `Mal: ${GOOD_LABEL[g]}`]), ['meclis', 'Maaş: Meclis üyesi'], ...STATE_PROFS.map((p): [string, string] => [p, `Maaş: ${PROF_LABEL[p]}`]), ...w.people.filter((p) => STATE_PROFS.includes(p.prof) || p.rank || p.meclis).map((p): [string, string] => [p.id, `Kişi: ${p.rank ? p.rank + ' ' : ''}${p.name}`])]);
+    box.append(h('h3', {}, 'Teklif ver (genelge, vergi, bütçe, gensoru…)'), h('div', { class: 'row' }, kind, val, target, title, h('button', { class: 'primary', onclick: () => c.act({ t: 'propose', kind: kind.value as BillKind, value: Number(val.value), target: target.value, title: title.value || undefined } as never) }, 'Teklif et')),
+      h('div', { class: 'muted' }, 'Genelge: bağlayıcı olmayan Meclis bildirisi. Gensoru: bir memuru ya da vezir/paşayı görevden alır. Bütçe: Saray’ın harcama sınırı. Kabul edilen kararlar Kayzer’in onayına gider; veto kesindir.'),
+      h('h3', {}, 'Kanun teklifi (kanun yazıcı)'), lawBuilder(w, 'Meclise sun', (law) => c.act({ t: 'propose', kind: 'ozel', value: law.value, target: law.good ?? '', law })));
+  } else box.append(h('div', { class: 'card muted' }, h('b', {}, 'Meclis bölümü kilitli. '), 'Teklif vermek, kürsüde konuşmak, oy kullanmak ve parti kurmak için milletvekili seçilmelisiniz.'));
   // history
   const done = w.meclis.bills.filter((b) => !['tartisma', 'oylama', 'onay'].includes(b.status)).slice(-8).reverse();
   if (done.length) box.append(h('h3', {}, '🗳 Oylama geçmişi'), ...done.map((b) => billCard(c, b, false)));
@@ -299,6 +310,7 @@ function santiyePanel(c: Ctx): HTMLElement {
 }
 
 const INFO: Record<string, string> = {
+  hayvan: 'Hayvan tüccarı inek, koyun, tavuk ve at satar; çiftlik arsası da buradan alınır. Ahır/kümes ve besleme çiftliğinizde (Buğday Tarlaları) yapılır.',
   okul: 'Öğretmenler çocuklara okuma yazma öğretiyor. Hocalar maaşını hazineden alır.',
   cami: 'Hoca Abdullah’ın camisi. Düğünler avluda yapılır.',
   hekimhane: 'Hekimler ücret karşılığı tedavi eder. Parası olmayana darülaceze (hazine) bakar.',
@@ -312,6 +324,18 @@ const INFO: Record<string, string> = {
   kahve: 'Memurlar ve tahsildarlar burada. Sarraf (borç) ⚡ menüsünde.',
 };
 
+function housePanel(c: Ctx, b: Building): HTMLElement {
+  const w = c.w; const rs = w.people.filter((p) => p.home === b.id); const owner = findPerson(w, b.ownerId) ?? rs[0]; const me = c.me;
+  const box = h('div', { class: 'stack' });
+  box.append(h('div', { class: 'row' }, h('span', { class: 'pill' }, `Doluluk ${rs.length}/5`), h('div', { class: 'bar wide' }, h('i', { style: `width:${rs.length * 20}%;background:${rs.length >= 5 ? 'var(--red)' : 'var(--green)'}` })), h('span', { class: 'muted' }, `Ev sahibi: ${owner?.name ?? 'Saray'}`)));
+  if (me && me.home === b.id) {
+    const inside = (me.homeUntil ?? 0) > (w.serverNow ?? Date.now());
+    box.append(h('div', { class: 'muted' }, `Burası sizin eviniz${me.renting === b.id ? ' (kiracı, 4 D/gün)' : ''}. Evdeyken dışarıdan kimse size saldıramaz, soyamaz. Uyku enerji ve sağlık yeniler.`),
+      h('div', { class: 'row' }, inside ? h('button', { class: 'primary', onclick: () => c.act({ t: 'leaveHome' }) }, 'Dışarı çık') : [h('button', { class: 'primary', onclick: () => c.act({ t: 'goHome', sleep: true }) }, 'Uyu (sabaha kadar)'), h('button', { onclick: () => c.act({ t: 'goHome', sleep: false }) }, 'Eve gir, dinlen')] as never));
+  } else if (me && rs.length < 5) box.append(h('div', { class: 'row' }, h('button', { class: 'primary', onclick: () => c.act({ t: 'buyHome', houseId: b.id }) }, 'Yer satın al (150 D)'), h('button', { onclick: () => c.act({ t: 'rentHome', houseId: b.id }) }, 'Kirala (4 D/gün)')), h('div', { class: 'muted' }, me.home ? 'Taşınırsanız eski evinizdeki yeriniz boşalır.' : 'Eviniz yok: geceleri sokakta kalırsınız ve uyuyamazsınız.'));
+  else if (me) box.append(h('div', { class: 'muted' }, 'Bu ev dolu.'));
+  return box;
+}
 export function buildingPanel(c: Ctx, b: Building): HTMLElement {
   const w = c.w;
   let where = '';
@@ -323,6 +347,7 @@ export function buildingPanel(c: Ctx, b: Building): HTMLElement {
   else if (b.id === 'kisla') box.append(kislaPanel(c));
   else if (b.id === 'meclis') box.append(meclisPanel(c));
   else if (b.id === 'santiye') box.append(santiyePanel(c));
+  else if (b.kind === 'ev') box.append(housePanel(c, b));
   else {
     if (INFO[b.id]) box.append(h('div', { class: 'muted' }, INFO[b.id]!));
     const ex = buildingExtras(c, b); if (ex) box.append(ex);

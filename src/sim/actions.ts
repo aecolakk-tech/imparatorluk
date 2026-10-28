@@ -1,4 +1,6 @@
-import { drinkMilk, eatEgg, buyFarm, buyAnimal, slaughter, grantTitle, stripTitle, orgFound, orgJoin, orgLeave, orgMeet, assignSpy, issueWarrant, searchHouse, raidOrg } from './realm';
+import { moveIn, goInside, leaveHome, atHomeSafe } from './housing';
+import { kayzerBill, foundFaction, members } from './meclis';
+import { buildBarn, feedAnimals, collectFarm, hasHorse, drinkMilk, eatEgg, buyFarm, buyAnimal, slaughter, grantTitle, stripTitle, orgFound, orgJoin, orgLeave, orgMeet, orgRole, orgAct, assignSpy, issueWarrant, searchHouse, raidOrg } from './realm';
 import { setGoal, missionCreate, missionClaim, missionPay } from './goals';
 import type { Action, ActionResult, Person, Profession, World } from './types';
 import { GOODS } from './types';
@@ -55,7 +57,7 @@ export function joinWorld(w: World, playerId: string, name: string, prof: Profes
     const safeProf = PLAYER_PROFS.includes(prof) ? prof : 'hamal';
     const houses = w.buildings.filter((b) => b.kind === 'ev');
     const counts = new Map<string, number>(); for (const x of w.people) counts.set(x.home, (counts.get(x.home) ?? 0) + 1);
-    const home = [...houses].sort((a, b) => (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0))[0]?.id ?? 'ev1';
+    const best = [...houses].sort((a, b) => (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0))[0]; const home = best && (counts.get(best.id) ?? 0) < 5 ? best.id : ''; // v1.9: full city = homeless until you buy/rent
     p = makePerson(w, { name: clean(name), prof: safeProf, money: 40, honesty: 60, ambition: 50, loyalty: 60 }, home);
     w.people.push(p);
   }
@@ -94,7 +96,8 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
   const pl = w.players[playerId]; if (!pl || pl.banned) return no('Hesap bulunamadı.');
   const me = findPerson(w, pl.personId); if (!me) return no('Karakter bulunamadı.');
   const isKayzer = (ww: World, p: Person): boolean => canRule(ww, p, now, ONLINE_WINDOW_MS);
-  const jailedOk: Action['t'][] = ['petition', 'eat', 'divorce', 'answerProposal', 'defense', 'restCase', 'offerBribe'];
+  if ((me.homeUntil ?? 0) > now && !['goHome', 'setSpeed', 'setGoal', 'petition', 'answerProposal', 'defense', 'restCase'].includes(a.t)) leaveHome(me); // any other action = you step outside
+  const jailedOk: Action['t'][] = ['petition', 'eat', 'divorce', 'answerProposal', 'defense', 'restCase', 'offerBribe', 'setSpeed', 'setGoal'];
   if (me.jailedDays > 0 && !jailedOk.includes(a.t)) return no('Zindandasınız; şimdilik sadece dilekçe yazabilirsiniz.');
   const exileOk: Action['t'][] = [...jailedOk, 'restore', 'buy', 'sell', 'marry', 'haveChild', 'school', 'cure'];
   if (me.exiledDays > 0 && !exileOk.includes(a.t)) return no(`Sürgündesiniz (${me.exiledDays} gün kaldı).`);
@@ -143,7 +146,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       const pet = w.petitions.find((x) => x.id === a.petitionId); if (!pet) return no('Dilekçe yok.');
       return answerPetition(w, pet, a.accept, 'kayzer', now) ? ok('Ferman yazıldı.') : no('Bu dilekçe uygulanamadı (hazine yetmiyor olabilir).');
     }
-    case 'setTax': { if (!isKayzer(w, me)) return no('Yetkiniz yok.'); const r = num(a.rate, 0, 40); if (r === null) return no('0–40 arası.'); w.taxRate = Math.round(r); log(w, `Ferman: satış vergisi %${w.taxRate}.`); return ok('Vergi değişti.'); }
+    case 'setTax': { if (!isKayzer(w, me)) return no('Yetkiniz yok.'); const r = num(a.rate, 0, 40); if (r === null) return no('0–40 arası.'); if (w.regime === 'imparatorluk' && members(w).length >= 5 && Math.round(r) !== w.taxRate) { const b = kayzerBill(w, me, 'vergi', Math.round(r), ''); return typeof b === 'string' ? no(b) : ok(`Vergi değişikliği Meclis’e sevk edildi (%${Math.round(r)}). Meclis kabul ederse yürürlüğe girer.`); } w.taxRate = Math.round(r); log(w, `Ferman: satış vergisi %${w.taxRate}.`); return ok('Vergi değişti.'); }
     case 'setHeadTax': { if (!isKayzer(w, me)) return no('Yetkiniz yok.'); const r = num(a.amount, 0, 10); if (r === null) return no('0–10 arası.'); w.headTax = r; log(w, `Ferman: baş vergisi ${r} Dinar.`); return ok('Baş vergisi değişti.'); }
     case 'setSalary': { if (!isKayzer(w, me)) return no('Yetkiniz yok.'); const r = num(a.amount, 0, 60); if (r === null || !STATE_PROFS.includes(a.prof)) return no('Geçersiz.'); w.salaries[a.prof] = r; log(w, `Ferman: ${PROF_LABEL[a.prof]} maaşı ${r} Dinar.`); return ok('Maaş değişti.'); }
     case 'toggleLaw': {
@@ -200,6 +203,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     }
     case 'steal': {
       const t = findPerson(w, a.personId); if (!t || t.id === me.id || t.prof === 'naip' || t.id === w.kayzerId) return no('Geçersiz.');
+      if (atHomeSafe(w, t, now)) return no(`${t.name} evinde; kapı kilitli.`);
       me.honesty = clamp(me.honesty - 10); const got = steal(w, me, t); return got ? ok(`${got} Dinar çaldınız…`) : no('Kesesi boş çıktı.');
     }
     case 'bribe': {
@@ -313,9 +317,17 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       if (!w.isyan.rebels.includes(me.id)) w.isyan.rebels.push(me.id); me.republic = clamp(me.republic + 20); return ok('Asilere katıldınız!');
     }
     case 'setGoal': return ok(setGoal(me, a.goal));
+    case 'buyHome': case 'rentHome': { const r = moveIn(w, me, a.houseId, a.t === 'buyHome' ? 'satin' : 'kira'); return /satın aldınız|taşındınız/.test(r) ? ok(r) : no(r); }
+    case 'goHome': { const r = goInside(w, me, !!a.sleep, now, hourMs(w)); return r.startsWith('Eviniz yok') ? no(r) : ok(r); }
+    case 'leaveHome': leaveHome(me); return ok('Dışarı çıktınız.');
+    case 'foundFaction': { const r = foundFaction(w, me, String(a.name ?? '')); return r.includes('kuruldu') ? ok(r) : no(r); }
     case 'drinkMilk': { const r = drinkMilk(me); return r.startsWith('Süt içtiniz') ? ok(r) : no(r); }
     case 'eatEgg': { const r = eatEgg(me); return r.startsWith('Yumurta') ? ok(r) : no(r); }
-    case 'buyFarm': { const r = buyFarm(w, me); return r.startsWith('Çiftlik kurdunuz') ? ok(r) : no(r); }
+    case 'buildBarn': { const r = buildBarn(w, me, a.kind); return r.includes('yapıldı') ? ok(r) : no(r); }
+    case 'feedAnimals': { const r = feedAnimals(w, me); return r.includes('beslendi') ? ok(r) : no(r); }
+    case 'collectFarm': { const r = collectFarm(me); return r.startsWith('Toplandı') ? ok(r) : no(r); }
+    case 'ride': { if (a.on && !hasHorse(me)) return no('Atınız yok. Hayvan Pazarı’ndan alın.'); me.riding = !!a.on; return ok(a.on ? 'Atınıza bindiniz: %50 daha hızlısınız.' : 'Attan indiniz.'); }
+    case 'buyFarm': { const r = buyFarm(w, me); return r.includes('arsanız hazır') ? ok(r) : no(r); }
     case 'buyAnimal': { const r = buyAnimal(w, me, a.animal, Math.max(1, Math.min(10, Math.round(a.n ?? 1)))); return / aldınız/.test(r) ? ok(r) : no(r); }
     case 'slaughter': { const r = slaughter(w, me, a.animal); return r.includes('kesildi') ? ok(r) : no(r); }
     case 'grantTitle': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); const r = grantTitle(w, me, t, a.rank, a.fief); return r.startsWith('👑') ? ok(r) : no(r); }
@@ -323,6 +335,8 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'orgFound': { const r = orgFound(w, me, a.kind, String(a.name ?? '')); return r.includes('kuruldu') ? ok(r) : no(r); }
     case 'orgJoin': { const r = orgJoin(w, me, a.orgId); return r.includes('katıldınız') ? ok(r) : no(r); }
     case 'orgLeave': return ok(orgLeave(w, me));
+    case 'orgRole': { const r = orgRole(w, me, a.personId, a.role); return r.includes('artık') ? ok(r) : no(r); }
+    case 'orgAct': { const r = orgAct(w, me, a.deed); return /asıldı|soyuldu|yapıldı|başarılı|BAŞLADI/.test(r) ? ok(r) : no(r); }
     case 'orgMeet': { const r = orgMeet(w, me); return r.startsWith('Bu gece') ? ok(r) : no(r); }
     case 'assignSpy': { const s = findPerson(w, a.spyId), t = findPerson(w, a.targetId); if (!s || !t) return no('Kişi yok.'); const r = assignSpy(w, me, s, t); return r.includes('izleyecek') ? ok(r) : no(r); }
     case 'warrant': { const t = findPerson(w, a.personId); if (!t) return no('Kişi yok.'); const r = issueWarrant(w, me, t); return r.includes('çıkarıldı') ? ok(r) : no(r); }

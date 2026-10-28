@@ -1,9 +1,10 @@
-import { migrate5 } from './realm';
+import { migrate7 } from './realm';
 import type { Building, BuildingKind, Good, Law, Person, Profession, World } from './types';
 import { GOODS } from './types';
 import { BASE_PRICE, DEFAULT_SALARY, MAP_H, MAP_W } from './constants';
 import { pick, rand, randInt } from './rng';
-import { DEFAULT_BUDGET, initMeclis, meclisElection } from './meclis';
+import { DEFAULT_BUDGET, initMeclis } from './meclis';
+import { log } from './log';
 
 function b(id: string, name: string, kind: BuildingKind, x: number, y: number, w: number, h: number, market = false): Building {
   return { id, name, kind, x, y, w, h, door: { x: x + Math.floor(w / 2), y: y + h }, market };
@@ -40,6 +41,7 @@ export function makeBuildings(): Building[] {
     b('dokuma', 'Dokuma Tezgâhı', 'dokuma', 70, 30, 8, 4),
     b('mobilyahane', 'Mobilyahane', 'mobilyahane', 82, 22, 8, 5),
     b('ambar', 'Tahıl Ambarı', 'ambar', 70, 22, 8, 5),
+    b('hayvan', 'Hayvan Pazarı', 'hayvan', 70, 37, 8, 5),
     b('arsa1', 'Arsa (boş)', 'arsa', 82, 3, 8, 6),
     b('arsa2', 'Arsa (boş)', 'arsa', 93, 3, 6, 6),
     b('arsa3', 'Arsa (boş)', 'arsa', 93, 22, 6, 5),
@@ -103,7 +105,7 @@ const COUNTS: [Profession, number][] = [
 export const WORKPLACE: Record<Profession, string> = {
   firinci: 'firin', sucu: 'kuyu', kasap: 'kasaphane', balikci: 'liman', terzi: 'atolye', demirci: 'atolye', marangoz: 'atolye',
   tuccar: 'pazar', hekim: 'hekimhane', hoca: 'okul', hamal: 'pazar', insaatci: 'santiye', kalemsor: 'kahve', imam: 'cami',
-  ciftci: 'ciftlik', hayvanci: 'ciftlik', dokumaci: 'dokuma', mobilyaci: 'mobilyahane', barci: 'bar',
+  ciftci: 'ciftlik', hayvanci: 'hayvan', dokumaci: 'dokuma', mobilyaci: 'mobilyahane', barci: 'bar',
   memur: 'saray', tahsildar: 'kahve', bekci: 'zindan', savci: 'mahkeme', hakim: 'mahkeme', asker: 'kisla', kayzer: 'saray', naip: 'saray',
 };
 const TITLE: Partial<Record<Profession, string>> = { ciftci: 'Çiftçi', barci: 'Barcı', asker: 'Asker', bekci: 'Bekçi', hoca: 'Öğretmen', hekim: 'Hekim', savci: 'Savcı', hakim: 'Kadı', tuccar: 'Tüccar', hamal: 'Hamal', firinci: 'Fırıncı', kalemsor: 'Kalemşör' };
@@ -154,7 +156,7 @@ export function createWorld(seed = 42, now = Date.now()): World {
     treasury: 10000, taxRate: 10, headTax: 1.75, salaries: { ...DEFAULT_SALARY }, laws: defaultLaws(),
     people: [], buildings: makeBuildings(), listings: [], prices: { ...BASE_PRICE }, market: { sold: emptyInv(), unmet: emptyInv() }, ledger: [], petitions: [], cases: [],
     projects: [{ id: 'saray-insa', name: 'Saray Kanadı İnşaatı (Usta Bekir)', site: 'santiye', cost: 1200, paid: 200, progress: 0, needed: 120, done: false }],
-    election: { nextDay: 25, candidates: [], votes: {}, seats: 5, baskanNextDay: 0, baskanCandidates: [], baskanVotes: {} }, gazette: [], events: [], todayEvents: [], players: {},
+    election: { nextDay: 10, candidates: [], votes: {}, seats: 5, baskanNextDay: 0, baskanCandidates: [], baskanVotes: {} }, gazette: [], events: [], todayEvents: [], players: {},
     regime: 'imparatorluk', meclis: initMeclis(), budget: { limit: DEFAULT_BUDGET, spent: 0, until: 20, approved: false }, schema: 4, corpses: [], escorts: [], llm: { day: '', n: 0, talkAt: 0 }, speed: 1, nature: null, nextDrought: 60, festivalUntil: 0, granary: 800, priceCaps: {}, arrests: [], chatOut: [], talks: [], offers: [], rumors: [], caravan: null, threat: null, bans: [], loans: [], outsideNet: 0, customLaws: [], suspicion: {}, treasuryBook: [], priceHist: {},
     headAwayDays: 0, children: [], proposals: [], pregnancies: [], veliaht: null, regentId: null, regentFor: null, isyan: null, deposed: null, allowStateTakeover: false, kayzerId: null, founderPersonId: null, hanedanId: '', cumhuriyet: 5, cumhuriyetDays: 0, coup: null, stats: [],
     dailyIncome: 0, dailyExpense: 0, lastSnapshotAt: now, idSeq: 0,
@@ -202,9 +204,11 @@ export function createWorld(seed = 42, now = Date.now()): World {
   // Necati is a committed republican agitator; Cemal an ambitious merchant
   const nec = w.people.find((p) => p.name === 'Kalemşör Necati'); if (nec) { nec.republic = 75; nec.plotting = 'revolution'; nec.faction = 'cumhuriyet'; }
   const cem = w.people.find((p) => p.name === 'Tüccar Cemal'); if (cem) cem.faction = 'esnaf';
-  meclisElection(w, [], {}, () => true); // the first Meclis sits from day 1
+  // v1.9: no pre-seated Meclis – the first one is ELECTED (candidacy → propaganda → vote on day 10)
+  for (const s of w.meclis.seats) s.holder = null; for (const p of w.people) { p.meclis = false; p.immune = false; }
+  log(w, 'İmparatorluk kuruldu. İlk Meclis seçimi 10. gün: adaylık şimdi açık (3. güne kadar), ardından propaganda.');
   w.todayEvents = [];
-  return migrate5(w);
+  return migrate7(w);
 }
 
 export function findPerson(w: World, id: string | null | undefined): Person | undefined {

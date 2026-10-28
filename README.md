@@ -104,3 +104,13 @@ Bilinen sınırlar için rapordaki "Eksikler" bölümüne bakın: dünya durumu 
 - Takip kamerası, müzik, hız kontrolü, vatandaş defteri, hedefler/görevler, düşük grafik, tüm tıklamalara ses.
 - Soylular (Vezir/Paşa/Bey/Ağa, tımar), entrikalar, gizli cemiyetler (muhbir, casus, arama emri, baskın, sorgu), mevsimler, hayvanlar ve çiftlik, sürekli açlık/susuzluk, Tarih Kitabı, bekçi devriyeleri.
 - PWA: ana ekrana eklenebilir (manifest, simgeler, yalnızca statik dosyaları önbelleğe alan service worker).
+
+## v1.9
+- Mahkeme pop-up'ı karardan sonra kalıcı kapanır; aynı olay için açılan mükerrer davalar birleştirilir.
+- Kayzer zindandayken de oyun hızını değiştirebilir (HUD'daki ½x/1x/2x).
+- Gizli cemiyetler: kişi kartından "Cemiyete davet et" (ideoloji, ilişki, ödeme, risk + AI cevabı), roller, hedef, toplantı/propaganda/hırsızlık/sabotaj/ayaklanma; NPC'ler de üye toplar.
+- Meclis: 16 sandalye, ilk Meclis 10. gün gerçek seçimle (adaylık → propaganda → oylama). Milletvekilleri genelge/kanun/vergi/bütçe/gensoru teklif eder, parti kurar; NPC konuşmaları AI ile yazılır. Kayzer vetosu kesindir.
+- Ev sistemi: ev başına 5 kişi, yer satın alma (150 D) / kiralama (4 D/gün), evde uyku (enerji + sağlık), evdekine saldırılamaz.
+- 1 oyun günü = 6 gerçek dakika. NPC'ler günlük rutinle, akıcı (interpolasyonlu) hareket eder.
+- Hayvan Pazarı, çiftlik (arsa → ahır/kümes → hayvan → yem → süt/yumurta/yün → kesim), haritada hayvan sprite'ları, binilebilir at.
+- Sade arayüz, game-icons.net (CC BY 3.0) ikonları, yatay ekran, açlık/susuzluk uyarısı, hafif animasyonlar.

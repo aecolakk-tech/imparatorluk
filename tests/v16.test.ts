@@ -72,7 +72,7 @@ describe('rebellion trigger (bug: everyone republican, no isyan)', () => {
 describe('elections', () => {
   it('slow calendar; soldiers and watchmen cannot stand', () => {
     rules.reach = false;
-    const w = setup(); const d = electionDates(w); expect(d.vote - d.adayFrom).toBe(11); expect(w.election.nextDay).toBeGreaterThanOrEqual(25);
+    const w = setup(); const d = electionDates(w); expect(d.vote - d.adayFrom).toBe(11); expect(w.election.nextDay).toBe(10); expect(w.people.filter((p) => p.meclis).length).toBe(0); // v1.9: the first Meclis is elected
     w.day = d.adayFrom; expect(electionPhase(w).phase).toBe('aday');
     const me = findPerson(w, w.players.u2!.personId)!; me.prof = 'bekci';
     expect(applyAction(w, 'u2', { t: 'runForMeclis' }, T0).ok).toBe(false);

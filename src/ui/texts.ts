@@ -6,8 +6,19 @@ export const RULES: [string, string[]][] = [
     'İstifçilik: fiyatı fırlayan malı stoklayanlar şüphe toplar (komşu ihbarı, dedikodu). Bekçiler devriyede en şüphelileri arar; yakalama ihtimali bekçinin dürüstlüğü ve sadakatine bağlıdır. Fazla stoka el konur, ceza kesilir. Rüşvetçi bekçi göz yumabilir. Oyuncu bekçi/asker kişi kartındaki 🔍 Ara ile günde bir arama yapar.',
     'Hamallar inşaatta yük taşır (günde 3 D, inşaat ilerler) ya da pazarda tüccara taşıma yapar (2 D). Kuraklıkta buğday pahalanır; ambar her gün piyasaya buğday salar.',
   ]],
+  ['Hayvanlar ve Çiftlik', [
+    'Hayvan Pazarı (Buğday Tarlaları’nın yanında, çitli ağıl): hayvan tüccarından inek, koyun, tavuk ve at alınır; çiftlik arsası da buradan alınır (250 D).',
+    'Çiftliğinize (Buğday Tarlaları) gidip ahır (120 D, 6 büyükbaş/at) ya da kümes (50 D, 15 tavuk) yapın. Hayvan almadan önce yer olmalı.',
+    'Hayvanları HER GÜN çiftlikte “Yem ver” ile buğdayla besleyin. Beslenen hayvan ertesi gün ürün verir: inek 3 süt (süt susuzluğu da giderir), tavuk 1 yumurta, koyun yün. Ürünleri “Topla” ile alın, pazarda satın ya da tüketin.',
+    'Kesim: inek 8, koyun 4 (+2 yün), tavuk 1 et verir. At kesilmez: ata binince %50 daha hızlı yürürsünüz (Yap → Ata bin).',
+  ]],
+  ['Gizli Cemiyetler', [
+    'Menü → Cemiyet: hırsızlar loncası, cumhuriyet cemiyeti ya da tarikat kurun. Üye toplamak için birine 1 adım yaklaşın, kartında “Cemiyete davet et” deyin (para da teklif edebilirsiniz).',
+    'Kabul; fikirlerine (dürüstlük, cumhuriyet isteği, dindarlık), size yakınlığına, paraya ve riske bağlıdır. Sadık/dürüst biri reddedip ihbar edebilir. Üyeleriniz de tanıdıklarını kazanmaya çalışır.',
+    'Lider rol dağıtır (yardımcı, propagandacı, gözcü) ve eylem seçer: propaganda, soygun (lonca), sabotaj, gece toplantısı ve en az 8 üyeyle ayaklanma. Her eylem şüpheyi artırır; muhbir, casus, baskın ve sorgu sizi ele verebilir.',
+  ]],
   ['Dünya', [
-    'Tek bir ortak dünya var, hiç sıfırlanmaz. 1 oyun günü = 5 gerçek dakika (1x). Hızı sadece Kayzer 0,5x / 1x / 2x yapabilir (Saray).',
+    'Tek bir ortak dünya var, hiç sıfırlanmaz. 1 oyun günü = 6 gerçek dakika (1x). Hızı sadece Kayzer 0,5x / 1x / 2x yapabilir (üst çubuktan, her yerden).',
     'Kimse çevrimiçi değilken dünya donar; biri girince kaldığı yerden devam eder.',
     'Siz yokken karakterinizi oyunun yapay zekâsı SADECE hayatta tutar: 3 öğün yer, 5 kez su içer, gerekirse hekime gider. Çalışmaz, satmaz, para biriktirmez, suç işlemez. Girdiğiniz an kontrol size geçer.',
     'Üç hafta hiç girmeyen oyuncunun karakteri tamamen bağımsız bir vatandaşa döner (geri gelince yine sizin olur).',

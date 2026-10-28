@@ -132,7 +132,9 @@ export function judgeAnswer(w: World, c: CourtCase, reply: string, score: number
   if (tr.msgs.filter((m) => m.who === 'sanik').length >= 5) finishTrial(w, c, now);
 }
 export function finishTrial(w: World, c: CourtCase, now: number): void {
-  const tr = c.trial; if (!tr || tr.done) return; tr.done = true; tr.pending = false;
+  const tr = c.trial; if (!tr || tr.done) return; tr.done = true; tr.doneAt = now; tr.pending = false;
+  // v1.9 dedupe: the same deed must not produce a second trial
+  for (const o of w.cases) if (o !== c && o.accusedId === c.accusedId && o.stage !== 'kapandi' && (o.crime === c.crime || (o.victimId && o.victimId === c.victimId))) { o.stage = 'kapandi'; o.verdict = 'dusuruldu'; o.sentence = 'Aynı olay için görülen davayla birleştirildi.'; if (o.trial) { o.trial.done = true; o.trial.doneAt = now; } }
   const a = findPerson(w, c.accusedId); if (!a) return;
   const judge = findPerson(w, tr.judgeId);
   const pGuilty = (c.evidence * ((judge?.honesty ?? 70) / 80) - tr.persuasion * 7) / 100;
@@ -153,7 +155,7 @@ export function finishTrial(w: World, c: CourtCase, now: number): void {
 // ---------------- movement ----------------
 export function startWalk(w: World, me: Person, to: Pt, now: number): void {
   const q = placeOf(w, me.id, now); const from = q ? { x: q.x, y: q.y } : to;
-  me.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * ((me.animals?.at ?? 0) > 0 ? 1.5 : 1) }; // 🐎 riders are faster
+  me.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * (me.riding && (me.animals?.at ?? 0) > 0 ? 1.5 : 1) }; // 🐎 riders are faster
 }
 export function myPos(w: World, me: Person, now: number): Pt { if (playerWalking(w, me, now)) return walkPos(me.walk!, now).pt; const q = placeOf(w, me.id, now); return q ? { x: q.x, y: q.y } : { x: 0, y: 0 }; }
 
@@ -183,7 +185,7 @@ export function dmPrompt(w: World, npc: Person, from: Person, text: string, hist
   const role = from.id === w.kayzerId ? (w.regime === 'cumhuriyet' ? 'şehrin Başkanı' : 'İmparator (Kayzer) – ona saygıyla "İmparatorum" diye hitap et') : `${PROF_LABEL[from.prof]} ${from.soylu ? '(soylu)' : ''}`;
   return {
     system: `${STYLE}\n${personaOf(w, npc)}\n${worldBrief(w)}`,
-    user: `Sana yazan: ${from.name}, ${role}. Ona hitabın: "${addressOf(w, from)}". Onunla ilişkin: ${rel > 30 ? 'dost' : rel < -30 ? 'düşman, soğuk davran' : 'tanıdık'}.\n${history.length ? `Önceki konuşma:\n${history.map((h) => `${h.from}: ${h.text}`).join('\n')}\n` : ''}${from.name}: ${text}\n${outcome ? `Bu bir istek/emir. Oyun kuralları karar verdi: ${outcome}. Cevabın bu sonuca KESİNLİKLE uygun olsun (reddettiysen karakterine uygun reddet, kabul ettiysen kabul et). Sadece kendi cevabını yaz.` : `Eğer mesaj senden bir şey yapmanı istiyorsa (bir yere git, takip et, saldır, öldür, tutukla, çal, ver, sat, satın al, çalış, oy ver, dedikodu yay, rüşvet götür, koru, git/ayrıl) bunu action olarak çıkar. Kabul edip etmemene OYUN karar verir; o yüzden iki cevap yaz. SADECE JSON döndür: {"action": null veya {"type": "go|follow|attack|kill|arrest|steal|give|sell|buy|work|vote|gossip|bribe|guard|leave", "target": "kişi adı veya 'ben'", "place": "yer adı", "item": "mal", "amount": 1, "text": "dedikodu metni"}, "reply": "istek yoksa cevabın", "reply_yes": "kabul edersen cevabın", "reply_no": "reddedersen cevabın"}`}`, json: !outcome,
+    user: `Sana yazan: ${from.name}, ${role}. Ona hitabın: "${addressOf(w, from)}". Onunla ilişkin: ${rel > 30 ? 'dost' : rel < -30 ? 'düşman, soğuk davran' : 'tanıdık'}.\n${history.length ? `Önceki konuşma:\n${history.map((h) => `${h.from}: ${h.text}`).join('\n')}\n` : ''}${from.name}: ${text}\n${outcome ? `Bu bir istek/emir. Oyun kuralları karar verdi: ${outcome}. Cevabın bu sonuca KESİNLİKLE uygun olsun (reddettiysen karakterine uygun reddet, kabul ettiysen kabul et). Sadece kendi cevabını yaz.` : `Eğer mesaj senden bir şey yapmanı istiyorsa (bir yere git, takip et, saldır, öldür, tutukla, çal, ver, sat, satın al, çalış, oy ver, dedikodu yay, rüşvet götür, koru, git/ayrıl, gizli cemiyete katıl) bunu action olarak çıkar. Kabul edip etmemene OYUN karar verir; o yüzden iki cevap yaz. SADECE JSON döndür: {"action": null veya {"type": "go|follow|attack|kill|arrest|steal|give|sell|buy|work|vote|gossip|bribe|guard|leave|join", "target": "kişi adı veya 'ben'", "place": "yer adı", "item": "mal", "amount": 1, "text": "dedikodu metni"}, "reply": "istek yoksa cevabın", "reply_yes": "kabul edersen cevabın", "reply_no": "reddedersen cevabın"}`}`, json: !outcome,
   };
 }
 export function talksPrompt(w: World, pairs: { a: Person; b: Person }[]): { system: string; user: string } {

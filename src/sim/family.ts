@@ -1,3 +1,4 @@
+import { freeSpots, houses } from './housing';
 /**
  * Marriage & family: proposals, weddings, shared household, children (only above a prosperity threshold),
  * ageing bebek → çocuk → genç → yetişkin, schooling, illness, orphans, inheritance and dynastic succession.
@@ -90,7 +91,7 @@ export function wed(w: World, a: Person, b: Person): void {
   a.relations[b.id] = 80; b.relations[a.id] = 80;
   const royal = [a, b].find((x) => x.id === w.kayzerId && w.regime === 'imparatorluk');
   if (royal) { const sp = royal === a ? b : a; sp.soylu = true; sp.home = 'saray'; royal.home = 'saray'; }
-  else { const host = a.home.startsWith('ev') || b.home === 'kisla' ? a : b; const other = host === a ? b : a; if (other.home !== 'saray') other.home = host.home; }
+  else { const host = a.home.startsWith('ev') || b.home === 'kisla' ? a : b; const other = host === a ? b : a; if (other.home !== 'saray') { if (host.home.startsWith('ev') && freeSpots(w, host.home) <= 0) { const to = houses(w).find((x) => freeSpots(w, x.id) >= 2); if (to) { host.home = to.id; other.home = to.id; } } else other.home = host.home; } }
   log(w, `${a.name} ile ${b.name} evlendi! ${royal ? 'Saray düğünü: yeni eş artık soylu ve sarayda yaşıyor.' : 'Bütün mahalle düğüne geldi.'}`, a.id);
   for (const x of w.people) if (x.home === a.home && x !== a && x !== b) x.mood = clamp(x.mood + 1);
 }

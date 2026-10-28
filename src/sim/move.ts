@@ -102,7 +102,10 @@ export function actionNeed(w: World, me: Person, a: Action): Need {
     case 'caravanBuy': return B([...MARKET_IDS(w), 'liman'], 'pazara ya da limana');
     case 'eat': return B([...MARKET_IDS(w), 'firin', 'kasaphane', 'bar', me.home], 'evinize, fırına ya da bir pazara');
     case 'askida': return B(['firin'], 'Fırın’a');
-    case 'buyFarm': case 'buyAnimal': return B(['ciftlik'], 'Buğday Tarlaları’na (hayvan tüccarı)');
+    case 'buyHome': case 'rentHome': return B([a.houseId], 'eve');
+    case 'goHome': return me.home ? B([me.home], 'evinize') : null;
+    case 'buyFarm': case 'buyAnimal': return B(['hayvan'], 'Hayvan Pazarı’na');
+    case 'buildBarn': case 'feedAnimals': case 'collectFarm': case 'slaughter': return B(['ciftlik'], 'çiftliğinize (Buğday Tarlaları)');
     case 'grantTitle': case 'stripTitle': case 'assignSpy': case 'warrant': case 'raidOrg': case 'informantPay': return B(['saray'], 'Saray’a');
     case 'searchHouse': { const t = w.people.find((p) => p.id === a.personId); return t ? B([t.home], 'şüphelinin evine') : null; }
     case 'drinkWater': return B(['kuyu', 'gida', 'pazar', me.home], 'kuyuya, evinize ya da pazara');

@@ -18,19 +18,12 @@ export const FACTIONS: Faction[] = [
   { id: 'esnaf', name: 'Esnaf Birliği', ideology: 'esnaf', leaderId: null, color: '#c9a227' },
   { id: 'halk', name: 'Halk Fırkası', ideology: 'halkci', leaderId: null, color: '#c8483a' },
 ];
-export const SEATS: Omit<Seat, 'holder'>[] = [
-  { id: 'batı', label: 'Batı Mahallesi', kind: 'bolge', key: 'bati' },
-  { id: 'merkez', label: 'Çarşı (Merkez)', kind: 'bolge', key: 'merkez' },
-  { id: 'doğu', label: 'Doğu Mahallesi', kind: 'bolge', key: 'dogu' },
-  { id: 'liman', label: 'Liman Mahallesi', kind: 'bolge', key: 'liman' },
-  { id: 'esnaf', label: 'Esnaf Sandalyesi', kind: 'meslek', key: 'esnaf' },
-  { id: 'devlet', label: 'Devlet Memurları', kind: 'meslek', key: 'devlet' },
-  { id: 'emekci', label: 'Emekçiler', kind: 'meslek', key: 'emekci' },
-];
+export const SEAT_COUNT = 16;
+export const SEATS: Omit<Seat, 'holder'>[] = Array.from({ length: SEAT_COUNT }, (_, i) => ({ id: `mv${i + 1}`, label: `Milletvekili ${i + 1}`, kind: 'genel' as const, key: 'genel' }));
 export const BILL_LABEL: Record<BillKind, string> = {
   ozel: 'Özel kanun (serbest)',
   vergi: 'Vergi', fiyat: 'Narh (fiyat)', maas: 'Maaş', butce: 'Bütçe', kanun: 'Kanun', insaat: 'İnşaat', af: 'Genel af',
-  gensoru: 'Gensoru', sorusturma: 'Soruşturma komisyonu', dokunulmazlik: 'Dokunulmazlığın kaldırılması', azil: 'Başkan’ın azli',
+  gensoru: 'Gensoru', genelge: 'Genelge (Meclis bildirisi)', sorusturma: 'Soruşturma komisyonu', dokunulmazlik: 'Dokunulmazlığın kaldırılması', azil: 'Başkan’ın azli',
 };
 const DEBATE_DAYS = 1; const VOTE_DAYS = 1; const SANCTION_DAYS = 3;
 export const DEFAULT_BUDGET = 600; // discretionary spending per 20-day term without an approved budget
@@ -49,7 +42,7 @@ export function profGroup(p: Person): 'esnaf' | 'devlet' | 'emekci' | null {
   if (p.prof === 'hamal' || p.prof === 'insaatci' || p.prof === 'kalemsor') return 'emekci';
   return null;
 }
-const inSeat = (w: World, p: Person, s: Seat): boolean => (s.kind === 'bolge' ? districtOf(w, p) === s.key : profGroup(p) === s.key);
+export const inSeat = (w: World, p: Person, s: Seat): boolean => (s.kind === 'genel' ? true : s.kind === 'bolge' ? districtOf(w, p) === s.key : profGroup(p) === s.key);
 
 export function naturalFaction(p: Person): string {
   if (p.republic > 55 || p.plotting === 'revolution') return 'cumhuriyet';
@@ -64,33 +57,34 @@ const mlog = (w: World, text: string, personId?: string): void => {
 };
 
 /** Seat-by-seat election: district voters elect district seats, profession groups elect profession seats. */
+export const canRun = (w: World, p: Person): boolean => p.jailedDays === 0 && p.prof !== 'naip' && p.prof !== 'kayzer' && p.prof !== 'asker' && p.prof !== 'bekci' && p.id !== w.kayzerId;
+/** v1.9 at-large election for 16 seats: declared candidates (players + NPCs); every adult votes once; top 16 win. */
 export function meclisElection(w: World, playerCandidates: string[], playerVotes: Record<string, string>, npcAI: (p: Person) => boolean): string[] {
-  const winners: string[] = [];
-  for (const s of w.meclis.seats) {
-    const pool = w.people.filter((p) => inSeat(w, p, s) && p.jailedDays === 0 && p.prof !== 'naip' && p.prof !== 'kayzer' && p.id !== w.kayzerId && !winners.includes(p.id));
-    const cands = [...new Set([
-      ...playerCandidates.filter((id) => pool.some((p) => p.id === id)),
-      ...pool.filter((p) => npcAI(p) && p.ambition > 45).sort((a, b) => (b.ambition + b.money / 20) - (a.ambition + a.money / 20)).slice(0, 3).map((p) => p.id),
-    ])];
-    if (!cands.length) { s.holder = null; continue; }
-    const tally: Record<string, number> = {}; for (const c of cands) tally[c] = 0;
-    for (const v of w.people.filter((p) => inSeat(w, p, s) && p.prof !== 'naip')) {
-      const pv = playerVotes[v.id];
-      if (pv && tally[pv] !== undefined) { tally[pv] += 1; continue; }
-      let best = ''; let bs = -Infinity;
-      for (const c of cands) { const cp = findPerson(w, c)!; const sc = (v.relations[c] ?? 0) - Math.abs(v.republic - cp.republic) - Math.abs(v.loyalty - cp.loyalty) * 0.3 - Math.abs(v.din - cp.din) * 0.2 + (w.election.posters?.[c] ?? 0) * 3 + cp.rep * 0.2 + rand(w) * 30 + (c === v.id ? 50 : 0); if (sc > bs) { bs = sc; best = c; } }
-      if (best) tally[best] = (tally[best] ?? 0) + 1;
-    }
-    const win = Object.entries(tally).sort((a, b) => b[1] - a[1])[0]![0];
-    s.holder = win; winners.push(win);
+  let cands = [...new Set(playerCandidates)].filter((id) => { const p = findPerson(w, id); return p && canRun(w, p); });
+  if (cands.length < SEAT_COUNT + 4) { // too few runners: ambitious NPCs step in so the seats get filled
+    const extra = w.people.filter((p) => npcAI(p) && canRun(w, p) && !cands.includes(p.id)).sort((a, b) => (b.ambition + b.money / 20) - (a.ambition + a.money / 20)).slice(0, SEAT_COUNT + 4 - cands.length);
+    cands.push(...extra.map((p) => p.id));
   }
+  const tally: Record<string, number> = {}; for (const c of cands) tally[c] = 0;
+  for (const v of w.people.filter((p) => p.prof !== 'naip' && p.jailedDays === 0)) {
+    const pv = playerVotes[v.id]; if (pv && tally[pv] !== undefined) { tally[pv] += 1; continue; }
+    if (cands.includes(v.id) && !v.playerId) { tally[v.id] = (tally[v.id] ?? 0) + 1; continue; } // NPC candidates vote for themselves
+    if (v.playerId && !v.npc) continue; // players who didn't vote abstain
+    let best = ''; let bs = -Infinity;
+    for (const c of cands) { const cp = findPerson(w, c)!; const sc = (v.relations[c] ?? 0) * 0.6 - Math.abs(v.republic - cp.republic) * 0.5 - Math.abs(v.loyalty - cp.loyalty) * 0.25 - Math.abs(v.din - cp.din) * 0.15 + (w.election.posters?.[c] ?? 0) * 3 + (v.faction && v.faction === cp.faction ? 8 : 0) + (rand(w) - 0.5) * 12; if (sc > bs) { bs = sc; best = c; } }
+    if (best) tally[best] = (tally[best] ?? 0) + 1;
+  }
+  const ranked = Object.entries(tally).sort((a, b) => b[1] - a[1] || ((findPerson(w, b[0])?.ambition ?? 0) - (findPerson(w, a[0])?.ambition ?? 0)));
+  const winners = ranked.slice(0, SEAT_COUNT).filter(([, n]) => n > 0).map(([id]) => id);
+  w.meclis.seats = SEATS.map((s, i) => ({ ...s, holder: winners[i] ?? null }));
+  w.election.last = { day: w.day, results: ranked.slice(0, 40).map(([id, n]) => ({ id, votes: n, won: winners.includes(id) })) };
   for (const p of w.people) {
     const was = p.meclis; p.meclis = winners.includes(p.id);
-    if (p.meclis && !was) { p.immune = true; if (!p.faction) p.faction = naturalFaction(p); }
+    if (p.meclis && !was) { p.immune = true; if (!p.faction) p.faction = naturalFaction(p); if (p.playerId) log(w, `🗳 ${p.name} milletvekili seçildi! Meclis bölümü açıldı.`, p.id); }
     if (!p.meclis) p.immune = false;
   }
   electLeaders(w);
-  mlog(w, `Seçim sonuçları: ${w.meclis.seats.map((s) => `${s.label}: ${findPerson(w, s.holder)?.name ?? 'boş'}`).join(', ')}.`);
+  mlog(w, `Seçim sonuçları (${SEAT_COUNT} sandalye): ${winners.map((id) => `${findPerson(w, id)?.name} (${tally[id]})`).join(', ')}.`);
   return winners;
 }
 
@@ -114,10 +108,11 @@ export function validateBill(w: World, kind: BillKind, value: number, target: st
     case 'kanun': return w.laws.some((l) => l.id === target) ? null : 'Kanun yok.';
     case 'insaat': return value >= 100 && value <= 20000 ? null : 'İnşaat 100–20000 Dinar.';
     case 'af': return null;
-    case 'gensoru': { const p = findPerson(w, target); return p && (STATE_PROFS.includes(p.prof)) ? null : 'Gensoru sadece devlet görevlileri için.'; }
+    case 'gensoru': { const p = findPerson(w, target); return p && (STATE_PROFS.includes(p.prof) || !!p.rank) && p.id !== w.kayzerId ? null : 'Gensoru devlet görevlileri ve vezir/paşa gibi unvanlılar için.'; }
     case 'sorusturma': return findPerson(w, target) && target !== w.kayzerId ? null : 'Geçersiz kişi.';
     case 'dokunulmazlik': { const p = findPerson(w, target); return p?.meclis && p.immune ? null : 'Bu kişinin dokunulmazlığı yok.'; }
     case 'azil': return w.regime === 'cumhuriyet' && w.kayzerId ? null : 'Azil sadece cumhuriyette, Başkan için.';
+    case 'genelge': return null;
   }
 }
 
@@ -136,6 +131,7 @@ export function billTitle(w: World, kind: BillKind, value: number, target: strin
     case 'sorusturma': return `Soruşturma komisyonu: ${who}`;
     case 'dokunulmazlik': return `${who}'ın dokunulmazlığı kaldırılsın`;
     case 'azil': return `Başkan ${who} azledilsin`;
+    case 'genelge': return 'Meclis genelgesi';
   }
 }
 
@@ -169,6 +165,7 @@ export function stance(w: World, p: Person, b: Bill): number {
     case 'gensoru': s = f === 'cumhuriyetci' ? 0.6 : f === 'saltanatci' ? -0.7 : 0; if (target) s += (50 - target.honesty) / 80; break;
     case 'sorusturma': s = f === 'cumhuriyetci' ? 0.6 : f === 'saltanatci' ? -0.3 : 0.2; if (target && target.honesty < 40) s += 0.3; if (target?.id === p.id) s = -1; break;
     case 'dokunulmazlik': s = target?.id === p.id ? -1 : target?.faction === p.faction ? -0.6 : 0.3; break;
+    case 'genelge': s = (f === 'halkci' ? 0.3 : 0.1) + (p.relations[b.proposerId] ?? 0) / 150; break;
     case 'azil': { const avgMood = w.people.reduce((a, x) => a + x.mood, 0) / w.people.length; s = (50 - avgMood) / 40 + (target?.faction === p.faction ? -0.8 : 0.2); break; }
   }
   // faction discipline: follow the leader if he already voted
@@ -184,11 +181,13 @@ export function stance(w: World, p: Person, b: Bill): number {
 
 export function npcVote(w: World, p: Person, b: Bill): VoteChoice { const s = stance(w, p, b); return s > 0.15 ? 'evet' : s < -0.15 ? 'hayir' : 'cekimser'; }
 
-const SPEECH: Record<string, [string, string]> = {
-  evet: ['Bu teklif halkın yararınadır, destekliyoruz!', 'Şehir bunu bekliyor; evet diyeceğiz.'],
-  hayir: ['Bu teklif hazineyi de halkı da yorar, karşıyız!', 'Böyle bir karar şehre zarar verir.'],
-  cekimser: ['Teklifin bazı yönleri iyi, bazıları değil; düşünmeliyiz.', 'Daha fazla görüşme gerekiyor.'],
+const SPEECH: Record<string, string[]> = {
+  evet: ['Bu teklif halkın yararınadır, destekliyoruz!', 'Şehir bunu bekliyor; evet diyeceğiz.', 'Pazarda, limanda konuştuğum herkes bunu istiyor.', 'Bu adımı atmazsak tarih bizi affetmez.'],
+  hayir: ['Bu teklif hazineyi de halkı da yorar, karşıyız!', 'Böyle bir karar şehre zarar verir.', 'Bunun bedelini yine esnaf öder; hayır!', 'Aceleye getirilmiş bir teklif, reddediyoruz.'],
+  cekimser: ['Teklifin bazı yönleri iyi, bazıları değil; düşünmeliyiz.', 'Daha fazla görüşme gerekiyor.', 'Ne tam karşıyım ne tam destekçi.'],
 };
+const IDEO_LINE: Record<string, string> = { saltanatci: 'Kayzer’e ve düzene sadakat önce gelir.', cumhuriyetci: 'Halkın iradesi her şeyin üstündedir.', esnaf: 'Çarşının bereketi şehrin bereketidir.', halkci: 'Fakir fukaranın sofrasını düşünmeliyiz.' };
+export function npcSpeech(w: World, p: Person, b: Bill, v: string): string { const f = w.meclis.factions.find((x) => x.id === p.faction)?.ideology ?? 'halkci'; return `“${b.title}” hakkında: ${pick(w, SPEECH[v]!)} ${IDEO_LINE[f] ?? ''}`.trim(); }
 
 function enactable(b: Bill): boolean { return b.status === 'kabul'; }
 
@@ -208,9 +207,10 @@ export function enact(w: World, b: Bill): void {
       break;
     }
     case 'af': for (const p of w.people) p.jailedDays = 0; for (const c of w.cases) if (c.stage !== 'kapandi') { c.stage = 'kapandi'; c.verdict = 'af'; } break;
-    case 'gensoru': { const t = findPerson(w, b.target); if (t) { const old = PROF_LABEL[t.prof]; t.prof = 'hamal'; t.work = WORKPLACE.hamal; t.mood = clamp(t.mood - 20); mlog(w, `Gensoru kabul edildi: ${t.name} ${old} görevinden alındı.`, t.id); } break; }
+    case 'gensoru': { const t = findPerson(w, b.target); if (t) { const old = t.rank ? `${t.rank} unvanı ve ${PROF_LABEL[t.prof]}` : PROF_LABEL[t.prof]; t.rank = null; t.fief = null; t.prof = STATE_PROFS.includes(t.prof) ? 'hamal' : t.prof; t.work = WORKPLACE.hamal; t.mood = clamp(t.mood - 20); mlog(w, `Gensoru kabul edildi: ${t.name} ${old} görevinden alındı.`, t.id); } break; }
     case 'sorusturma': investigate(w, b.target); break;
     case 'dokunulmazlik': { const t = findPerson(w, b.target); if (t) { t.immune = false; mlog(w, `${t.name}'ın dokunulmazlığı kaldırıldı.`, t.id); } break; }
+    case 'genelge': { for (const x of w.people) x.mood = clamp(x.mood + 1); log(w, `📜 Meclis genelgesi yayımlandı: “${b.title}”.`); break; }
     case 'azil': { const t = findPerson(w, w.kayzerId); w.kayzerId = null; w.election.baskanNextDay = w.day + 1; mlog(w, `Başkan ${t?.name ?? ''} azledildi! Yarın yeni Başkanlık seçimi var.`); break; }
   }
   b.result = 'yürürlüğe girdi';
@@ -255,7 +255,7 @@ export function meclisDay(w: World, playerDecides: (p: Person) => boolean, headO
   for (const b of w.meclis.bills) {
     if (b.status === 'tartisma') {
       for (const p of ms) if (!playerDecides(p) && !b.speeches.some((s) => s.personId === p.id) && chance(w, 0.5)) {
-        const v = npcVote(w, p, b); b.speeches.push({ personId: p.id, text: pick(w, SPEECH[v]!), day: w.day });
+        const v = npcVote(w, p, b); b.speeches.push({ personId: p.id, text: npcSpeech(w, p, b, v), day: w.day });
       }
       if (w.day >= b.debateUntil) { b.status = 'oylama'; mlog(w, `“${b.title}” oylamaya açıldı.`); }
     } else if (b.status === 'oylama' && w.day >= b.voteUntil) {
@@ -265,7 +265,7 @@ export function meclisDay(w: World, playerDecides: (p: Person) => boolean, headO
       const passed = t.evet >= need && t.evet > t.hayir;
       mlog(w, `“${b.title}”: ${t.evet} evet, ${t.hayir} hayır, ${t.cekimser} çekimser → ${passed ? 'KABUL' : 'RET'}.`);
       if (!passed) { b.status = 'ret'; b.result = 'Meclis reddetti'; continue; }
-      const needsSanction = w.regime === 'imparatorluk' && b.kind !== 'sorusturma' && b.kind !== 'dokunulmazlik' && !!w.kayzerId;
+      const needsSanction = w.regime === 'imparatorluk' && b.kind !== 'sorusturma' && b.kind !== 'dokunulmazlik' && b.kind !== 'genelge' && !!w.kayzerId && !b.fromKayzer;
       if (needsSanction) { b.status = 'onay'; b.voteUntil = w.day + SANCTION_DAYS; mlog(w, `“${b.title}” Kayzer'in onayını bekliyor.`); }
       else enact(w, b);
     } else if (b.status === 'onay' && w.day > b.voteUntil) {
@@ -300,6 +300,7 @@ function npcPropose(w: World, p: Person): void {
   else if (f === 'halkci' && !w.projects.some((x) => !x.done) && w.treasury > 1500) r = propose(w, p, 'insaat', 800, '');
   else if (f === 'halkci' && w.prices.ekmek > 4.5) r = propose(w, p, 'fiyat', Math.round(BASE_PRICE.ekmek * 1.2 * 10) / 10, 'ekmek');
   else if (f === 'saltanatci' && (w.salaries.asker ?? 0) < 12) r = propose(w, p, 'maas', 12, 'asker');
+  else if (chance(w, 0.3)) r = propose(w, p, 'genelge', 0, '', pick(w, ['Kuyuların temizliği için çağrı', 'Pazarda dürüst tartı çağrısı', 'Yetimlere yardım çağrısı', 'Gece asayişi için bekçilere teşekkür', 'Kıtlığa karşı ambar çağrısı']));
   void r;
 }
 
@@ -328,4 +329,30 @@ function lawStance(w: World, p: Person, f: string, l?: LawSpec): number {
     case 'sertCeza': return f === 'saltanatci' ? 0.6 : f === 'cumhuriyetci' ? -0.6 : p.honesty < 35 ? -0.8 : 0.1;
   }
   return 0;
+}
+
+/** The Kayzer sends a tax change to the Meclis (when one sits): it takes effect only if the Meclis passes it. */
+export function kayzerBill(w: World, k: Person, kind: BillKind, value: number, target: string): Bill | string {
+  const err = validateBill(w, kind, value, target); if (err) return err;
+  if (w.meclis.bills.some((b) => b.fromKayzer && b.kind === kind && (b.status === 'tartisma' || b.status === 'oylama'))) return 'Bu konuda Meclis’te bekleyen bir teklifiniz var.';
+  const bill: Bill = { id: nextId(w, 'B'), kind, value, target, title: `Saray teklifi: ${billTitle(w, kind, value, target)}`, proposerId: k.id, day: w.day, debateUntil: w.day + DEBATE_DAYS, voteUntil: w.day + DEBATE_DAYS + VOTE_DAYS, status: 'tartisma', votes: {}, speeches: [], fromKayzer: true };
+  w.meclis.bills.push(bill); mlog(w, `Saray “${bill.title}” teklifini Meclis’e sevk etti.`, k.id); return bill;
+}
+export function foundFaction(w: World, p: Person, name: string): string {
+  if (!p.meclis) return 'Parti kurmak için milletvekili olmalısınız.'; const n = name.trim().slice(0, 30); if (n.length < 3) return 'Parti adı en az 3 harf.';
+  if (w.meclis.factions.length >= 8) return 'Çok fazla parti var.';
+  const id = `f${w.idSeq++}`; w.meclis.factions.push({ id, name: n, ideology: (p.republic > 55 ? 'cumhuriyetci' : p.loyalty > 70 ? 'saltanatci' : profGroup(p) === 'esnaf' ? 'esnaf' : 'halkci'), leaderId: p.id, color: ['#2a9d8f', '#e76f51', '#8ab17d', '#b56576'][w.meclis.factions.length % 4]! });
+  p.faction = id; mlog(w, `${p.name} yeni bir parti kurdu: ${n}.`, p.id); return `${n} kuruldu; lideri sizsiniz.`;
+}
+export function migrateMeclis16(w: World): void {
+  if (w.meclis.seats.length === SEAT_COUNT && w.meclis.seats[0]?.kind === 'genel') return;
+  const holders = w.meclis.seats.map((s) => s.holder).filter((x): x is string => !!x);
+  // A world that never held a real election still has the old appointed members: vacate them and open the first election.
+  const never = !w.election.last && w.day < 10;
+  w.meclis.seats = SEATS.map((s, i) => ({ ...s, holder: never ? null : holders[i] ?? null }));
+  if (never) {
+    for (const p of w.people) if (p.meclis) { p.meclis = false; p.immune = false; }
+    w.election.nextDay = w.day + 10; w.election.candidates = []; w.election.votes = {};
+    w.meclis.log.push({ day: w.day, text: `Atanmış Meclis dağıtıldı. İlk Meclis seçimi ${w.election.nextDay}. gün: adaylık şimdi açık.` });
+  }
 }

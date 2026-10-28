@@ -1,3 +1,5 @@
+import { orgInvite } from './realm';
+import { openCase } from './ai';
 /**
  * v1.7 chat-to-action: a player DMs an NPC with a request/order → parsed into a whitelisted Order
  * (rule parser here, or the LLM's structured JSON on the server), accepted or refused by GAME RULES
@@ -12,10 +14,10 @@ import { log } from './log';
 import { clamp } from './rng';
 import { transfer, buy, produce, marketPrice } from './economy';
 import { arrest, assault, murder, steal, rumor, isProtected, relate } from './life';
-import { placeOf } from './place';
+import { placeOf, schedulePos } from './place';
 import { doorSpot, findPath, walkEnd, WALK_SPEED, PERSON_REACH, walkPos, type Pt } from './move';
 
-export const ORDER_TYPES = ['go', 'follow', 'attack', 'kill', 'arrest', 'steal', 'give', 'sell', 'buy', 'work', 'vote', 'gossip', 'bribe', 'guard', 'leave'] as const;
+export const ORDER_TYPES = ['go', 'follow', 'attack', 'kill', 'arrest', 'steal', 'give', 'sell', 'buy', 'work', 'vote', 'gossip', 'bribe', 'guard', 'leave', 'join'] as const;
 export type OrderType = typeof ORDER_TYPES[number];
 export interface Order { type: OrderType; targetId?: string | null; place?: string | null; item?: Good | null; amount?: number; text?: string }
 export interface Task extends Order { byId: string; at: number; status: 'yolda' | 'bitti' | 'basarisiz' | 'donus'; label: string; until: number; note?: string; tries?: number; repath?: number; doneAt?: number; pay?: number }
@@ -38,7 +40,7 @@ export function orderLabel(w: World, o: Order): string {
     case 'kill': return `${t} kişisini öldürmeye gidiyor`; case 'arrest': return `${t} kişisini tutuklamaya gidiyor`; case 'steal': return `${t} kişisinden çalmaya gidiyor`;
     case 'give': return `${t}'a ${n} ${it} götürüyor`; case 'sell': return `${t}'a ${n} ${it} satıyor`; case 'buy': return `Pazardan ${n} ${it} almaya gidiyor`;
     case 'work': return `${pl || 'işyerinde'} çalışmaya gidiyor`; case 'vote': return `${t}'a oy vermeye gidiyor`; case 'gossip': return `${t} hakkında dedikodu yaymaya gidiyor`;
-    case 'bribe': return `${t}'a rüşvet götürüyor`; case 'guard': return `${t} kişisini koruyor`; case 'leave': return 'evine gidiyor';
+    case 'bribe': return `${t}'a rüşvet götürüyor`; case 'guard': return `${t} kişisini koruyor`; case 'leave': return 'evine gidiyor'; case 'join': return 'cemiyete katıldı';
   }
 }
 
@@ -53,7 +55,8 @@ export function parseIntent(w: World, npc: Person, from: Person, text: string): 
   const t = low(text);
   const has = (r: RegExp): boolean => r.test(t);
   let type: OrderType | null = null;
-  if (has(/öldür|gebert|katlet|canını al|işini bitir|temizle\b/)) type = 'kill';
+  if (has(/cemiyet|örgüt|loncamıza|loncaya|tarikat|aramıza katıl|bize katıl|davet ediyorum|üye ol/) && !has(/öldür|döv/)) type = 'join';
+  else if (has(/öldür|gebert|katlet|canını al|işini bitir|temizle\b/)) type = 'kill';
   else if (has(/tutukla|yakala|zindana at|içeri at|tevkif|hapse at/)) type = 'arrest';
   else if (has(/döv|saldır|yarala|dayak at|pataka|\bvur\b|tokat/)) type = 'attack';
   else if (has(/\bçal\b|çalsana|çalıp|\bsoy\b|soysana|aşır|yürüt/)) type = 'steal';
@@ -145,7 +148,7 @@ export function orderReply(w: World, npc: Person, from: Person, o: Order, d: Dec
     const st = STATE_FORCES.includes(npc.prof) && isRuler(w, from);
     const lead = st ? `Emredersiniz ${a}!` : ['Peki ' + a + ',', 'Olur ' + a + ',', 'Tamam ' + a + ',', 'Baş üstüne ' + a + ','][npc.id.length % 4];
     const what: Record<OrderType, string> = {
-      go: `hemen ${w.buildings.find((b) => b.id === o.place)?.name ?? (t?.id === from.id ? 'yanınıza' : `${tn} yanına`)} geliyorum.`, follow: `${t?.id === from.id ? 'peşinizden' : tn + ' peşinden'} ayrılmam.`,
+      join: 'cemiyetinize katılıyorum.', go: `hemen ${w.buildings.find((b) => b.id === o.place)?.name ?? (t?.id === from.id ? 'yanınıza' : `${tn} yanına`)} geliyorum.`, follow: `${t?.id === from.id ? 'peşinizden' : tn + ' peşinden'} ayrılmam.`,
       attack: `${tn}'a gereken dersi vereceğim.`, kill: `${tn}… iş bu gün bitecek. Kimse bilmeyecek.`, arrest: `${tn} şimdi zindanı boylar.`,
       steal: `${tn}'ın kesesi hafifleyecek, kimseye çaktırmam.`, give: `${o.amount} ${it} getiriyorum.`, sell: `${o.amount} ${it}, ${Math.round(marketPrice(w, o.item!) * (o.amount ?? 1))} Dinar. Geliyorum.`,
       buy: `pazardan ${o.amount} ${it} alıp getiririm.`, work: `işbaşı yapıyorum.`, vote: `oyum ${tn}'a.`, gossip: `${tn} hakkında söyleneceği herkes duyacak.`,
@@ -220,6 +223,12 @@ export function handleOrder(w: World, from: Person, npc: Person, o: Order, text:
     rumor(w, `${npc.name}: “Kayzer bize masumları öldürtüyor!” deyip kaçtı.`, from.id, -12);
     return { reply: joins ? 'Artık yeter! Masum kanı dökmeyeceğim. Halkın yanındayım!' : 'Bu kadarı fazla… Kılıcımı bırakıyorum. Beni bir daha kışlada göremezsiniz.', d: { ok: false, code: 'firar', why: 'firar' }, o };
   }
+  if (o.type === 'join') {
+    const r = orgInvite(w, from, npc, offer); const a = hitab(w, from);
+    const reply = r.ok ? (offer > 0 ? `${offer} Dinar mı? Pekâlâ ${a}, sırrınız sırrımdır. Ben de varım.` : `Uzun zamandır böyle bir şey bekliyordum, ${a}. Sayın beni!`)
+      : r.code === 'ihbar' ? 'Ne?! Böyle işlere bulaşmam. Bunu bekçiler duyacak!' : r.code === 'zaten' ? 'Benim zaten bağlı olduğum biri var… daha fazlasını sormayın.' : r.code === 'yok' ? 'Hangi cemiyet? Ortada bir şey yok ki.' : r.code === 'asla' ? 'Asla. Başımı belaya sokmam, bir daha da açmayın bu konuyu.' : r.code === 'para' ? 'Önce kesenizi doldurun.' : `Şimdilik olmaz ${a}. Risk büyük… belki ileride, belki bir bedeli olursa.`;
+    return { reply, d: { ok: r.ok, code: r.code, why: r.text }, o };
+  }
   const d = decideOrder(w, npc, from, o, offer);
   if (d.ok) assignTask(w, npc, from, o, now, o.type === 'sell' || o.type === 'buy' ? 0 : offer);
   if (d.ok && isRuler(w, from) && cruel(w, o)) { // obeying hurts morale
@@ -263,7 +272,16 @@ export function runTasks(w: World, now: number): void {
   for (const npc of w.people) {
     const tk = npc.task; if (!tk) continue;
     if (npc.jailedDays > 0 && tk.status === 'yolda') { finish(w, npc, false, 'Yakalandım, görevi yapamadım.', now); }
-    if (tk.status !== 'yolda') { if (now - (tk.doneAt ?? now) > 30_000) { delete npc.task; delete npc.walk; } continue; }
+    if (tk.status === 'donus') { if (!npc.walk || now >= walkEnd(npc.walk) || now - (tk.doneAt ?? now) > 120_000) { delete npc.task; delete npc.walk; } continue; }
+    if (tk.status !== 'yolda') {
+      if (now - (tk.doneAt ?? now) > 6_000) { // walk back into the daily routine instead of freezing / teleporting
+        if (npc.playerId && !npc.npc) { delete npc.task; continue; }
+        const from = npc.walk ? walkPos(npc.walk, now).pt : placeOf(w, npc.id, now) ?? { x: 0, y: 0 };
+        let to = schedulePos(w, npc, now); const eta = (Math.abs(to.x - from.x) + Math.abs(to.y - from.y)) / (WALK_SPEED * 0.8) * 1000; to = schedulePos(w, npc, now + eta);
+        tk.status = 'donus'; npc.walk = { path: findPath(w, from, to), t0: now, speed: WALK_SPEED * 0.8 };
+      }
+      continue;
+    }
     if (now > tk.until) { if (tk.type === 'follow' || tk.type === 'guard') finish(w, npc, true, tk.type === 'follow' ? 'Takibi bitirdim.' : 'Nöbetim bitti.', now); else finish(w, npc, false, 'Vaktinde yapamadım.', now); continue; }
     if (!npc.walk) { const to = targetPt(w, tk, now, npc); if (to) walkFrom(w, npc, to, now); else { finish(w, npc, false, 'Yeri bulamadım.', now); continue; } }
     const moving = tk.type === 'follow' || tk.type === 'guard' || !!(tk.targetId && ['attack', 'kill', 'steal', 'arrest', 'give', 'sell', 'bribe', 'go'].includes(tk.type));
@@ -298,6 +316,6 @@ export function revealOrder(w: World, criminal: Person): void {
   } else {
     rumor(w, `${criminal.name}: “${victim} işini bana ${by.name} yaptırdı!”`, by.id, -15);
     log(w, `🗣 ${criminal.name}, ${victim} olayının azmettiricisi olarak ${by.name}'ı gösterdi.`, by.id);
-    if (o.crime === 'cinayet' || o.crime === 'saldiri') { by.jailedDays = Math.max(by.jailedDays, 0); w.cases.push({ id: `C${w.cases.length + 1}-${by.id}`, accusedId: by.id, crime: o.crime, victimId: o.victimId, amount: 0, evidence: 55, stage: 'savci', day: w.day, deadline: w.day + 1 }); }
+    if (o.crime === 'cinayet' || o.crime === 'saldiri') { by.jailedDays = Math.max(by.jailedDays, 0); openCase(w, by.id, o.crime, o.victimId, 0, 55); }
   }
 }

@@ -16,6 +16,7 @@
   "license": "ISC",
   "type": "module",
   "devDependencies": {
+    "@iconify-json/game-icons": "^1.2.4",
     "@types/node": "^26.6.5",
     "esbuild": "^0.28.2",
     "puppeteer-core": "^24.43.1",

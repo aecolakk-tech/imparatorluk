@@ -61,16 +61,54 @@ function scheduled(w: World, p: Person, now: number, ctx: Ctx): Placed {
   else if (p.prof === 'bekci' && (bekciShift(p) === 'gece') === night) { const k = (now / 50000 + (h % 10) / 10) % 1; const route2 = night ? [{ x: 6, y: 29.5 }, { x: 80, y: 29.5 }, { x: 80, y: 35.5 }, { x: 6, y: 35.5 }, { x: 6, y: 29.5 }] : [{ x: 30, y: 20.5 }, { x: 80, y: 20.5 }, { x: 80, y: 29.5 }, { x: 30, y: 29.5 }, { x: 30, y: 20.5 }]; pos = along(route2, k); moving = true; }
   else if (p.prof === 'bekci' && false) { const k = (now / 50000 + (h % 10) / 10) % 1; pos = along([{ x: 6, y: 29.5 }, { x: 80, y: 29.5 }, { x: 80, y: 35.5 }, { x: 6, y: 35.5 }, { x: 6, y: 29.5 }], k); moving = true; }
   else if (p.nightOut && night) { const k = (now / 60000 + (h % 10) / 10) % 1; const bb = B.get('bar')!; pos = along([{ x: bb.door.x, y: bb.door.y + 0.5 }, { x: bb.door.x, y: 20.5 }, { x: 44, y: 20.5 }, { x: 44, y: 29.5 }, { x: bb.door.x, y: 29.5 }, { x: bb.door.x, y: bb.door.y + 0.5 }], k); moving = true; }
-  else if (t >= s1 && t < s2) { pos = along(route(door(home, p), door(work, p)), (t - s1) / (s2 - s1)); moving = true; }
-  else if (t >= s2 && t < s3) { pos = door(work, p); pos.x += wanderX; pos.y += wanderY; moving = walking; }
-  else if (t >= s3 && t < s4) { pos = along(route(door(work, p), door(market, p)), (t - s3) / (s4 - s3)); moving = true; }
-  else if (t >= s4 && t < s5) { pos = door(market, p); pos.x += wanderX; pos.y += wanderY; moving = walking; }
-  else if (t >= s5 && t < s6) { pos = along(route(door(market, p), door(home, p)), (t - s5) / (s6 - s5)); moving = true; }
-  else { pos = door(home, p, 0.6); visible = false; }
+  else {
+    // v1.9 human routine: home → work → lunch (kahve / pazar / kuyu / cami) → work → evening (pazar, cami, meyhane or a friend's house) → home
+    const dh = hash(p.id + ':' + w.day);
+    const lunch = p.din > 68 && dh % 3 === 0 ? 'cami' : (['kahve', market, 'kuyu', market] as const)[dh % 4]!;
+    const friend = Object.entries(p.relations).filter(([id, r]) => r > 25 && id !== p.id).sort((a, b) => b[1] - a[1])[dh % 3]?.[0];
+    const fHome = friend ? w.people.find((x) => x.id === friend)?.home : undefined;
+    const eve = p.din > 70 && dh % 2 === 0 ? 'cami' : p.din < 35 && dh % 3 === 0 && B.has('bar') ? 'bar' : fHome && fHome !== home && dh % 4 === 1 ? fHome : market;
+    const L1 = 11.8 + off * 0.6, L2 = L1 + 0.5, L3 = L2 + 0.8, L4 = L3 + 0.5;
+    const leg = (a: Pt, b: Pt, f: number): void => { pos = along(route(a, b), Math.min(1, Math.max(0, f))); moving = true; };
+    const idle = (at: Pt, r: number): void => { const s = stroll(p, now, r); pos = { x: at.x + s.dx, y: at.y + s.dy }; moving = s.moving; };
+    pos = door(home, p, 0.6);
+    if (t >= s1 && t < s2) leg(door(home, p), door(work, p), (t - s1) / (s2 - s1));
+    else if (t >= s2 && t < L1) idle(door(work, p), 1.2);
+    else if (t >= L1 && t < L2) leg(door(work, p), door(lunch, p, 2.2), (t - L1) / (L2 - L1));
+    else if (t >= L2 && t < L3) idle(door(lunch, p, 2.2), 0.9);
+    else if (t >= L3 && t < L4) leg(door(lunch, p, 2.2), door(work, p), (t - L3) / (L4 - L3));
+    else if (t >= L4 && t < s3) idle(door(work, p), 1.2);
+    else if (t >= s3 && t < s4) leg(door(work, p), door(eve, p, 2.2), (t - s3) / (s4 - s3));
+    else if (t >= s4 && t < s5) idle(door(eve, p, 2.2), eve === market ? 1.8 : 0.8);
+    else if (t >= s5 && t < s6) leg(door(eve, p, 2.2), door(home, p), (t - s5) / (s6 - s5));
+    else visible = false;
+    void wanderY; void walking;
+  }
   if (p.id === w.kayzerId || p.prof === 'naip' || (p.soylu && p.home === 'saray')) { pos = door('saray', p, 2); pos.x += wanderX * 0.7; moving = walking; visible = !night || !!p.nightOut; }
   return { p, x: pos.x, y: pos.y, moving, visible, dir: 1 };
 }
 
+/** Idle behaviour: stroll to a nearby spot, stop, look around, repeat (deterministic from time, no snapping). */
+function stroll(p: Person, now: number, r: number): { dx: number; dy: number; moving: boolean } {
+  const h = hash(p.id); const P = 14000 + (h % 9000); const ph = now / P + (h % 1000) / 1000; const k = Math.floor(ph); const f = ph - k;
+  const spot = (i: number): Pt => { const a = hash(p.id + '#' + i); return { x: ((a % 1000) / 1000 - 0.5) * 2 * r, y: (((a >> 10) % 1000) / 1000 - 0.5) * r * 0.9 }; };
+  const a = spot(k), b = spot(k + 1); const walkF = 0.3 + (h % 20) / 100; // walk part of the cycle, then stand
+  if (f < walkF) { const e = f / walkF; const s = e * e * (3 - 2 * e); return { dx: a.x + (b.x - a.x) * s, dy: a.y + (b.y - a.y) * s, moving: true }; }
+  return { dx: b.x, dy: b.y, moving: false };
+}
+/** Personal space: standing people never stack (cheap grid pass). */
+function separate(list: Placed[]): void {
+  const grid = new Map<string, Placed[]>(); const MIN = 0.62;
+  for (const q of list) { if (!q.visible) continue; const key = `${Math.floor(q.x)},${Math.floor(q.y)}`; const g = grid.get(key); if (g) g.push(q); else grid.set(key, [q]); }
+  for (const q of list) {
+    if (!q.visible || q.talking) continue; const cx = Math.floor(q.x), cy = Math.floor(q.y);
+    for (let gx = cx - 1; gx <= cx + 1; gx++) for (let gy = cy - 1; gy <= cy + 1; gy++) for (const o of grid.get(`${gx},${gy}`) ?? []) {
+      if (o === q || o.p.id < q.p.id) continue; const dx = o.x - q.x, dy = o.y - q.y; const d = Math.hypot(dx, dy);
+      if (d >= MIN) continue; const push = (MIN - d) / 2; const ux = d > 0.001 ? dx / d : ((hash(q.p.id) % 2) ? 1 : -1), uy = d > 0.001 ? dy / d : 0.3;
+      if (!o.talking) { o.x += ux * push; o.y += uy * push * 0.6; } q.x -= ux * push; q.y -= uy * push * 0.6;
+    }
+  }
+}
 interface Ctx { t: number; night: boolean; B: Map<string, World['buildings'][number]>; door: (id: string, p: Person, spread?: number) => Pt; site?: string; festOpen: boolean }
 function mkCtx(w: World, now: number): Ctx {
   const frac = w.frozen ? 0 : Math.max(0, Math.min(0.999, (now - w.lastTickAt) / hourMs(w)));
@@ -86,6 +124,7 @@ function mkCtx(w: World, now: number): Ctx {
   return { t, night: t < 6 || t >= 21.5, B, door, site: w.projects.find((x) => !x.done && x.plot && x.paid >= 6)?.plot, festOpen: (w.festivalUntil ?? 0) >= w.day };
 }
 
+export function schedulePos(w: World, p: Person, now: number): Pt { const q = scheduled(w, p, now, mkCtx(w, now)); return { x: q.x, y: q.y }; }
 export function placePeople(w: World, now: number): Placed[] {
   const c = mkCtx(w, now);
   const zindan = c.B.get('zindan');
@@ -95,6 +134,7 @@ export function placePeople(w: World, now: number): Placed[] {
     let q: Placed;
     if (p.jailedDays > 0 && inCustody(w, p) && c.B.get('mahkeme')) { const m = c.B.get('mahkeme')!; q = { p, x: m.door.x + 1.6 + (hash(p.id) % 3) * 0.5, y: m.door.y + 1.1, moving: false, visible: true, dir: -1 }; }
     else if (p.jailedDays > 0 && zindan) { const i = jailed.indexOf(p); const cols = Math.max(1, zindan.w - 1); q = { p, x: zindan.x + 0.8 + (i % cols), y: zindan.y + zindan.h - 0.6 - Math.floor(i / cols) * 0.5, moving: false, visible: true, dir: 1 }; }
+    else if (p.playerId && (p.homeUntil ?? 0) > now && c.B.get(p.home)) { const hb = c.B.get(p.home)!; q = { p, x: hb.door.x + 0.5, y: hb.door.y + 0.4, moving: false, visible: false, dir: 1 }; }
     else if (playerWalking(w, p, now)) { const r = walkPos(p.walk!, now); q = { p, x: r.pt.x, y: r.pt.y, moving: r.moving, visible: true, dir: r.dir }; }
     else q = scheduled(w, p, now, c);
     if (p.exiledDays > 0) q.visible = false;
@@ -138,7 +178,7 @@ export function placePeople(w: World, now: number): Placed[] {
     const put = (id: string | null, dx: number): void => { const q = id ? out.get(id) : undefined; if (q && !playerWalking(w, q.p, now)) { q.x = mh.door.x + 0.5 + dx; q.y = mh.door.y + 0.8; q.visible = true; q.moving = false; } };
     put(cs.accusedId, 0); put(cs.trial.judgeId, -1.2); put(cs.trial.prosecutorId, 1.2);
   }
-  return [...out.values()];
+  const all = [...out.values()]; separate(all.filter((q) => !q.p.playerId && !playerWalking(w, q.p, now))); return all;
 }
 
 /** Arrested but not yet sentenced: held at the courthouse (nezarethane), not in the zindan. */

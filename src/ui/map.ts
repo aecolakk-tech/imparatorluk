@@ -4,6 +4,8 @@ import { MAP_H, MAP_W } from '../sim/constants';
 import { electionPhase } from '../sim/tick';
 import { ROADS_X, ROADS_Y } from '../sim/world';
 import { shade, spriteFor } from './sprites';
+import { drawIcon } from './icons';
+import { animalSprite, animalSize, placeAnimals, isRiding } from './animals';
 
 export const T = 16;
 
@@ -92,6 +94,13 @@ function drawBuilding(g: CanvasRenderingContext2D, b: Building): void {
     for (let yy = 0; yy < b.h; yy += 1) { g.fillStyle = yy % 2 ? '#c8a840' : '#a88a30'; g.fillRect(X, Y + yy * T, W, T); g.fillStyle = '#e0c860'; for (let xx = 2; xx < W; xx += 6) g.fillRect(X + xx, Y + yy * T + 3, 2, 8); }
     g.strokeStyle = '#6a4a2a'; g.lineWidth = 2; g.strokeRect(X, Y, W, H); return;
   }
+  if (b.kind === 'hayvan') { // fenced pen + barn
+    g.fillStyle = '#8fa85a'; g.fillRect(X, Y, W, H); g.fillStyle = '#a4b86a'; for (let i = 0; i < 40; i += 1) { const hh = hash(b.id + i); g.fillRect(X + (hh % W), Y + ((hh >> 8) % H), 2, 2); }
+    g.fillStyle = '#c9a36a'; g.fillRect(X + W - 3 * T, Y + 2, 3 * T - 2, 2 * T); g.fillStyle = '#9a3a2a'; g.fillRect(X + W - 3 * T - 2, Y - 6, 3 * T + 2, 12); g.fillStyle = '#5a3a1a'; g.fillRect(X + W - 2 * T, Y + T, 12, T + 2);
+    g.fillStyle = '#e8d8a8'; g.fillRect(X + 4, Y + H - 10, 22, 6); // trough
+    g.fillStyle = '#7a5230'; for (let i = 0; i <= W; i += 8) { g.fillRect(X + i - 1, Y, 3, 6); g.fillRect(X + i - 1, Y + H - 6, 3, 6); } for (let j = 0; j <= H; j += 8) { g.fillRect(X, Y + j - 1, 4, 3); g.fillRect(X + W - 4, Y + j - 1, 4, 3); }
+    g.fillRect(X, Y + 2, W, 2); g.fillRect(X, Y + H - 4, W / 2 - 8, 2); g.fillRect(X + W / 2 + 8, Y + H - 4, W / 2 - 8, 2); g.fillRect(X, Y, 2, H); g.fillRect(X + W - 2, Y, 2, H); return;
+  }
   if (b.kind === 'arsa') {
     g.fillStyle = '#9a8a6a'; g.fillRect(X, Y, W, H); g.fillStyle = '#7a6a4a'; for (let i = 0; i < 30; i += 1) { const hh = hash(b.id + i); g.fillRect(X + (hh % W), Y + ((hh >> 8) % H), 3, 2); }
     g.fillStyle = '#e0e0d0'; for (const [cx, cy] of [[X, Y], [X + W - 3, Y], [X, Y + H - 3], [X + W - 3, Y + H - 3]] as const) g.fillRect(cx, cy, 3, 3);
@@ -137,6 +146,8 @@ import { TALK_MS, type Placed } from '../sim/place';
 import type { Corpse } from '../sim/types';
 const findPersonLite = (w: World, id: string | undefined): Person | undefined => (id ? w.people.find((p) => p.id === id) : undefined);
 export const SPRITE_SCALE = 1.4;
+/** Tap marker: an expanding ring where the player tapped. */
+export const tapFx = { x: 0, y: 0, t: 0 };
 /** The Meydan election notice board (tile coords). */
 export const SIGN = { x: 28.6, y: 21.2 };
 
@@ -155,7 +166,15 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
   drawSign(ctx, w, cam, z, now);
   // corpses: blood pool + body lying on the ground
   for (const co of w.corpses ?? []) drawCorpse(ctx, co, cam, z, sz, now);
+  if (tapFx.t && performance.now() - tapFx.t < 550) { const k = (performance.now() - tapFx.t) / 550; const tx = (tapFx.x - cam.x) * z, ty = (tapFx.y - cam.y) * z; ctx.strokeStyle = `rgba(255,240,160,${1 - k})`; ctx.lineWidth = 3 * (1 - k) + 1; ctx.beginPath(); ctx.ellipse(tx, ty, sz * (0.2 + k * 0.7), sz * (0.09 + k * 0.32), 0, 0, Math.PI * 2); ctx.stroke(); }
   if (target) { const tx = (target.x - cam.x) * z, ty = (target.y - cam.y) * z; ctx.strokeStyle = 'rgba(255,240,120,0.9)'; ctx.lineWidth = 2; const r0 = sz * (0.25 + 0.08 * Math.sin(now / 150)); ctx.beginPath(); ctx.ellipse(tx, ty, r0, r0 * 0.45, 0, 0, Math.PI * 2); ctx.stroke(); }
+  // animals (visual only)
+  for (const a of placeAnimals(w, now).sort((p, q) => p.y - q.y)) {
+    const s = Math.round(sz * animalSize(a.kind)); const sx = (a.x - cam.x) * z, sy = (a.y - cam.y) * z;
+    if (sx < -s || sy < -s || sx > cw + s || sy > ch + s) continue;
+    const img = animalSprite(a.kind, a.moving ? Math.floor(now / 260 + a.x * 5) % 2 : 0);
+    if (a.dir < 0) { ctx.save(); ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); ctx.drawImage(img, Math.round(-s / 2), Math.round(sy - s), s, s); ctx.restore(); } else ctx.drawImage(img, Math.round(sx - s / 2), Math.round(sy - s), s, s);
+  }
   // people sorted by y
   const vis = placed.filter((q) => q.visible).sort((a, b) => a.y - b.y);
   for (const q of vis) {
@@ -166,8 +185,13 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
       ctx.fillStyle = q.p.id === selected ? 'rgba(255,230,80,0.55)' : 'rgba(120,200,255,0.5)';
       ctx.beginPath(); ctx.ellipse(sx, sy, sz * 0.45, sz * 0.18, 0, 0, Math.PI * 2); ctx.fill();
     }
-    if (q.dir < 0) { ctx.save(); ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); ctx.drawImage(fr[f]!, Math.round(-sz / 2), Math.round(sy - sz), sz, sz); ctx.restore(); }
-    else ctx.drawImage(fr[f]!, Math.round(sx - sz / 2), Math.round(sy - sz), sz, sz);
+    const ride = isRiding(q.p); const lift = ride ? sz * 0.42 : 0;
+    if (ride) { const hs = Math.round(sz * 1.25); const hi = animalSprite('at', q.moving ? Math.floor(now / 160 + q.x * 3) % 2 : 0); if (q.dir < 0) { ctx.save(); ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); ctx.drawImage(hi, Math.round(-hs / 2), Math.round(sy - hs), hs, hs); ctx.restore(); } else ctx.drawImage(hi, Math.round(sx - hs / 2), Math.round(sy - hs), hs, hs); }
+    const pf = ride ? 0 : f; // seated rider: no leg swing
+    if (ride) { ctx.save(); ctx.beginPath(); ctx.rect(sx - sz, sy - sz - lift - 2, sz * 2, sz * 0.78); ctx.clip(); } // legs hidden behind the horse's flank
+    if (q.dir < 0) { ctx.save(); ctx.translate(Math.round(sx), 0); ctx.scale(-1, 1); ctx.drawImage(fr[pf]!, Math.round(-sz / 2), Math.round(sy - sz - lift), sz, sz); ctx.restore(); }
+    else ctx.drawImage(fr[pf]!, Math.round(sx - sz / 2), Math.round(sy - sz - lift), sz, sz);
+    if (ride) ctx.restore();
     if (q.p.id === myPersonId) { ctx.fillStyle = '#7fd0ff'; ctx.beginPath(); ctx.moveTo(sx - 5, sy - sz - 10); ctx.lineTo(sx + 5, sy - sz - 10); ctx.lineTo(sx, sy - sz - 3); ctx.fill(); }
   }
   // children: small sprites near home during the day
@@ -179,14 +203,14 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
       const sx = (x - cam.x) * z, sy = (y - cam.y) * z; if (sx < -cs || sy < -cs || sx > cw + cs || sy > ch + cs) continue;
       const pseudo = { id: c.id, prof: 'hamal', female: c.female, hairColor: c.hairColor, skin: c.skin, shirt: c.shirt } as unknown as Person;
       ctx.drawImage(spriteFor(pseudo)[Math.floor(now / 260 + hh) % 2]!, Math.round(sx - cs / 2), Math.round(sy - cs), cs, cs);
-      if (c.sick > 0) { ctx.font = `${Math.round(cs * 0.6)}px system-ui`; ctx.fillText('🤒', sx, sy - cs - 4); }
+      if (c.sick > 0) drawIcon(ctx, 'doctor', sx, sy - cs - 6, cs * 0.55, '#ff7a6a');
     }
   }
   // isyan: occupied buildings
   if (w.isyan) for (const id of w.isyan.occupied) {
     const b = w.buildings.find((x) => x.id === id); if (!b) continue;
     ctx.fillStyle = 'rgba(200,30,30,0.28)'; ctx.fillRect((b.x - cam.x) * z, (b.y - cam.y) * z, b.w * z, b.h * z);
-    ctx.font = `${Math.round(sz * 0.9)}px system-ui`; ctx.textAlign = 'center'; ctx.fillText('🚩', (b.x + b.w / 2 - cam.x) * z, (b.y - cam.y) * z + sz * 0.6 + Math.sin(now / 250) * 3);
+    drawIcon(ctx, 'banner', (b.x + b.w / 2 - cam.x) * z, (b.y - cam.y) * z + sz * 0.6 + Math.sin(now / 250) * 3, sz * 0.9, '#ff6a5a');
   }
   // night overlay
   seasonFx(ctx, w, now, cw, ch, dark === 0 && w.people.length > 0);
@@ -198,7 +222,8 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
     if (b.kind === 'ev' && cam.z < 2.2) continue;
     const sx = (b.x + b.w / 2 - cam.x) * z, sy = (b.y - cam.y) * z - fs * 0.9;
     if (sx < -200 || sy < -40 || sx > cw + 200 || sy > ch + 40) continue;
-    const label = b.kind === 'ev' ? '🏠' : b.name;
+    if (b.kind === 'ev') { drawIcon(ctx, 'house', sx, sy, fs * 1.5); continue; }
+    const label = b.name;
     const tw = ctx.measureText(label).width + 10;
     ctx.fillStyle = 'rgba(20,14,8,0.78)'; ctx.fillRect(sx - tw / 2, sy - fs * 0.75, tw, fs * 1.5);
     ctx.fillStyle = b.market ? '#ffd76a' : '#ffffff'; ctx.fillText(label, sx, sy);
@@ -223,19 +248,21 @@ export function drawFrame(ctx: CanvasRenderingContext2D, stat: HTMLCanvasElement
     if (!tk.at || now < tk.at + 5000 || now > tk.at + TALK_MS) continue;
     const lines = tk.lines?.length ? tk.lines : [tk.text]; const k = Math.floor((now - tk.at - 5000) / 9000); if (k >= lines.length * 2) continue;
     const li = k % lines.length; const q = byId.get(li % 2 === 0 ? tk.a : tk.b); if (!q) continue;
-    bubble(ctx, (q.x - cam.x) * z, (q.y - cam.y) * z - sz - 8, lines[li]!, cw);
+    const bx = (q.x - cam.x) * z, by = (q.y - cam.y) * z - sz - 8; const age = (now - tk.at - 5000) % 9000; const e = Math.min(1, age / 220); const sc = 0.6 + 0.4 * (1 - (1 - e) * (1 - e)) + (e < 1 ? 0 : 0);
+    if (sc < 1) { ctx.save(); ctx.translate(bx, by); ctx.scale(sc, sc); ctx.translate(-bx, -by); ctx.globalAlpha = e; bubble(ctx, bx, by, lines[li]!, cw); ctx.restore(); } else bubble(ctx, bx, by, lines[li]!, cw);
   }
   // festival flags, campaign posters, construction at a plot
   const fb = w.buildings.find((x) => x.id === 'festival');
-  if (fb && (w.festivalUntil ?? 0) >= w.day) { ctx.font = `${Math.round(fs * 1.4)}px system-ui`; for (let i = 0; i < 5; i += 1) ctx.fillText(['🎉', '🎊', '🏮', '🎶', '🎉'][i]!, (fb.x + 1 + i * (fb.w - 2) / 4 - cam.x) * z, (fb.y - cam.y) * z + Math.sin(now / 300 + i) * 4); }
-  if (electionPhase(w).phase === 'propaganda') { const mb = w.buildings.find((x) => x.id === 'pazar'); if (mb) { ctx.font = `${Math.round(fs * 1.2)}px system-ui`; const n = Math.min(8, Object.values(w.election.posters ?? {}).reduce((a, b) => a + b, 0)); for (let i = 0; i < n; i += 1) ctx.fillText('📜', (mb.x + 0.5 + i * 1.4 - cam.x) * z, (mb.y - cam.y) * z - 6); } }
-  for (const pr of w.projects.filter((x) => !x.done && x.plot)) { const b = w.buildings.find((x) => x.id === pr.plot); if (!b) continue; ctx.font = `${Math.round(fs * 1.4)}px system-ui`; ctx.fillText('🏗', (b.x + b.w / 2 - cam.x) * z, (b.y + b.h / 2 - cam.y) * z + Math.sin(now / 400) * 3); }
+  if (fb && (w.festivalUntil ?? 0) >= w.day) { for (let i = 0; i < 5; i += 1) drawIcon(ctx, i % 2 ? 'music' : 'party', (fb.x + 1 + i * (fb.w - 2) / 4 - cam.x) * z, (fb.y - cam.y) * z + Math.sin(now / 300 + i) * 4, fs * 1.6); }
+  if (electionPhase(w).phase === 'propaganda') { const mb = w.buildings.find((x) => x.id === 'pazar'); if (mb) { const n = Math.min(8, Object.values(w.election.posters ?? {}).reduce((a, b) => a + b, 0)); for (let i = 0; i < n; i += 1) drawIcon(ctx, 'scroll', (mb.x + 0.5 + i * 1.4 - cam.x) * z, (mb.y - cam.y) * z - 6, fs * 1.4); } }
+  for (const pr of w.projects.filter((x) => !x.done && x.plot)) { const b = w.buildings.find((x) => x.id === pr.plot); if (!b) continue; drawIcon(ctx, 'hammer', (b.x + b.w / 2 - cam.x) * z, (b.y + b.h / 2 - cam.y) * z + Math.sin(now / 400) * 3, fs * 1.8); }
   // event markers (last 2 game hours)
   for (const e of w.events.slice(-12)) {
     if (e.x === undefined || e.y === undefined || e.day !== w.day || w.hour - e.hour > 2) continue;
     const sx = (e.x - cam.x) * z, sy = (e.y - cam.y) * z;
     const bounce = Math.sin(now / 200) * 4;
-    ctx.font = `${Math.round(fs * 1.6)}px system-ui`; ctx.fillText(e.text.includes('soyuldu') || e.text.includes('yakaladı') ? '🚨' : e.text.includes('saldırdı') ? '🤕' : e.text.includes('CİNAYET') ? '💀' : e.text.includes('kervan') || e.text.includes('gemisi') ? '🐪' : e.text.includes('KURAKLIK') || e.text.includes('SALGIN') || e.text.includes('SEL') ? '⚠️' : e.text.includes('protesto') ? '✊' : e.text.includes('evlendi') ? '💍' : e.text.includes('doğdu') ? '👶' : e.text.includes('İSYAN') ? '🔥' : e.text.includes('dilekçe') ? '📜' : '❗', sx, sy - 30 + bounce);
+    const t = e.text; const name = t.includes('soyuldu') || t.includes('yakaladı') ? 'cuffs' : t.includes('saldırdı') ? 'wound' : t.includes('CİNAYET') ? 'skull' : t.includes('kervan') || t.includes('gemisi') ? 'camel' : t.includes('KURAKLIK') || t.includes('SALGIN') || t.includes('SEL') ? 'info' : t.includes('protesto') ? 'megaphone' : t.includes('evlendi') ? 'ring' : t.includes('doğdu') ? 'baby' : t.includes('İSYAN') ? 'fire' : t.includes('dilekçe') ? 'scroll' : 'info';
+    drawIcon(ctx, name, sx, sy - 30 + bounce, fs * 2, name === 'skull' || name === 'fire' || name === 'wound' ? '#ff7a6a' : '#f3d27a');
   }
 }
 
@@ -264,7 +291,7 @@ function drawSign(ctx: CanvasRenderingContext2D, w: World, cam: Camera, z: numbe
   ctx.fillStyle = '#b8894a'; ctx.fillRect(sx - 6 * s, sy - 20 * s, 40 * s, 22 * s); ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 2 * s; ctx.strokeRect(sx - 6 * s, sy - 20 * s, 40 * s, 22 * s);
   ctx.fillStyle = '#f4ecd8'; ctx.fillRect(sx - 3 * s, sy - 17 * s, 34 * s, 16 * s);
   ctx.fillStyle = '#3a2a10'; ctx.font = `bold ${Math.max(7, 5 * s)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const ph = electionPhase(w).phase; ctx.fillText('🗳 SEÇİM', sx + 14 * s, sy - 12 * s); ctx.font = `${Math.max(6, 4 * s)}px system-ui`;
+  const ph = electionPhase(w).phase; ctx.fillText('SEÇİM', sx + 14 * s, sy - 12 * s); ctx.font = `${Math.max(6, 4 * s)}px system-ui`;
   ctx.fillText(ph === 'bekleme' ? `${w.election.nextDay}. gün` : ph === 'aday' ? 'ADAYLIK' : ph === 'propaganda' ? 'PROPAGANDA' : 'BUGÜN!', sx + 14 * s, sy - 5 * s);
   if (ph !== 'bekleme') { ctx.fillStyle = 'rgba(255,220,80,0.9)'; ctx.beginPath(); ctx.arc(sx + 32 * s, sy - 20 * s, (3 + Math.sin(now / 200)) * s, 0, Math.PI * 2); ctx.fill(); }
 }
