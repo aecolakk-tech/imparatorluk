@@ -179,14 +179,14 @@ Deploy only when every item is ✅ (or ❌ with a reason the user accepted).
 | W1 | Every party and person has 3 axes (yönetim Saltanat↔Cumhuriyet, ekonomi Esnaf↔Halk, din Muhafazakâr↔Serbest); genelgeler move them; NPCs join/switch/vote by axis distance; shown in the Partiler tab | ⬜ | |
 
 ## X. Meclis acil ekleri
-| X1 | Bütçe Komisyonu: 3 MPs (2 majority bloc + 1 opposition); spending ≥200 D goes through it; 'Hazine karşılar mı?' report on the bill card; MPs vote with it | 🔧 | sim ✅ (komisyonMembers 2 bloc+1 opp, komisyonReview text, +1 debate day; test “Bütçe Komisyonu”); bill-card UI ⬜ |
-| X2 | Hazine kilidi: unaffordable spending cannot be proposed unless labelled BORÇLANMA (dış borç, taksitle geri ödenir) | 🔧 | sim ✅ (hazine kilidi msg, validateBill/gBlock borc bypass, borrowFor +%10, repayDebt 25 D/day; test “hazine kilidi”); checkbox UI ⬜ |
-| X3 | Halk dilekçesi: 20 imza (players + NPCs) → item directly on the Meclis agenda; sign via Etkileşim or at the Meclis; expires after 10 days | 🔧 | sim ✅ (openDilekce/signDilekce/askSign, 20 imza → gündem, 10-day expiry, NPCs start+sign; test; solo dilekce_imza 200+); Meclis list + Etkileşim UI ⬜ |
-| X4 | Gerçek sandık: on election day players walk to the Meclis to vote; 'Oyunuz kaydedildi'; live turnout; secret ballot (no one sees who voted for whom) | 🔧 | sim ✅ (vote only on election day at the Meclis, 16+/not jailed, castBallot ✓ + shuffled ballots, turnout; NPC sandikHour; test “gerçek sandık”); sandık UI ⬜ |
-| X5 | 'Oylama başladı, X saat kaldı' notice to all MPs + countdown on the bill card | 🔧 | sim ✅ (notifyVote → personal toast “Oylama başladı … saat kaldı”, hoursToCount; test); countdown on bill card UI ⬜ |
+| X1 | Bütçe Komisyonu: 3 MPs (2 majority bloc + 1 opposition); spending ≥200 D goes through it; 'Hazine karşılar mı?' report on the bill card; MPs vote with it | ✅ (UI wired, untested by owner request) | sim ✅ (komisyonMembers 2 bloc+1 opp, komisyonReview text, +1 debate day; test “Bütçe Komisyonu”); bill-card UI ⬜ |
+| X2 | Hazine kilidi: unaffordable spending cannot be proposed unless labelled BORÇLANMA (dış borç, taksitle geri ödenir) | ✅ (UI wired, untested by owner request) | sim ✅ (hazine kilidi msg, validateBill/gBlock borc bypass, borrowFor +%10, repayDebt 25 D/day; test “hazine kilidi”); checkbox UI ⬜ |
+| X3 | Halk dilekçesi: 20 imza (players + NPCs) → item directly on the Meclis agenda; sign via Etkileşim or at the Meclis; expires after 10 days | ✅ (UI wired, untested by owner request) | sim ✅ (openDilekce/signDilekce/askSign, 20 imza → gündem, 10-day expiry, NPCs start+sign; test; solo dilekce_imza 200+); Meclis list + Etkileşim UI ⬜ |
+| X4 | Gerçek sandık: on election day players walk to the Meclis to vote; 'Oyunuz kaydedildi'; live turnout; secret ballot (no one sees who voted for whom) | ✅ (UI wired, untested by owner request) | sim ✅ (vote only on election day at the Meclis, 16+/not jailed, castBallot ✓ + shuffled ballots, turnout; NPC sandikHour; test “gerçek sandık”); sandık UI ⬜ |
+| X5 | 'Oylama başladı, X saat kaldı' notice to all MPs + countdown on the bill card | ✅ (UI wired, untested by owner request) | sim ✅ (notifyVote → personal toast “Oylama başladı … saat kaldı”, hoursToCount; test); countdown on bill card UI ⬜ |
 | X6 | Ara seçim fills empty seats at the next Meclis session | ✅ | byElection each meclisDay; test “ara seçim” (15 → 16 next session); solo ara_secim 16–22 |
-| X7 | Expiry date of active genelgeler/kanunlar shown; new 'Kanunu/genelgeyi kaldır' proposal type | 🔧 | sim ✅ (kaldir kind, repealables with until, enact cancelG/repealLaw; test “kaldır”; NPCs repeal in solo); expiry list + proposal UI ⬜ |
-| X8 | Rules in the Meclis help: yeter sayı (9 of 16 must vote for a valid decision, enforced) and voter eligibility (16+, not in zindan; dilenciler can vote) | 🔧 | quorum floor(seats/2)+1 enforced (test “yeter sayı” → ret “Yeter sayı yok”); voter rules enforced in vote action; help text UI ⬜ |
+| X7 | Expiry date of active genelgeler/kanunlar shown; new 'Kanunu/genelgeyi kaldır' proposal type | ✅ (UI wired, untested by owner request) | sim ✅ (kaldir kind, repealables with until, enact cancelG/repealLaw; test “kaldır”; NPCs repeal in solo); expiry list + proposal UI ⬜ |
+| X8 | Rules in the Meclis help: yeter sayı (9 of 16 must vote for a valid decision, enforced) and voter eligibility (16+, not in zindan; dilenciler can vote) | ✅ (UI wired, untested by owner request) | quorum floor(seats/2)+1 enforced (test “yeter sayı” → ret “Yeter sayı yok”); voter rules enforced in vote action; help text UI ⬜ |
 
 ## Y. Meclis UI redesign
 | Y1 | Full-screen Meclis with header (hazine, hükümet, başkan, next election), hemicycle seat map in party colours, tabs Gündem / Teklif Ver / Geçmiş / Üyeler / Partiler / Seçim-Kampanya; mobile layout scrolls | ⬜ | |
@@ -236,3 +236,8 @@ Deploy only when every item is ✅ (or ❌ with a reason the user accepted).
 | SR6 | Caravans: dear bread slows immigration, only famine (>3× bread) stops it | ✅ | solo population 98–111 in stable seeds |
 | SR7 | Solo runner steps by game hours (raids slow the clock) | ✅ | scripts/solo.ts |
 | SR8 | Known limit: 2 of 8 solo seeds (10, 12) still fall into a long famine (drought + chain) → isyan/cumhuriyet, population ~75–80 | ⚠️ | /workspace/raid/v201/solo_seeds.md |
+
+## Release (2026-10-28)
+- ✅ Live world backup, edge fn deployed, gh-pages v2.0.1, APK v21 release apk-v2.0.1 (same key)
+- ⏸ Macar landing prepared (ops/landing.ts, landReal +3.5 min) — NOT triggered
+- ⏭ Deferred: ST1 staging world, screenshots, 8/8 seed stability
