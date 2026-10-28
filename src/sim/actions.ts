@@ -41,7 +41,8 @@ import { nearestOwnAnimal, ANIMAL_REACH } from './herdpos';
 import { actionNeed, distToBuilding, PERSON_REACH, REACH, rules } from './move';
 import { placeOf } from './place';
 import { itibarOf } from './career';
-import { askJob, becomeTalebe, discharge, enlist, hire, hoursText, itibar, postJob, quitJob, readLesson, seferberlik, setShift, talim, teach } from './career';
+import { jobTask } from './jobtask';
+import { payDay, askJob, becomeTalebe, discharge, enlist, hire, hoursText, itibar, postJob, quitJob, readLesson, seferberlik, setShift, talim, teach } from './career';
 import { asevi, ate, din, namaz, sadaka, sifa } from './piety';
 import { addDefense, finishTrial, myPos, reportCorpse, startWalk } from './v16';
 import { MAP_H, MAP_W } from './constants';
@@ -159,6 +160,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
       const got = buy(w, me.id, a.good, Math.floor(q), Infinity, { group: grp, wholesale: grp === 'liman' }); if (got) { me.bought = me.bought ?? {}; me.bought[a.good] = (me.bought[a.good] ?? 0) + got; } return got ? ok(`${got} ${GOOD_LABEL[a.good]} aldınız.`) : no(shelf(w, a.good, grp, grp === 'liman').price === null ? `${GOOD_LABEL[a.good]} tükendi.` : 'Paranız yetmiyor.');
     }
     case 'fulfillOrder': { const e = fulfillOrder(w, me, a.orderId); if (e) return no(e); const c = (me.cs ??= {}); c.quests = (c.quests ?? 0) + 1; itibar(w, me, 2, 'sipariş teslim etti'); return ok('Sipariş teslim edildi, ödülü aldınız.'); }
+    case 'jobTask': { const r = jobTask(w, me, a.step === 'done' ? 'done' : 'start', now, payDay); return r.ok ? ok(r.msg) : no(r.msg); }
     case 'jobApply': { const j = (w.jobs ?? []).find((x) => x.id === a.jobId); if (!j) return no('Bu ilan artık yok.'); if (me.job && me.job.title === j.title) return no('Zaten bu işte çalışıyorsunuz.'); const e = hire(w, me, j); return e ? no(e) : ok(`İşe alındınız: ${j.title}. Çalışma saati ${hoursText(j)}; ${j.place === 'liman' ? 'Liman' : (w.buildings.find((b) => b.id === j.place)?.name ?? j.place)}’da olun.`); }
     case 'jobQuit': return ok(quitJob(w, me));
     case 'jobPost': { const wg = num(a.wage, 1, 50), f = num(a.from, 0, 23), t2 = num(a.to, 0, 23); if (wg === null || f === null || t2 === null || f === t2) return no('Geçersiz ilan.'); const e = postJob(w, me, filterProfanity(String(a.title ?? 'Yardımcı')), wg, Math.floor(f), Math.floor(t2)); return e ? no(e) : ok('İlanınız İş İlanı Tahtası’na asıldı.'); }

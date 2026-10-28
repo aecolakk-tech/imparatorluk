@@ -14,6 +14,7 @@ import { distToBuilding, REACH } from './move';
 import { myPos } from './v16';
 import { yearsOf } from './age';
 import { wageMul } from './market2';
+import { isSoldierJob } from './jobtask';
 
 export const MAIN: MainRank[] = ['dilenci', 'isci', 'cirak', 'usta', 'tuccar', 'esraf', 'soylu', 'danisman'];
 export const MAIN_LABEL: Record<MainRank, string> = { dilenci: 'Dilenci', isci: 'İşçi', cirak: 'Çırak', usta: 'Usta', tuccar: 'Tüccar', esraf: 'Eşraf', soylu: 'Soylu', danisman: 'Kayzer’e danışman' };
@@ -206,11 +207,11 @@ export function hire(w: World, p: Person, j: Job): string | null {
   const e = meetsReq(w, p, j); if (e) return e;
   if (p.prof === 'asker') return 'Askerken başka işte çalışamazsınız; önce terhis olun.';
   if (j.kind === 'cirak' && j.employerId === p.id) return 'Kendinize çırak olamazsınız.';
-  const job: Job = { ...j, id: nextId(w, 'J'), att: 0 };
+  const job: Job = { ...j, id: nextId(w, 'J'), att: 0, hiredDay: w.day };
   if (j.prof && j.kind !== 'cirak') { p.prof = j.prof; p.work = WORKPLACE[j.prof] ?? j.place; }
   if (j.kind === 'cirak') { p.work = j.place; cs(p).ustaId = j.employerId; }
   if (j.kind === 'gundelik') p.work = j.place;
-  p.job = job; p.unemployedDays = 0;
+  p.job = job; p.unemployedDays = 0; { const c = cs(p); c.missStreak = 0; c.offStreak = 0; } // v2.0.3: a new job starts with a clean slate (old misses fired players on their first miss)
   if (j.kind === 'oyuncu') w.jobs = (w.jobs ?? []).filter((x) => x.id !== j.id);
   log(w, `💼 ${p.name} işe girdi: ${j.title} (${hoursText(j)}, günde ${j.wage} D).`, p.id);
   return null;
@@ -246,6 +247,19 @@ const shiftLen = (j: Job): number => (j.to - j.from + 24) % 24 || 24;
 export function careerHour(w: World, now: number): void {
   for (const p of w.people) {
     const j = p.job; if (!j || !isPlayer(p)) continue;
+    if (!isSoldierJob(p, j)) { // v2.0.3: civilian jobs are paid by İş görevi (3 a day, any hour of the day)
+      if (j.hiredDay === undefined) { j.hiredDay = w.day; cs(p).missStreak = 0; } // jobs from before v2.0.3: clean slate + today is a grace day
+      if (w.hour === 0) taskDayEnd(w, p, j, w.day - 1); // online that day but < 3 tasks → a missed day
+      const on = isOnline(w, p.playerId, now, 120_000); if (on) j.onlineDay = w.day;
+      // never came online during the shift → the old "absent" rule (offStreak; 3 → the job ends), judged at the shift's end
+      if (j.attDay !== w.day && w.hour === j.from) { j.attDay = w.day; j.online = false; }
+      if (inShift(j, w.hour) && j.attDay === w.day && on) j.online = true;
+      if (w.hour === j.to % 24 && j.attDay !== undefined && (w.day === j.attDay || (j.from > j.to && w.day === j.attDay + 1))) {
+        const d = j.attDay; j.attDay = undefined;
+        if (!j.online && j.paidDay !== d && j.onlineDay !== d && j.judgedDay !== d) { j.judgedDay = d; missDay(w, p, j, false); }
+      }
+      continue;
+    }
     if (j.attDay !== w.day && w.hour === j.from) { j.att = 0; j.attDay = w.day; j.online = false; }
     if (inShift(j, w.hour) && j.attDay === w.day) {
       const on = isOnline(w, p.playerId, now, 120_000); if (on) j.online = true;
@@ -254,18 +268,33 @@ export function careerHour(w: World, now: number): void {
     if (w.hour === j.to % 24 && j.attDay !== undefined && (w.day === j.attDay || (j.from > j.to && w.day === j.attDay + 1))) endShift(w, p, j);
   }
 }
-function endShift(w: World, p: Person, j: Job): void {
-  const c = cs(p); const done = (j.att ?? 0) >= Math.ceil(shiftLen(j) / 2);
-  if (done) {
+/** v2.0.3: the end of a game day for a civilian job: 3 tasks done (paid already) or a missed day. */
+function taskDayEnd(w: World, p: Person, j: Job, day: number): void {
+  if (j.paidDay === day || (j.hiredDay ?? -1) >= day || j.judgedDay === day || j.onlineDay !== day) return; // offline days are judged at the shift's end
+  j.judgedDay = day; missDay(w, p, j, true);
+}
+/** Full day's pay: wage from the employer, +1 itibar, streaks, çırak/dilenci progress. */
+export function payDay(w: World, p: Person, j: Job): void { workedDay(w, p, j); }
+function workedDay(w: World, p: Person, j: Job): void {
+  const c = cs(p);
+  {
     c.missStreak = 0; c.offStreak = 0; c.jobDays = (c.jobDays ?? 0) + 1; c.jobStreak = (c.jobStreak ?? 0) + 1;
     if (j.wage > 0 && j.employerId !== '-') { const payer = j.employerId; if (!transfer(w, payer, p.id, j.wage, `ücret (${j.title})`)) { tell(w, p, `💸 ${findPerson(w, payer)?.name ?? 'İşvereniniz'} ücretinizi ödeyemedi; iş bitti.`); p.job = undefined; } else p.incomeToday += j.wage; }
     itibar(w, p, 1, 'tam bir iş günü');
     if (j.kind === 'cirak') { c.ustaDays = (c.ustaDays ?? 0) + 1; const u = findPerson(w, j.employerId); if (u) { u.itibar = clamp(itibarOf(u) + 0.5, 0, 100); if (isPlayer(u)) itibar(w, u, 1, `çırağınız ${p.name} bir gün çalıştı`); } if (rankOf(p) === 'isci' && c.ustaDays >= 3) promote(w, p); }
     if (rankOf(p) === 'dilenci' && (c.jobDays ?? 0) >= 2) { /* dilenci → işçi needs the dilenci goal; 2 days in a job also counts */ setRank(w, p, 'isci', '2 gün bir işte çalıştı'); }
-    j.attDay = undefined; return;
+    j.attDay = undefined;
   }
+}
+function endShift(w: World, p: Person, j: Job): void {
+  const done = (j.att ?? 0) >= Math.ceil(shiftLen(j) / 2);
+  if (done) { workedDay(w, p, j); return; }
+  missDay(w, p, j, !!j.online);
+}
+function missDay(w: World, p: Person, j: Job, online: boolean): void {
+  const c = cs(p);
   c.jobStreak = 0;
-  if (!j.online) { c.offStreak = (c.offStreak ?? 0) + 1; if (c.offStreak >= 3) { p.job = undefined; itibar(w, p, -2, 'üç gündür işe gelmedi, kovuldu'); } j.attDay = undefined; return; }
+  if (!online) { c.offStreak = (c.offStreak ?? 0) + 1; if (c.offStreak >= 3) { p.job = undefined; itibar(w, p, -2, 'üç gündür işe gelmedi, kovuldu'); } j.attDay = undefined; return; }
   c.missStreak = (c.missStreak ?? 0) + 1; itibar(w, p, -2, `işe gelmedi (${j.title})`);
   if (p.prof === 'asker') demote(w, p, 1, 'nöbeti terk etti');
   else if (c.missStreak >= 2) { p.job = undefined; itibar(w, p, -3, 'kovuldu'); tell(w, p, `🚪 İki gündür işe gelmediğiniz için ${j.title} işinden kovuldunuz.`); }

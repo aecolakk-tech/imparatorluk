@@ -1,4 +1,6 @@
 /** v2.0.1 UI: yükselme yolu (Ben tab), İş İlanı Tahtası, Kışla window, cami/okul actions. */
+import { askConfirm } from './modal';
+import { isSoldierJob, tasksToday, taskFor, TASKS_PER_DAY } from '../sim/jobtask';
 import type { Building, Person } from '../sim/types';
 import type { Ctx } from './panels';
 import { bar, h } from './dom';
@@ -32,9 +34,11 @@ export function careerBen(c: Ctx, me: Person): HTMLElement {
   const gs = goalsFor(me); const done = me.cs?.goals ?? {};
   if (gs.length) box.append(h('h3', {}, '📌 Görevler (para + itibar)'), ...gs.map((g) => { const hv = Math.round(g.have(w, me) * 10) / 10; return h('div', { class: done[g.id] ? 'card done' : 'card' }, pbar(done[g.id] ? g.need : hv, g.need, `${g.text} — ${g.money ? `${g.money} D` : ''}${g.money && g.it ? ' + ' : ''}${g.it ? `${g.it} itibar` : ''}`)); }));
   const j = me.job;
-  box.append(h('h3', {}, '💼 İşin'), j ? h('div', { class: 'card' }, h('b', {}, j.title), h('div', { class: 'muted' }, `Saat ${hoursText(j)} · ${w.buildings.find((b) => b.id === j.place)?.name ?? j.place}${j.wage ? ` · günde ${j.wage} D` : ' · kendi kazancın'}${j.attDay === w.day ? ` · bugün ${j.att ?? 0} saat buradaydın` : ''}`),
-    h('div', { class: 'muted small' }, 'Vardiyanın en az yarısında iş yerinde ol: ücret + 1 itibar. Çevrimiçiyken gelmezsen −2 itibar; 2 kez gelmeyen kovulur.'),
-    me.prof !== 'asker' ? h('button', { onclick: () => c.act({ t: 'jobQuit' }) }, '🚪 İşi bırak') : '') : h('div', { class: 'muted' }, 'İşin yok. Pazar’daki İş İlanı Tahtası’na bak ya da bir esnafa “Bir iş var mı?” diye sor.'));
+  box.append(h('h3', {}, '💼 İşin'), j ? h('div', { class: 'card' }, h('b', {}, j.title), h('div', { class: 'muted' }, `Saat ${hoursText(j)} · ${w.buildings.find((b) => b.id === j.place)?.name ?? j.place}${j.wage ? ` · günde ${j.wage} D` : ' · kendi kazancın'}${isSoldierJob(me, j) ? (j.attDay === w.day ? ` · bugün ${j.att ?? 0} saat buradaydın` : '') : ` · Bugün ${tasksToday(w, j)}/${TASKS_PER_DAY} görev`}`),
+    isSoldierJob(me, j) ? h('div', { class: 'muted small' }, 'Asker: vardiyanın en az yarısında Kışla’da ol: ücret + 1 itibar. Çevrimiçiyken gelmezsen −2 itibar ve rütbe düşer.')
+      : h('div', { class: 'muted small' }, `İş yerinde günde ${TASKS_PER_DAY} “İş görevi” yap (her biri ~20–30 sn: ${taskFor(j, me).steps.join(' → ')}). 3. görevde günlük ücret + 1 itibar hemen ödenir; hızlı bitirene bahşiş. Gün içinde çevrimiçiyken görevleri yapmazsan −2 itibar; 2 kez yapmayan kovulur.`),
+    !isSoldierJob(me, j) && tasksToday(w, j) < TASKS_PER_DAY && c.jobTask ? h('button', { class: 'primary', onclick: () => c.jobTask?.() }, `🛠 İş görevi (${tasksToday(w, j)}/${TASKS_PER_DAY})`) : '',
+    me.prof !== 'asker' ? h('button', { onclick: () => c.act({ t: 'jobQuit' }) }, '🚪 İşi bırak') : '') : h('div', { class: 'stack' }, ...((): HTMLElement[] => { const f = (me.notes ?? []).slice().reverse().find((x) => /kovuldu|iş bitti|işe gelmedi/.test(x.why)); return f && w.day - f.day <= 3 ? [h('div', { class: 'card warn' }, `🚪 Gün ${f.day} ${String(f.hour).padStart(2, '0')}:00 – ${f.why}. (Eski kural: vardiyanın yarısında iş yerinde olmak gerekiyordu; artık günde 3 İş görevi yeter.)`)] : []; })(), h('div', { class: 'muted' }, 'İşin yok. Pazar’daki İş İlanı Tahtası’na bak ya da bir esnafa “Bir iş var mı?” diye sor.')));
   return box;
 }
 
@@ -46,7 +50,7 @@ export function jobBoard(c: Ctx, _b: Building): HTMLElement {
   for (const j of jobs) {
     const why = me ? meetsReq(w, me, j) : null; const mine = me?.job?.title === j.title;
     box.append(h('div', { class: 'card row inv-row' }, h('div', { style: 'flex:1' }, h('b', {}, j.title), h('div', { class: 'muted small' }, `${j.wage ? `günde ${j.wage} D` : 'kendi kazancın'} · ${hoursText(j)} · ${w.buildings.find((b) => b.id === j.place)?.name ?? j.place} · ${reqText(j)}`)),
-      me ? h('button', { class: why ? '' : 'primary', disabled: mine, title: why ?? '', onclick: () => c.act({ t: 'jobApply', jobId: j.id }) }, mine ? 'Çalışıyorsun' : why ? 'Şart yok ✗' : 'Başvur') : ''));
+      me ? h('button', { class: why ? '' : 'primary', disabled: mine, title: why ?? '', onclick: () => { void askConfirm(`${j.title} – ${j.wage ? `günde ${j.wage} D` : 'kendi kazancın'}, ${hoursText(j)}.${me.job ? ` Şimdiki işiniz (${me.job.title}) biter.` : ''}`, 'Başvur', 'Vazgeç', 'Bu işe girilsin mi?').then((yes) => { if (yes) c.act({ t: 'jobApply', jobId: j.id }); }); } }, mine ? 'Çalışıyorsun' : why ? 'Şart yok ✗' : 'Başvur') : ''));
   }
   if (me && ['usta', 'tuccar', 'esraf', 'soylu', 'danisman'].includes(rankOf(me))) {
     const t = h('input', { value: 'Yardımcı', maxlength: '40', style: 'width:120px' }); const wg = num(4, 1, 50), f = num(8, 0, 23), to = num(14, 0, 23);

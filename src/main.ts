@@ -38,6 +38,8 @@ import { rankLabel, displayName } from './sim/career';
 import { yearsOf } from './sim/age';
 import { DAY_REAL_MIN } from './sim/constants';
 import { isGhostClick, invisibleBox, staleFlag } from './ui/guard';
+import { openJobTask } from './ui/jobtask';
+import { isSoldierJob, tasksToday, taskFor, TASKS_PER_DAY } from './sim/jobtask';
 import { ambience, installClickSounds, isMuted, setMuted, sfx, musicOn, setMusic, setMusicMood, musicMood } from './ui/sound';
 import { needTarget, myPos } from './sim/v16';
 import { findPath, WALK_SPEED, walkEnd, doorSpot, distToBuilding, REACH, PERSON_REACH, type Pt } from './sim/move';
@@ -133,8 +135,23 @@ function loginScreen(): void {
 const canvas = h('canvas', { id: 'map' });
 const ctx2d = canvas.getContext('2d')!;
 
+/** v2.0.3 İş görevi: open the task window (the server checks place, timing and pays). */
+function startJobTask(): void {
+  const w0 = world; const m0 = me(); const j0 = m0?.job; const b0 = j0 ? w0?.buildings.find((x) => x.id === j0.place) : undefined; const q0 = myPlaced();
+  if (b0 && q0 && distToBuilding(b0, q0) > REACH + 1) { closeSheet(); goBuilding(b0.id); return; } // walk to work first; the panel there has the button
+  closeSheet();
+  openJobTask(() => { const w = world; const m = me(); return w && m ? { w, me: m } : null; },
+    async (a) => { const r = await actSafe(a); await tick(); rerenderSheet(); return r; }, (t) => toast(t), () => renderDock());
+}
+/** Arriving at the workplace: a one-per-day hint about İş görevi. */
+let jtHintDay = -1;
+function jobTaskHint(w: World, m: Person): void {
+  const j = m.job; if (!j || isSoldierJob(m, j) || jtHintDay === w.day || tasksToday(w, j) >= TASKS_PER_DAY) return;
+  const b = w.buildings.find((x) => x.id === j.place); const q = myPlaced(); if (!b || !q || distToBuilding(b, q) > REACH + 1) return;
+  jtHintDay = w.day; toast(`🛠 İş yerindesiniz (${b.name}). Binaya girip “İş görevi yap” – bugün ${tasksToday(w, j)}/${TASKS_PER_DAY}; 3 görev = günlük ücret.`);
+}
 function ctx(): Ctx {
-  return { w: world!, me: me(), founder: !!be.session()?.founder, act: (a) => void doAct(a), dm: (id) => { dmTarget = id; openChat(); }, openPerson: (id) => openPersonSheet(id), openCitizens: () => openCitizens(), openLook: (mode) => openLook(mode), atSaray: atSaray(), say: (id, text) => { dmTarget = id; pendingSay = text; openChat(); } };
+  return { w: world!, me: me(), founder: !!be.session()?.founder, jobTask: startJobTask, act: (a) => void doAct(a), dm: (id) => { dmTarget = id; openChat(); }, openPerson: (id) => openPersonSheet(id), openCitizens: () => openCitizens(), openLook: (mode) => openLook(mode), atSaray: atSaray(), say: (id, text) => { dmTarget = id; pendingSay = text; openChat(); } };
 }
 let pending: { a: Action; label: string; since: number; retarget: number } | null = null;
 let walkTarget: Pt | null = null;
@@ -142,11 +159,17 @@ let lowGfx = localStorage.getItem('imp-lowgfx') === '1';
 let localWalk: { walk: NonNullable<Person['walk']>; id: string } | null = null; // client-side prediction wins over older server copies
 let followCam = true; let lastMoveSent = 0; let moveTimer: ReturnType<typeof setTimeout> | null = null; let moveTo: Pt | null = null;
 function atSaray(): boolean { const w = world; const m = me(); const b = w?.buildings.find((x) => x.id === 'saray'); return !!(w && m && b && w.kayzerId === m.id && distToBuilding(b, myPos(w, m, gameNow())) <= REACH + 0.6); }
+/** v2.0.3: every action request ends within 15 s and never throws: failures come back as { ok:false, msg } so the UI can always say why. */
+function actSafe(a: Action): Promise<{ ok: boolean; msg: string }> {
+  return withTimeout(be.act(a), 15_000).then((r) => ({ ok: r.ok, msg: r.msg ?? '' })).catch((e: unknown) => { const em = String((e as Error)?.message ?? e); return { ok: false, msg: `⚠️ İşlem yapılamadı (${/zaman aşımı/.test(em) ? 'bağlantı yavaş' : em.slice(0, 80)}). Tekrar deneyin.` }; });
+}
 async function send(a: Action): Promise<void> {
   const before = me()?.money ?? 0; ownActAt = Date.now();
-  if (moveTimer && a.t !== 'move' && moveTo) { clearTimeout(moveTimer); moveTimer = null; lastMoveSent = Date.now(); await be.act({ t: 'move', x: moveTo.x, y: moveTo.y }); } // v1.9.3: a throttled move must not land AFTER the action (it pulled you out of the house)
-  const r = await be.act(a);
-  if (r.msg) toast(r.msg);
+  if (moveTimer && a.t !== 'move' && moveTo) { clearTimeout(moveTimer); moveTimer = null; lastMoveSent = Date.now(); await be.act({ t: 'move', x: moveTo.x, y: moveTo.y }).catch(() => undefined); } // v1.9.3: a throttled move must not land AFTER the action (it pulled you out of the house)
+  let r: Awaited<ReturnType<typeof be.act>>;
+  try { r = await withTimeout(be.act(a), 15_000); } // v2.0.3: a failed/hung request is never silent ("clicking did nothing")
+  catch (e) { const em = String((e as Error)?.message ?? e); r = { ok: false, msg: `⚠️ İşlem yapılamadı (${/zaman aşımı/.test(em) ? 'bağlantı yavaş' : em.slice(0, 80)}). Tekrar deneyin.` }; }
+  if (r.msg) toast(r.msg); else if (!r.ok) toast('⚠️ İşlem yapılamadı. Tekrar deneyin.');
   if (r.ok) { await tick(); const d = Math.round(((me()?.money ?? 0) - before) * 10) / 10; if (Math.abs(d) >= 0.5) floatText(`${d > 0 ? '+' : ''}${d} D`, `coin${d < 0 ? ' neg' : ''}`); else floatText('✓'); }
   if (!r.ok && r.msg) sfx('error'); else if (a.t === 'buy' || a.t === 'sell' || a.t === 'give' || a.t === 'borrow' || a.t === 'repay') sfx('coins'); else if (a.t === 'kill' && r.ok) sfx('death'); else if (a.t === 'report' && r.ok) sfx('bell');
   if (!r.ok) await tick(); rerenderSheet(false, true);
@@ -260,9 +283,9 @@ function funeralModal(w: World, pid: string): HTMLElement {
   const el = h('div', { class: 'modal funeral-modal' }, h('div', { class: 'box parchment' },
     h('h2', {}, '🕯 Vasiyet'), h('div', { class: 'msg' }, `${d.name} ${d.years} yaşında hayatını kaybetti. ${d.text}`),
     kids.length ? h('div', { class: 'stack' }, h('div', {}, 'Hangi çocuğunuzla devam edeceksiniz? Seçtiğiniz çocuk evi, sandığı ve çantayı alır; para yetişkin çocuklar arasında eşit bölündü.'),
-      ...kids.map((k) => h('button', { class: 'primary', onclick: () => { void be.act({ t: 'continueAs', childId: k.id } as never).then(done); } }, `${k.female ? '👩' : '👨'} ${k.name} – ${ageText(w, k)}, ${PROF_LABEL[k.prof]}, ${Math.round(k.money)} D`)))
+      ...kids.map((k) => h('button', { class: 'primary', onclick: () => { void actSafe({ t: 'continueAs', childId: k.id } as never).then(done); } }, `${k.female ? '👩' : '👨'} ${k.name} – ${ageText(w, k)}, ${PROF_LABEL[k.prof]}, ${Math.round(k.money)} D`)))
       : h('div', { class: 'stack' }, h('div', {}, '16 yaşını geçmiş çocuğunuz yok. Malınız eşinize (yoksa hazineye) kaldı. Aynı hesapla yeni bir karakter yaratın:'), name,
-        h('button', { class: 'primary', onclick: () => { void be.act({ t: 'newCharacter', name: name.value } as never).then(done); } }, 'Yeni karakter oluştur')),
+        h('button', { class: 'primary', onclick: () => { void actSafe({ t: 'newCharacter', name: name.value } as never).then(done); } }, 'Yeni karakter oluştur')),
     err));
   return el;
 }
@@ -321,7 +344,7 @@ function openLook(mode: 'ilk' | 'terzi' | 'berber'): void {
     if (needProfile && (!pr.surname.trim() || !pr.origin || !pr.temper)) { err.textContent = 'Lütfen soyadı, köken ve mizaç seçin.'; return; }
     const act = { t: 'customize', look: fem() ? { ...L, beard: 0 } : L, where: 'ilk', ...(needGender ? { female: !!female } : {}), ...(needProfile ? { profile: { surname: pr.surname.trim(), age: pr.age!, origin: pr.origin!, temper: pr.temper!, hard: pr.hard } } : {}) } as Action;
     const bt = e.currentTarget as HTMLButtonElement; bt.disabled = true; bt.textContent = 'Kaydediliyor…'; err.textContent = '';
-    void be.act(act).then((r) => {
+    void actSafe(act).then((r) => {
       if (!r.ok) { bt.disabled = false; bt.textContent = 'Kaydet'; err.textContent = r.msg || 'Kaydedilemedi.'; return; }
       lookSaved = true; const mm = me(); if (mm) { mm.lookSet = true; mm.genderSet = true; mm.female = fem(); mm.look = act.t === 'customize' ? act.look : L; }
       close(); toast(r.msg || 'Karakteriniz kaydedildi.'); void tick().then(() => onboarding());
@@ -459,6 +482,7 @@ function openMenu(sec: Section): void {
 
 function bPanel(b: import('./sim/types').Building): HTMLElement {
   const box = buildingPanel(ctx(), b);
+  { const m = me(); const j = m?.job; if (m && j && j.place === b.id && !isSoldierJob(m, j)) { const n = tasksToday(world!, j); box.prepend(h('div', { class: 'card jt-card' }, h('b', {}, `🛠 İş görevi · bugün ${n}/${TASKS_PER_DAY}`), h('div', { class: 'muted small' }, n >= TASKS_PER_DAY ? 'Bugünün ücreti alındı. Yarın yine gelin.' : `${taskFor(j, m).steps.join(' → ')} · 3 görev = günlük ücret (${j.wage} D) + 1 itibar`), n < TASKS_PER_DAY ? h('button', { class: 'primary', onclick: startJobTask }, '🛠 İş görevi yap') : '')); } }
   if (b.id === 'saray' || b.id === 'okul') box.append(h('button', { onclick: () => openSheet(historyBody) }, '📖 Tarih Kitabı’nı oku'));
   if (b.id === 'ciftlik') box.append(farmBody());
   if (b.id === 'hayvan') box.append(animalMarketBody());
@@ -847,6 +871,7 @@ function npcTalkHalt(w: World, m: Person): void {
 function frameExtras(): void {
   const w = world; const m = me(); if (!w || !m) return;
   npcTalkHalt(w, m);
+  jobTaskHint(w, m);
   if (pendingB) { const b = w.buildings.find((x) => x.id === pendingB); const q = myPlaced(); if (!b) pendingB = null; else if (q && distToBuilding(b, q) <= REACH) { pendingB = null; openSheet(() => bPanel(b)); } }
   // name + health label above a tapped person
   if (selPerson && performance.now() < selUntil) {
@@ -1141,7 +1166,7 @@ function v2Popups(): void {
   if (anyModal()) return;
   if (!namePrompted && !w.empireName && w.kayzerId === m.id && !document.querySelector('.whatsnew')) { namePrompted = true; app.append(empireNameModal(nameSend)); }
 }
-async function nameSend(name: string): Promise<string | null> { const r = await be.act({ t: 'nameEmpire', name } as never); if (!r.ok) return r.msg; await tick(); return null; }
+async function nameSend(name: string): Promise<string | null> { const r = await actSafe({ t: 'nameEmpire', name } as never); if (!r.ok) return r.msg; await tick(); return null; }
 function trialPopup(): void {
   const w = world; const m = me(); if (!w || !m) return;
   const c: CourtCase | undefined = w.cases.find((x) => x.trial && (x.accusedId === m.id || x.trial.judgeId === m.id || x.trial.prosecutorId === m.id || x.trial.blamedId === m.id || (x.eyeIds ?? []).includes(m.id) || (x.witnesses ?? []).some((v) => v.id === m.id) || (x.called ?? []).some((v) => v.id === m.id)) && (!x.trial.done || (!trialSeen.has(tKey(x.id)) && x.stage !== 'kapandi' ? true : !trialSeen.has(tKey(x.id)) && gameNow() - (x.trial.doneAt ?? 0) < 120_000)) && !(x.trial.done && x.verdict === 'dusuruldu' && x.sentence?.startsWith('Aynı olay')));

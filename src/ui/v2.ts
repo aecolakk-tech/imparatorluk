@@ -17,7 +17,7 @@ import { assignSlot, hotbarSlots } from './controls';
 import { marketPrice } from '../sim/economy';
 
 export const APP_NAME = 'Medieval Empire';
-export const VERSION = 'v2.0.3';
+export const VERSION = 'v2.0.4';
 const EAT: Good[] = ['ekmek', 'et', 'balik', 'yumurta', 'sut', 'su'];
 
 /** 🎒 Çanta: carried weapons (draw / holster), food & water (use), and the house chest. */
@@ -100,6 +100,10 @@ export function eventOptions(kind: string, env: PopupEnv, close: () => void): HT
 export function eventTitle(kind: string): string { return `${ICON[kind] ?? '⚠'} ${TITLE[kind] ?? 'OLAY'}`; }
 
 export const WHATS_NEW: string[] = [
+  '🛠 YENİ – İş görevi: işiniz varsa iş yerinize gidin, binaya girip “İş görevi yap”a basın. 3 kısa adım (ör. meyhane: sipariş al → içki doldur → servis). Günde 3 görev = günlük ücret + 1 itibar hemen ödenir; hızlı bitirene bahşiş. Artık bütün vardiya iş yerinde beklemek gerekmiyor. Menü → İşin: “Bugün 1/3 görev”.',
+  '🧯 Bir işlem başarısız olursa artık mutlaka sebebini söyleyen bir uyarı çıkar (sessizce “hiçbir şey olmuyor” durumu kalmadı); sunucu meşgulse işlem daha çok kez denenir.',
+  '📌 “Ana ekrana ekle” bandı artık açık pencerelerin düğmelerinin üstüne çıkmıyor (Al/Başvur’a basınca o banda basılıyordu).',
+  '📋 İş ilanına başvururken onay sorulur; yeni işe başlayınca eski devamsızlıklar sıfırlanır.',
   '🛠 Donma düzeltildi: çıkış yapıp tekrar girince Menü ve düğmeler artık hep çalışıyor; görünmez bir pencere ekranı kilitleyemez, oyun 20 sn güncellenmezse kendini toparlıyor.',
   '🪟 Saray, Mahkeme ve diğer pencereler açıldığı dokunuşla kendiliğinden kapanmıyor; siz kapatana kadar açık kalıyor.',
   '⌨️ Giriş ekranında klavye açılınca form kaybolmuyor; yazdıklarınız silinmiyor.',

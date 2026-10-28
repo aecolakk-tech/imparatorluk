@@ -103,6 +103,7 @@ export interface CareerStats {
 export interface Job {
   id: string; title: string; place: string; prof?: Profession; wage: number; from: number; to: number; employerId: string; // 'saray' | 'dis' | person id
   kind: 'gundelik' | 'cirak' | 'usta' | 'devlet' | 'oyuncu' | 'kendi' | 'asker'; req?: { rank?: MainRank; itibar?: number; din?: number; literate?: boolean }; att?: number; attDay?: number; online?: boolean;
+  /** v2.0.3 İş görevi */ tasks?: number; taskDay?: number; taskAt?: number; paidDay?: number; onlineDay?: number; hiredDay?: number; judgedDay?: number;
 }
 export interface Arrest { id: string; criminalId: string; catcherId: string; crime: CrimeKind; victimId: string | null; amount: number; day: number; hour: number; offer: number; status: 'bekliyor' | 'kabul' | 'ret'; at?: number; evidence?: number; eyewitnesses?: number; basis?: string; eyeIds?: string[]; complainantId?: string | null }
 export type CrimeKind = 'hirsizlik' | 'rusvet' | 'zimmet' | 'isyan' | 'saldiri' | 'cinayet' | 'kacakcilik';
@@ -315,7 +316,7 @@ export type Action =
   | { t: 'buy'; good: Good; qty: number; market?: string }
   | { t: 'sell'; good: Good; qty: number; price: number; market?: string }
   | { t: 'fulfillOrder'; orderId: string } | { t: 'imports'; on: boolean }
-  | { t: 'jobApply'; jobId: string } | { t: 'jobQuit' } | { t: 'jobPost'; title: string; wage: number; from: number; to: number } | { t: 'askJob'; personId: string }
+  | { t: 'jobApply'; jobId: string } | { t: 'jobTask'; step: 'start' | 'done' } | { t: 'jobQuit' } | { t: 'jobPost'; title: string; wage: number; from: number; to: number } | { t: 'askJob'; personId: string }
   | { t: 'kisla'; op: 'kayit' | 'terhis' | 'talim' | 'nobet'; shift?: 'gunduz' | 'aksam' | 'gece' } | { t: 'seferberlik'; on: boolean } | { t: 'recommend'; personId: string }
   | { t: 'sadaka'; amount: number } | { t: 'asevi' } | { t: 'sifa' } | { t: 'talebe' } | { t: 'oku' } | { t: 'dersVer' }
   | { t: 'eat' }

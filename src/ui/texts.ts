@@ -1,4 +1,11 @@
 export const RULES: [string, string[]][] = [
+  ['💼 İş ve İş görevi (v2.0.3)', [
+    'İş: Pazar’daki İş İlanı Tahtası’ndan başvurun ya da bir esnafa “Bir iş var mı?” diye sorun. Menü → İşin kartı işinizi, saatlerini ve ücretini gösterir.',
+    'İş görevi: iş yerinizde (o oyun gününün herhangi bir saatinde) “🛠 İş görevi yap”. Her mesleğin kendi işi var – meyhane: sipariş al → içki doldur → masaya servis; fırın: yoğur → fırına koy → çıkar; demirci: ısıt → döv → soğut; tarla: ek → sula → hasat; hamal: yükü sırtla → taşı → teslim et; liman: halatı çöz → ağı çek → sandığa koy; terzi: ölç → kes → dik.',
+    'Her adımın çubuğu dolunca düğmeye 5 sn içinde basın (kaçırırsanız o adım yeniden dolar). Bir görev en az 15 sn sürer; 25 sn içinde bitirene müşteriden küçük bahşiş.',
+    'Günde 3 görev = günlük ücret hemen ödenir (+1 itibar, iş günü sayılır: çıraklık, dilencilikten işçiliğe geçiş). O gün çevrimiçiyken 3 görevi bitirmezseniz −2 itibar; iki kez olursa kovulursunuz. Hiç girmediğiniz günler 3 kez üst üste olursa iş biter.',
+    'Askerler bu sistemin dışındadır: vardiyanın en az yarısında Kışla’da olmak yeter (talim ayrıca rütbe kazandırır).',
+  ]],
   ['⚔ Silahlar, çanta ve sandık (v2.0)', [
     'Silahlar: Kılıç (60 D, güçlü yakın dövüş), Hançer (25 D, ucuz, hafif, zayıf), Yay (45 D, uzaktan; her atış 1 ok), Ok (1 D/adet, kılıçtan zayıf vurur), Kalkan (30 D, her darbeden 15 can keser). Sadece Demirci (Zanaat Atölyesi) sabit fiyatla satar; her silah adınıza kaydedilir.',
     'Asker ve bekçiler Kışla’dan 2 günde bir bedava kılıç + kalkan + yay + 20 ok alır.',
@@ -144,5 +151,6 @@ export const GUIDE: string[] = [
   'HAYVANLAR: Buğday Tarlaları’nın hemen batısında, yol kenarındaki çitli ağıl HAYVAN PAZARI’dır. Kendi hayvanlarınızın üstünde mavi işaret olur: ata dokununca binersiniz, inek/koyun/tavuğa dokununca “Kes” ile et alırsınız. Satılık inek, koyun, tavuk ve atlar içinde dolaşır; tarlalarda çiftçilerin sürüleri otlar. Hayvancıdan arsa ve hayvan alın, ahır/kümes kurun, besleyin; süt, yumurta, yün toplayın. Ata binince iki kat hızlı yürürsünüz.',
   'Birine dokununca adı ve canı görünür. Yanına gidip “Etkileşim”e basınca kartı açılır (o kişi siz konuşurken bekler): parasını, ihtiyaçlarını, ne düşündüğünü görürsünüz; para verebilir, mesaj atabilirsiniz.',
   'Karakteriniz her gün kendi mesleğinde otomatik çalışır. Siz çevrimiçiyken yemeyi/su içmeyi siz yaparsınız (Ye / Su iç); siz yokken yapay zekâ yiyip içer ve bunu size bildirir. Siz daha fazlasını yapabilirsiniz: ticaret, dilekçe, seçim… ya da darbe.',
+  '💼 İŞ GÖREVİ: Bir işe girince (Pazar’daki İş İlanı Tahtası) iş yerinize gidin; varınca bir ipucu çıkar. Binaya girip “🛠 İş görevi yap”a basın: 3 kısa adım (ör. fırında yoğur → fırına koy → çıkar), her adım dolunca düğmeye basın. Bir görev ~20–30 sn sürer; günde 3 görev = günlük ücret + 1 itibar hemen ödenir, hızlı bitirene bahşiş. Menü → İşin kartında “Bugün 1/3 görev” görünür. Askerler Kışla’da nöbet/talimle çalışır.',
   '📜 Gazete her günün özetini verir, 💬 Meydan’da herkesle konuşursunuz. Kurallar 📖 sayfasında. Hayırlı olsun!',
 ];

@@ -55,13 +55,15 @@ describe('v2.0.1 iş bulma', () => {
     const w = setup(); refreshJobs(w); const p = me(w); p.itibar = 5; const j = w.jobs!.find((x) => x.id === 'J-bekci')!;
     const r = act(w, 'u2', { t: 'jobApply', jobId: j.id }, T0); expect(r.ok).toBe(false); expect(r.msg).toMatch(/İtibar/);
   });
-  it('attending the shift pays the wage from the employer and gives +1 itibar; no-shows lose itibar and get fired', () => {
+  it('v2.0.3: 3 İş görevi in a day pay the wage and +1 itibar; online days without tasks lose itibar and get fired', () => {
     const w = setup(); refreshJobs(w); const p = me(w); p.itibar = 10; const j = w.jobs!.find((x) => x.id === 'J-hamal')!; act(w, 'u2', { t: 'jobApply', jobId: j.id }, T0);
-    let now = T0; goTo(w, p, 'liman', now); const m0 = p.money;
-    for (let h = 6; h <= 14; h++) { w.hour = h; now += 60_000; touchPlayer(w, 'u2', now); goTo(w, p, 'liman', now); careerHour(w, now); }
-    expect(p.money).toBeGreaterThan(m0); expect(p.itibar).toBe(11);
-    // two days online but elsewhere → fired
-    for (let d = 0; d < 2; d++) { w.day++; for (let h = 6; h <= 14; h++) { w.hour = h; now += 60_000; touchPlayer(w, 'u2', now); goTo(w, p, 'cami', now); careerHour(w, now); } }
+    const place = p.job!.place; let now = T0; goTo(w, p, place, now); const m0 = p.money;
+    w.day += 1; // the hire day is a grace day
+    for (let k = 0; k < 3; k++) { now += 1000; expect(act(w, 'u2', { t: 'jobTask', step: 'start' }, now).ok).toBe(true); now += 30_000; touchPlayer(w, 'u2', now); expect(act(w, 'u2', { t: 'jobTask', step: 'done' }, now).ok).toBe(true); }
+    expect(p.money).toBeGreaterThan(m0); expect(p.itibar).toBe(11); expect(p.job!.tasks).toBe(3); expect(p.job!.paidDay).toBe(w.day);
+    expect(act(w, 'u2', { t: 'jobTask', step: 'start' }, now + 1000).ok).toBe(false); // 3 a day
+    // two days online but no tasks → fired
+    for (let d = 0; d < 2; d++) { w.day++; for (let h = 1; h < 24; h++) { w.hour = h; now += 60_000; touchPlayer(w, 'u2', now); goTo(w, p, 'cami', now); careerHour(w, now); } w.day++; w.hour = 0; now += 60_000; careerHour(w, now); w.day--; }
     expect(p.job).toBeUndefined(); expect(p.itibar).toBeLessThan(11);
   });
   it('“Bir iş var mı?”: an usta hires an İşçi as çırak; a dilenci is told to work first', () => {

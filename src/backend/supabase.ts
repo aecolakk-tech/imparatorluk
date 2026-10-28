@@ -12,7 +12,10 @@ export class SupabaseBackend implements Backend {
 
   private async call<T>(body: Record<string, unknown>): Promise<T> {
     const { data, error } = await this.sb.functions.invoke('game', { body });
-    if (error) throw new Error(error.message);
+    if (error) { // v2.0.3: surface the server's own message ("Dünya meşgul…") instead of a generic non-2xx text
+      let msg = error.message; try { const ctx = (error as { context?: Response }).context; const j = ctx && typeof ctx.json === 'function' ? await ctx.json() : null; if (j?.error) msg = String(j.error); } catch { /* keep generic */ }
+      throw new Error(msg);
+    }
     return data as T;
   }
   session(): Session | null { return this.s; }

@@ -69,14 +69,14 @@ async function storeNpcChat(msgs: any[]) {
   if (!msgs.length) return;
   await db.from('messages').insert(msgs.map((m) => ({ from_user: null, from_person: m.fromPersonId, from_name: m.fromName, to_person: m.toPersonId, text: String(m.text).slice(0, 280), created_at: new Date(m.at).toISOString() })));
 }
-async function mutate<T>(f: (w: any) => T): Promise<T> {
-  for (let i = 0; i < 5; i++) {
+async function mutate<T>(f: (w: any) => T, tries = 5): Promise<T> {
+  for (let i = 0; i < tries; i++) {
     const { state, version } = await loadWorld();
     const r = f(state);
     const npc = core.drainChat(state);
     const { data: ok } = await db.rpc('commit_world', { new_state: state, expected: version });
     if (ok) { await storeNpcChat(npc); return r; }
-    await new Promise((res) => setTimeout(res, 40 + Math.random() * 160)); // v2.0.2: jittered back-off (attack spam starved heartbeats)
+    await new Promise((res) => setTimeout(res, (40 + Math.random() * 160) * (1 + Math.min(i, 4) * 0.5))); // v2.0.2: jittered back-off (attack spam starved heartbeats)
   }
   throw new Error('Dünya meşgul, tekrar deneyin.');
 }
@@ -143,7 +143,8 @@ Deno.serve(async (req) => {
           if (prompt) { const o = parseJson(await llm(prompt, true, 220)); await mutate((w) => core.judgeReply(w, String(body.action.caseId), o, Date.now())); }
           return json(r);
         }
-        return json(await mutate((w) => core.act(w, uid, body.action, now)));
+        try { return json(await mutate((w) => core.act(w, uid, body.action, now), 10)); } // v2.0.3: players' actions retry harder and never fail silently
+        catch (e) { return json({ ok: false, msg: `Dünya şu an çok meşgul; işleminiz yapılamadı, tekrar deneyin. (${String((e as Error).message ?? e).slice(0, 60)})` }); }
       }
       case 'chat': {
         const since = new Date(now - 30_000).toISOString();

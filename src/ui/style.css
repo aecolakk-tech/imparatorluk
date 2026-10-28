@@ -293,3 +293,19 @@ body.has-sheet .controls .hotbar { display:none; }
 .sound-set button { flex:1 1 140px; }
 /* v2.0.3: while typing (soft keyboard open) or on the login form, the rotate overlay never covers the form */
 body.typing .rotate-ov, body.on-login .rotate-ov { display:none !important; }
+/* v2.0.3 İş görevi */
+.jobtask .box { width:min(420px, 94vw); }
+.jt-step { display:flex; align-items:center; gap:8px; margin:6px 0; opacity:.6; }
+.jt-step.on, .jt-step.ready, .jt-step.done { opacity:1; }
+.jt-label { min-width:150px; }
+.jt-bar { flex:1; height:10px; border-radius:99px; background:#0c0905; overflow:hidden; }
+.jt-bar i { display:block; height:100%; width:0; background:var(--gold, #e8c14a); transition: width .1s linear; }
+.jt-step.ready .jt-bar i { background:#7fd16a; animation: flash .5s ease-in-out infinite alternate; }
+.jt-step.done .jt-bar i { background:#4f8a3a; }
+.jt-step.miss .jt-bar i { background:#c8483a; }
+.jt-go { width:100%; margin-top:8px; min-height:44px; font-size:16px; }
+/* v2.0.3: pop-ups never sit on top of an open panel's buttons (the "Ana ekrana ekle" banner stole taps on Al/Başvur) */
+body.has-sheet .a2hs, body:has(.modal) .a2hs { display:none !important; }
+@media (orientation: landscape) and (max-height: 520px) {
+  body.has-sheet .alert-pop { left: calc((100vw - min(500px, 56vw)) / 2); max-width: calc(100vw - min(500px, 56vw) - 16px); }
+}

@@ -6892,6 +6892,95 @@ San\u0131\u011F\u0131n son s\xF6z\xFCne kad\u0131 olarak cevap ver. Adil ol: g\x
   };
 }
 
+// src/sim/jobtask.ts
+var TASKS_PER_DAY = 3;
+var TASK_MIN_MS = 15e3;
+var TASK_MAX_MS = 18e4;
+var TASK_FAST_MS = 25e3;
+var BY_PROF = {
+  barci: { name: "M\xFC\u015Fteriye servis", steps: ["\u{1F4DD} Sipari\u015F al", "\u{1F37A} \u0130\xE7ki doldur", "\u{1F37D} Masaya servis et"] },
+  firinci: { name: "Ekmek pi\u015Fir", steps: ["\u{1FAD3} Hamuru yo\u011Fur", "\u{1F525} F\u0131r\u0131na koy", "\u{1F956} F\u0131r\u0131ndan \xE7\u0131kar"] },
+  demirci: { name: "Nal d\xF6vme", steps: ["\u{1F525} Demiri \u0131s\u0131t", "\u{1F528} \xD6rste d\xF6v", "\u{1F4A7} Suda so\u011Fut"] },
+  terzi: { name: "Kaftan dik", steps: ["\u{1F4CF} \xD6l\xE7\xFC al", "\u2702\uFE0F Kuma\u015F\u0131 kes", "\u{1FAA1} Dik"] },
+  marangoz: { name: "Sand\u0131k yap", steps: ["\u{1FA9A} Tahtay\u0131 kes", "\u{1F528} \xC7ivile", "\u{1FAB5} Z\u0131mparala"] },
+  ciftci: { name: "Tarla i\u015Fi", steps: ["\u{1F331} Tohum ek", "\u{1F4A7} Sula", "\u{1F33E} Hasat et"] },
+  hamal: { name: "Y\xFCk ta\u015F\u0131", steps: ["\u{1F4E6} Y\xFCk\xFC s\u0131rtla (A)", "\u{1F6B6} Pazar\u0131n \xF6b\xFCr ucuna ta\u015F\u0131", "\u{1F4CD} Teslim et (B)"] },
+  balikci: { name: "Liman i\u015Fi", steps: ["\u2693 Halat\u0131 \xE7\xF6z", "\u{1F41F} A\u011F\u0131 \xE7ek", "\u{1F4E6} Bal\u0131\u011F\u0131 sand\u0131\u011Fa koy"] },
+  sucu: { name: "Su ta\u015F\u0131", steps: ["\u{1FAA3} Kovay\u0131 indir", "\u{1F4AA} Kovay\u0131 \xE7ek", "\u{1F3FA} Testileri doldur"] },
+  kasap: { name: "Et haz\u0131rla", steps: ["\u{1F52A} Eti ay\u0131r", "\u2696\uFE0F Tart", "\u{1F4E6} Paketle"] },
+  hekim: { name: "Hasta bak", steps: ["\u{1FA7A} Hastay\u0131 dinle", "\u{1F33F} Merhem haz\u0131rla", "\u{1FA79} Sarg\u0131y\u0131 sar"] },
+  hoca: { name: "Ders ver", steps: ["\u{1F4D6} Dersi anlat", "\u270D\uFE0F \xD6devleri g\xF6r", "\u{1F514} Dersi bitir"] },
+  insaatci: { name: "Duvar \xF6r", steps: ["\u{1F9F1} Tu\u011Fla ta\u015F\u0131", "\u{1FAA3} Har\xE7 kar\u0131\u015Ft\u0131r", "\u{1F9F1} S\u0131ray\u0131 \xF6r"] },
+  kalemsor: { name: "Kahvehane i\u015Fi", steps: ["\u2615 Kahveyi kavur", "\u{1FAD6} Cezvede pi\u015Fir", "\u{1F37D} Masaya g\xF6t\xFCr"] },
+  imam: { name: "Cami hizmeti", steps: ["\u{1F9F9} Avluyu s\xFCp\xFCr", "\u{1F4A7} \u015Ead\u0131rvan\u0131 doldur", "\u{1F4FF} Vakti bildir"] },
+  hayvanci: { name: "Ah\u0131r i\u015Fi", steps: ["\u{1F33E} Yem ver", "\u{1F404} S\xFCt sa\u011F", "\u{1F9F9} Ah\u0131r\u0131 temizle"] },
+  degirmenci: { name: "Un \xF6\u011F\xFCt", steps: ["\u{1F33E} Bu\u011Fday\u0131 d\xF6k", "\u2699\uFE0F Ta\u015F\u0131 \xE7evir", "\u{1F6CD} Unu \xE7uvalla"] },
+  dokumaci: { name: "Kuma\u015F doku", steps: ["\u{1F9F6} \u0130pli\u011Fi ger", "\u{1FAA1} Meki\u011Fi at", "\u{1F9F5} Kuma\u015F\u0131 katla"] },
+  mobilyaci: { name: "Mobilya yap", steps: ["\u{1FA9A} Kes", "\u{1F528} Birle\u015Ftir", "\u{1F3A8} Cilala"] },
+  tuccar: { name: "Tezg\xE2h i\u015Fi", steps: ["\u{1F4E6} Mallar\u0131 diz", "\u{1F5E3} Pazarl\u0131k et", "\u{1F4B0} Sat\u0131\u015F\u0131 yaz"] },
+  memur: { name: "Dilek\xE7e i\u015Fle", steps: ["\u{1F4DC} Dilek\xE7eyi al", "\u{1F58B} Deftere kaydet", "\u{1F4EE} M\xFCh\xFCrle"] },
+  tahsildar: { name: "Vergi defteri", steps: ["\u{1F4D2} Defteri a\xE7", "\u{1F9EE} Hesapla", "\u{1F58B} \u0130mzala"] },
+  bekci: { name: "Zindan n\xF6beti", steps: ["\u{1F526} H\xFCcrelere bak", "\u{1F5DD} Kap\u0131lar\u0131 kilitle", "\u{1F4CB} N\xF6bet defterine yaz"] },
+  savci: { name: "Dosya haz\u0131rla", steps: ["\u{1F4C2} Dosyay\u0131 a\xE7", "\u{1F50E} Delilleri incele", "\u{1F58B} \u0130ddianame yaz"] },
+  hakim: { name: "Dosya incele", steps: ["\u{1F4C2} Dosyay\u0131 a\xE7", "\u2696\uFE0F Tart", "\u{1F58B} Karar yaz"] }
+};
+var BY_PLACE = {
+  bar: BY_PROF.barci,
+  firin: BY_PROF.firinci,
+  ciftlik: BY_PROF.ciftci,
+  liman: { name: "Liman i\u015Fi", steps: ["\u2693 Halat\u0131 \xE7\xF6z", "\u{1F4E6} Sand\u0131\u011F\u0131 indir", "\u{1F6B6} Ambara ta\u015F\u0131"] }
+};
+var GENERIC = { name: "G\xFCnl\xFCk i\u015F", steps: ["\u{1F9F0} Haz\u0131rlan", "\u{1F4AA} \xC7al\u0131\u015F", "\u2705 \u0130\u015Fi bitir"] };
+function taskFor(j, p) {
+  return j.prof && BY_PROF[j.prof] || BY_PROF[p.prof] || BY_PLACE[j.place] || GENERIC;
+}
+var isSoldierJob = (p, j) => p.prof === "asker" || j.kind === "asker";
+function jobTask(w, p, step2, now, payDay2) {
+  const j = p.job;
+  if (!j) return { ok: false, msg: "\u0130\u015Finiz yok. Pazar\u2019daki \u0130\u015F \u0130lan\u0131 Tahtas\u0131\u2019na bak\u0131n." };
+  if (isSoldierJob(p, j)) return { ok: false, msg: "Askerler K\u0131\u015Fla\u2019da talim ve n\xF6betle \xE7al\u0131\u015F\u0131r (vardiyada k\u0131\u015Flada olun)." };
+  const b2 = w.buildings.find((x) => x.id === j.place);
+  if (!b2 || distToBuilding(b2, myPos(w, p, now)) > REACH + 1) return { ok: false, msg: `\u0130\u015F g\xF6revi i\u015F yerinde yap\u0131l\u0131r: ${b2?.name ?? j.place}\u2019a gidin.` };
+  if (j.taskDay !== w.day) {
+    j.taskDay = w.day;
+    j.tasks = 0;
+    j.taskAt = void 0;
+  }
+  j.onlineDay = w.day;
+  const t = taskFor(j, p);
+  if (step2 === "start") {
+    if ((j.tasks ?? 0) >= TASKS_PER_DAY) return { ok: false, msg: `Bug\xFCnk\xFC ${TASKS_PER_DAY} g\xF6rev tamam, \xFCcretinizi ald\u0131n\u0131z. Yar\u0131n yine gelin.`, tasks: j.tasks };
+    j.taskAt = now;
+    return { ok: true, msg: `\u{1F6E0} ${t.name} ba\u015Flad\u0131 (${(j.tasks ?? 0) + 1}/${TASKS_PER_DAY}).`, tasks: j.tasks };
+  }
+  if (!j.taskAt) return { ok: false, msg: "\xD6nce bir g\xF6rev ba\u015Flat\u0131n." };
+  const el = now - j.taskAt;
+  if (el > TASK_MAX_MS) {
+    j.taskAt = void 0;
+    return { ok: false, msg: "G\xF6rev yar\u0131m kald\u0131 (zaman a\u015F\u0131m\u0131). Yeniden ba\u015Flay\u0131n." };
+  }
+  if (el < TASK_MIN_MS) return { ok: false, msg: "Bu kadar h\u0131zl\u0131 olmaz \u2013 i\u015Fi d\xFCzg\xFCn yap\u0131n." };
+  j.taskAt = void 0;
+  j.tasks = (j.tasks ?? 0) + 1;
+  let tip = 0;
+  if (el <= TASK_FAST_MS) {
+    const amt = Math.round(Math.max(0.2, Math.min(1, j.wage * 0.08)) * 100) / 100;
+    const payer = j.employerId === "dis" ? "dis" : w.people.filter((x) => x.id !== p.id && !x.playerId && x.money > 5 && x.jailedDays === 0).sort((a, c) => c.money - a.money)[w.day % 5]?.id;
+    if (payer && transfer(w, payer, p.id, amt, "bah\u015Fi\u015F")) {
+      tip = amt;
+      p.incomeToday += amt;
+    }
+  }
+  let paid = false;
+  if (j.tasks >= TASKS_PER_DAY && j.paidDay !== w.day) {
+    j.paidDay = w.day;
+    payDay2(w, p, j);
+    paid = true;
+  }
+  const tipTxt = tip ? ` \xC7abuk i\u015F: +${tip} D bah\u015Fi\u015F!` : "";
+  return { ok: true, msg: paid ? `\u2705 ${t.name} bitti (${TASKS_PER_DAY}/${TASKS_PER_DAY}) \u2013 g\xFCnl\xFCk \xFCcret \xF6dendi.${tipTxt}` : `\u2705 ${t.name} bitti (${j.tasks}/${TASKS_PER_DAY}).${tipTxt}`, tasks: j.tasks, paid, tip };
+}
+
 // src/sim/career.ts
 var MAIN = ["dilenci", "isci", "cirak", "usta", "tuccar", "esraf", "soylu", "danisman"];
 var MAIN_LABEL = { dilenci: "Dilenci", isci: "\u0130\u015F\xE7i", cirak: "\xC7\u0131rak", usta: "Usta", tuccar: "T\xFCccar", esraf: "E\u015Fraf", soylu: "Soylu", danisman: "Kayzer\u2019e dan\u0131\u015Fman" };
@@ -7164,7 +7253,7 @@ function hire(w, p, j) {
   if (e) return e;
   if (p.prof === "asker") return "Askerken ba\u015Fka i\u015Fte \xE7al\u0131\u015Famazs\u0131n\u0131z; \xF6nce terhis olun.";
   if (j.kind === "cirak" && j.employerId === p.id) return "Kendinize \xE7\u0131rak olamazs\u0131n\u0131z.";
-  const job = { ...j, id: nextId(w, "J"), att: 0 };
+  const job = { ...j, id: nextId(w, "J"), att: 0, hiredDay: w.day };
   if (j.prof && j.kind !== "cirak") {
     p.prof = j.prof;
     p.work = WORKPLACE[j.prof] ?? j.place;
@@ -7176,6 +7265,11 @@ function hire(w, p, j) {
   if (j.kind === "gundelik") p.work = j.place;
   p.job = job;
   p.unemployedDays = 0;
+  {
+    const c = cs2(p);
+    c.missStreak = 0;
+    c.offStreak = 0;
+  }
   if (j.kind === "oyuncu") w.jobs = (w.jobs ?? []).filter((x) => x.id !== j.id);
   log(w, `\u{1F4BC} ${p.name} i\u015Fe girdi: ${j.title} (${hoursText(j)}, g\xFCnde ${j.wage} D).`, p.id);
   return null;
@@ -7218,6 +7312,29 @@ function careerHour(w, now) {
   for (const p of w.people) {
     const j = p.job;
     if (!j || !isPlayer4(p)) continue;
+    if (!isSoldierJob(p, j)) {
+      if (j.hiredDay === void 0) {
+        j.hiredDay = w.day;
+        cs2(p).missStreak = 0;
+      }
+      if (w.hour === 0) taskDayEnd(w, p, j, w.day - 1);
+      const on = isOnline(w, p.playerId, now, 12e4);
+      if (on) j.onlineDay = w.day;
+      if (j.attDay !== w.day && w.hour === j.from) {
+        j.attDay = w.day;
+        j.online = false;
+      }
+      if (inShift(j, w.hour) && j.attDay === w.day && on) j.online = true;
+      if (w.hour === j.to % 24 && j.attDay !== void 0 && (w.day === j.attDay || j.from > j.to && w.day === j.attDay + 1)) {
+        const d = j.attDay;
+        j.attDay = void 0;
+        if (!j.online && j.paidDay !== d && j.onlineDay !== d && j.judgedDay !== d) {
+          j.judgedDay = d;
+          missDay(w, p, j, false);
+        }
+      }
+      continue;
+    }
     if (j.attDay !== w.day && w.hour === j.from) {
       j.att = 0;
       j.attDay = w.day;
@@ -7232,10 +7349,17 @@ function careerHour(w, now) {
     if (w.hour === j.to % 24 && j.attDay !== void 0 && (w.day === j.attDay || j.from > j.to && w.day === j.attDay + 1)) endShift(w, p, j);
   }
 }
-function endShift(w, p, j) {
+function taskDayEnd(w, p, j, day) {
+  if (j.paidDay === day || (j.hiredDay ?? -1) >= day || j.judgedDay === day || j.onlineDay !== day) return;
+  j.judgedDay = day;
+  missDay(w, p, j, true);
+}
+function payDay(w, p, j) {
+  workedDay(w, p, j);
+}
+function workedDay(w, p, j) {
   const c = cs2(p);
-  const done = (j.att ?? 0) >= Math.ceil(shiftLen(j) / 2);
-  if (done) {
+  {
     c.missStreak = 0;
     c.offStreak = 0;
     c.jobDays = (c.jobDays ?? 0) + 1;
@@ -7261,10 +7385,20 @@ function endShift(w, p, j) {
       setRank(w, p, "isci", "2 g\xFCn bir i\u015Fte \xE7al\u0131\u015Ft\u0131");
     }
     j.attDay = void 0;
+  }
+}
+function endShift(w, p, j) {
+  const done = (j.att ?? 0) >= Math.ceil(shiftLen(j) / 2);
+  if (done) {
+    workedDay(w, p, j);
     return;
   }
+  missDay(w, p, j, !!j.online);
+}
+function missDay(w, p, j, online) {
+  const c = cs2(p);
   c.jobStreak = 0;
-  if (!j.online) {
+  if (!online) {
     c.offStreak = (c.offStreak ?? 0) + 1;
     if (c.offStreak >= 3) {
       p.job = void 0;
@@ -11125,6 +11259,10 @@ function applyAction(w, playerId, a, now) {
       c.quests = (c.quests ?? 0) + 1;
       itibar(w, me, 2, "sipari\u015F teslim etti");
       return ok2("Sipari\u015F teslim edildi, \xF6d\xFCl\xFC ald\u0131n\u0131z.");
+    }
+    case "jobTask": {
+      const r = jobTask(w, me, a.step === "done" ? "done" : "start", now, payDay);
+      return r.ok ? ok2(r.msg) : no(r.msg);
     }
     case "jobApply": {
       const j = (w.jobs ?? []).find((x) => x.id === a.jobId);
