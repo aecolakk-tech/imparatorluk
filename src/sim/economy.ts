@@ -146,19 +146,26 @@ export function produce(w: World, p: Person): void {
   const unsold = w.listings.filter((l) => l.sellerId === p.id && l.good === spec.good).reduce((s, l) => s + l.qty, 0) + p.inv[spec.good];
   let frac = unsold >= spec.qty * 1.5 ? 0 : unsold >= spec.qty * 0.7 ? 0.5 : 1;
   // v2.0.1 narh: a ceiling far below the market price makes production a loss → less output (shortage)
-  const cap = w.priceCaps[spec.good]; if (cap && cap < w.prices[spec.good] * 0.9) frac *= Math.max(0.3, (cap / w.prices[spec.good]) ** 2);
+  // (v2.0.1 fix: the loss is measured against the producer's own unit cost, not the market price – a narh above cost no longer
+  //  throttles the ovens forever, which kept bread scarce and the narh in place: the seed-7 famine spiral)
+  { const cap = w.priceCaps[spec.good]; const unitCost = spec.inputs ? Object.entries(spec.inputs).reduce((s2, [ig, n]) => s2 + w.prices[ig as Good] * (n as number), 0) / spec.qty : BASE_PRICE[spec.good] * 0.5;
+    if (cap && cap < unitCost * 1.15) frac *= Math.max(0.3, (cap / (unitCost * 1.15)) ** 2); }
   if (frac === 0) { p.lastAction = 'tezgâh dolu, satış bekliyor'; return; }
   // v2.0.1 esnaf kredisi: a broke miller/baker can't buy wheat/flour and the bread chain dies (poverty trap). The hazine advances a small
   // working capital (money moves saray → esnaf, conserved) and takes it back in instalments once the shop earns again.
+  let advance = 0;
   if (spec.inputs && ['degirmenci', 'firinci'].includes(p.prof)) {
-    if ((p.kredi ?? 0) > 0 && p.money > 60) { const pay = Math.min(p.kredi!, Math.round((p.money - 60) * 0.3 * 100) / 100); if (pay > 0 && transfer(w, p.id, 'saray', pay, 'esnaf kredisi taksiti')) p.kredi = Math.round((p.kredi! - pay) * 100) / 100; }
+    if ((p.kredi ?? 0) > 0 && p.money > 25) { const pay = Math.min(p.kredi!, Math.round((p.money - 25) * 0.3 * 100) / 100); if (pay > 0 && transfer(w, p.id, 'saray', pay, 'esnaf kredisi taksiti')) p.kredi = Math.round((p.kredi! - pay) * 100) / 100; }
     const inCost = Object.entries(spec.inputs).reduce((s2, [ig, n]) => s2 + w.prices[ig as Good] * (n as number), 0) * frac;
-    if (p.money < inCost * 0.5 && (p.kredi ?? 0) < 150 && w.treasury > 1500) { const amt = Math.min(60, Math.ceil(inCost * 0.6)); if (transfer(w, 'saray', p.id, amt, 'esnaf kredisi')) p.kredi = (p.kredi ?? 0) + amt; }
+    // the advance is spent on the spot on wheat/flour (whatever isn't used goes straight back) – it can't be eaten up
+    const room = Math.max(150, inCost * 3) - (p.kredi ?? 0);
+    if (p.money < inCost * 0.8 && room > 0 && w.treasury > 1000) { const amt = Math.round(Math.min(room, inCost - p.money * 0.5) * 100) / 100; if (amt > 0 && transfer(w, 'saray', p.id, amt, 'esnaf kredisi')) { p.kredi = Math.round(((p.kredi ?? 0) + amt) * 100) / 100; advance = amt; } }
   }
   for (const [g, need] of Object.entries(spec.inputs ?? {}) as [Good, number][]) {
     if (p.inv[g] < need * frac) buy(w, p.id, g, Math.ceil(need * frac - p.inv[g]), Math.max(0.1, Math.min(p.money * 0.7, (spec.qty * w.prices[spec.good] * 0.8) / need / Object.keys(spec.inputs ?? {}).length)), { wholesale: true });
     frac = Math.min(frac, p.inv[g] / need);
   }
+  if (advance > 0) { const back = Math.min(advance, Math.max(0, p.money - 5)); if (back > 0.01 && transfer(w, p.id, 'saray', Math.round(back * 100) / 100, 'esnaf kredisi (kullanılmayan)')) p.kredi = Math.max(0, Math.round(((p.kredi ?? 0) - back) * 100) / 100); }
   if (frac <= 0) { p.lastAction = 'ham madde bulamadı'; return; }
   for (const [g, need] of Object.entries(spec.inputs ?? {}) as [Good, number][]) p.inv[g] = Math.max(0, p.inv[g] - Math.ceil(need * frac));
   const tools = p.inv.alet > 0 ? 1.15 : 1; // alet boosts output, wears out
@@ -194,7 +201,8 @@ export function settleMarket(w: World): void {
     const nm = natureMult(w, g);
     if (nm < 1) p *= 1 + Math.min(0.15, (1 - nm) * 0.3); // scarcity: a bad harvest drives the price even before shelves are empty
     else if (miss > 0) p *= 1 + Math.min(0.08, 0.01 + miss / Math.max(20, sold + miss) * 0.15);
-    else if (left < sold * 0.25) p *= 1.02; // thin shelves
+    // thin shelves: a little dearer – but with nobody turned away (no unmet demand) a staple does not ratchet up forever (v2.0.1 famine root cause)
+    else if (left < sold * 0.25) p *= p < BASE_PRICE[g] * seasonPremium(w, g) * 1.5 ? 1.02 : 0.99;
     else if (left > sold * 1.2 + 5) p *= 1 - Math.min(0.06, 0.01 + left / Math.max(20, sold + left) * 0.06);
     else p += (BASE_PRICE[g] * seasonPremium(w, g) - p) * 0.03; // balanced market drifts to the normal (seasonal) price
     // v1.6: bread follows wheat (bakers pass on flour cost), crafts don't collapse below cost

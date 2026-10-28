@@ -129,7 +129,7 @@ export function naipPolicy(w: World): string[] {
   if (bread > b0 * 1.8 && w.granary >= 20) { const n = granaryDistribute(w, 40); if (n) { done.push(`ambardan ${n} buğday dağıtıldı`); use(w, 'naip_ambar'); } }
   else if (bread < b0 * 1.05 && w.granary < 150 && w.treasury > R * 3) { const n = granaryBuy(w, 20); if (n) { done.push(`ambara ${n} buğday alındı`); use(w, 'naip_ambar'); } }
   if (bread > b0 * 3 && !w.priceCaps.ekmek) { w.priceCaps.ekmek = Math.round(b0 * 2.2 * 100) / 100; done.push(`ekmeğe narh ${w.priceCaps.ekmek} D`); use(w, 'naip_narh'); }
-  else if (w.priceCaps.ekmek && bread < b0 * 1.5 && !(w.genelgeler ?? []).some((g) => g.kind === 'fiyatTavani' && g.until >= w.day)) { delete w.priceCaps.ekmek; done.push('ekmek narhı kaldırıldı'); use(w, 'naip_narh'); }
+  else if (w.priceCaps.ekmek && bread < b0 * 2 && !(w.genelgeler ?? []).some((g) => g.kind === 'fiyatTavani' && g.until >= w.day)) { delete w.priceCaps.ekmek; done.push('ekmek narhı kaldırıldı'); use(w, 'naip_narh'); }
   if (w.imports === false && bread > b0 * 2 && !w.raid) { w.imports = true; done.push('ithalat izni verildi'); use(w, 'naip_ithalat'); }
   for (const p of w.people) if (p.prof === 'naip') p.mood = clamp(p.mood);
   if (done.length) log(w, `🏛 Naip: ${done.join('; ')}.`);

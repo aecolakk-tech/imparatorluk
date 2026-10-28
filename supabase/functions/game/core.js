@@ -2299,7 +2299,7 @@ function naipPolicy(w) {
     w.priceCaps.ekmek = Math.round(b0 * 2.2 * 100) / 100;
     done.push(`ekme\u011Fe narh ${w.priceCaps.ekmek} D`);
     use(w, "naip_narh");
-  } else if (w.priceCaps.ekmek && bread < b0 * 1.5 && !(w.genelgeler ?? []).some((g) => g.kind === "fiyatTavani" && g.until >= w.day)) {
+  } else if (w.priceCaps.ekmek && bread < b0 * 2 && !(w.genelgeler ?? []).some((g) => g.kind === "fiyatTavani" && g.until >= w.day)) {
     delete w.priceCaps.ekmek;
     done.push("ekmek narh\u0131 kald\u0131r\u0131ld\u0131");
     use(w, "naip_narh");
@@ -2905,7 +2905,7 @@ function canHaveChild(w, a, b2, npc = false) {
   if (fertility(w, a, b2) <= 0) return "Bu ya\u015Fta \xE7ocuk olmaz (kad\u0131nlar 16\u201345 ya\u015F aras\u0131; erkeklerde 60\u2019tan sonra azal\u0131r).";
   const need = npc ? 100 + kids * 40 : PROSPERITY_MONEY + kids * 100;
   if (a.money + b2.money < need) return `\xC7ocuk i\xE7in hanede en az ${need} Dinar birikim gerekir.`;
-  if (a.hunger > 45 || b2.hunger > 45) return "Hane tok de\u011Fil; \xF6nce karn\u0131n\u0131z\u0131 doyurun.";
+  if (a.hunger > (npc ? 70 : 45) || b2.hunger > (npc ? 70 : 45)) return "Hane tok de\u011Fil; \xF6nce karn\u0131n\u0131z\u0131 doyurun.";
   if (a.jailedDays > 0 || b2.jailedDays > 0) return "Zindandayken olmaz.";
   if (!foodSecure(w)) return "\u015Eehirde ekmek k\u0131tl\u0131\u011F\u0131 var; \u015Fimdi \xE7ocuk zor beslenir.";
   if (w.pregnancies.some((p) => p.parents.includes(a.id))) return "Zaten bir bebek yolda.";
@@ -2928,8 +2928,8 @@ function requestChild(w, me, playerDecides) {
   if (sp.mood < 35) return `${sp.name} \u015Fimdi haz\u0131r de\u011Fil.`;
   return conceive(w, me, sp);
 }
-function conceive(w, a, b2) {
-  const err = canHaveChild(w, a, b2);
+function conceive(w, a, b2, npc = false) {
+  const err = canHaveChild(w, a, b2, npc);
   if (err) return err;
   if (rand(w) > fertility(w, a, b2)) return "Bu sefer olmad\u0131; bir s\xFCre sonra yeniden deneyin.";
   w.pregnancies.push({ parents: [a.id, b2.id], due: w.day + PREGNANCY_DAYS });
@@ -2997,7 +2997,7 @@ function familyDay(w, npcDecides, now) {
   for (const p of w.people) {
     const sp = findPerson(w, p.spouse);
     if (!sp || p.id > sp.id || !npcDecides(p) || !npcDecides(sp)) continue;
-    if (!canHaveChild(w, p, sp, true) && chance(w, 0.04)) conceive(w, p, sp);
+    if (!canHaveChild(w, p, sp, true) && chance(w, 0.04)) conceive(w, p, sp, true);
   }
   for (const c of [...w.children]) {
     const parents = c.parents.map((id) => findPerson(w, id)).filter((x) => !!x);
@@ -5484,13 +5484,15 @@ function switchJobs(w) {
       return;
     }
     const g = PRODUCES[p.prof]?.good;
-    const best = Object.entries(PRODUCES).filter(([prof2]) => count(prof2) < 14 && (!idleHamal || STAPLE_PROFS.includes(prof2))).map(([prof2, r]) => ({ prof: prof2, need: w.market.unmet[r.good] * BASE_PRICE[r.good] * (STAPLE_PROFS.includes(prof2) ? 3 : 1) })).sort((a, b2) => b2.need - a.need)[0];
+    const best = Object.entries(PRODUCES).filter(([prof2]) => count(prof2) < 14 && (!idleHamal || STAPLE_PROFS.includes(prof2))).map(([prof2, r]) => ({ prof: prof2, need: (w.market.unmet[r.good] + (PRODUCES[prof2]?.inputs ? 0 : Math.max(0, w.prices[r.good] / BASE_PRICE[r.good] - 1.6) * 30)) * BASE_PRICE[r.good] * (STAPLE_PROFS.includes(prof2) ? 3 : 1) })).sort((a, b2) => b2.need - a.need)[0];
     const UP = { firinci: ["degirmenci", "un"], degirmenci: ["ciftci", "bugday"] };
     for (let i = 0; best && i < 2; i++) {
       const u = UP[best.prof];
       if (!u) break;
       const [up, ug] = u;
-      if ((w.market.unmet[ug] ?? 0) > 0 || (w.prices[ug] ?? 0) > BASE_PRICE[ug] * 2) best.prof = up;
+      const own2 = PRODUCES[best.prof].good;
+      const ratio = (x) => (w.prices[x] ?? 0) / BASE_PRICE[x];
+      if ((w.market.unmet[ug] ?? 0) > 0 && (w.market.unmet[own2] ?? 0) === 0 || ratio(ug) > 2 && ratio(ug) > ratio(own2)) best.prof = up;
       else break;
     }
     if (best && best.prof !== p.prof && best.need > 20 && (!g || w.market.unmet[g] === 0)) {
@@ -7438,26 +7440,38 @@ function produce(w, p) {
   }
   const unsold = w.listings.filter((l) => l.sellerId === p.id && l.good === spec.good).reduce((s, l) => s + l.qty, 0) + p.inv[spec.good];
   let frac = unsold >= spec.qty * 1.5 ? 0 : unsold >= spec.qty * 0.7 ? 0.5 : 1;
-  const cap = w.priceCaps[spec.good];
-  if (cap && cap < w.prices[spec.good] * 0.9) frac *= Math.max(0.3, (cap / w.prices[spec.good]) ** 2);
+  {
+    const cap = w.priceCaps[spec.good];
+    const unitCost = spec.inputs ? Object.entries(spec.inputs).reduce((s2, [ig, n2]) => s2 + w.prices[ig] * n2, 0) / spec.qty : BASE_PRICE[spec.good] * 0.5;
+    if (cap && cap < unitCost * 1.15) frac *= Math.max(0.3, (cap / (unitCost * 1.15)) ** 2);
+  }
   if (frac === 0) {
     p.lastAction = "tezg\xE2h dolu, sat\u0131\u015F bekliyor";
     return;
   }
+  let advance = 0;
   if (spec.inputs && ["degirmenci", "firinci"].includes(p.prof)) {
-    if ((p.kredi ?? 0) > 0 && p.money > 60) {
-      const pay = Math.min(p.kredi, Math.round((p.money - 60) * 0.3 * 100) / 100);
+    if ((p.kredi ?? 0) > 0 && p.money > 25) {
+      const pay = Math.min(p.kredi, Math.round((p.money - 25) * 0.3 * 100) / 100);
       if (pay > 0 && transfer(w, p.id, "saray", pay, "esnaf kredisi taksiti")) p.kredi = Math.round((p.kredi - pay) * 100) / 100;
     }
     const inCost = Object.entries(spec.inputs).reduce((s2, [ig, n2]) => s2 + w.prices[ig] * n2, 0) * frac;
-    if (p.money < inCost * 0.5 && (p.kredi ?? 0) < 150 && w.treasury > 1500) {
-      const amt = Math.min(60, Math.ceil(inCost * 0.6));
-      if (transfer(w, "saray", p.id, amt, "esnaf kredisi")) p.kredi = (p.kredi ?? 0) + amt;
+    const room = Math.max(150, inCost * 3) - (p.kredi ?? 0);
+    if (p.money < inCost * 0.8 && room > 0 && w.treasury > 1e3) {
+      const amt = Math.round(Math.min(room, inCost - p.money * 0.5) * 100) / 100;
+      if (amt > 0 && transfer(w, "saray", p.id, amt, "esnaf kredisi")) {
+        p.kredi = Math.round(((p.kredi ?? 0) + amt) * 100) / 100;
+        advance = amt;
+      }
     }
   }
   for (const [g, need] of Object.entries(spec.inputs ?? {})) {
     if (p.inv[g] < need * frac) buy(w, p.id, g, Math.ceil(need * frac - p.inv[g]), Math.max(0.1, Math.min(p.money * 0.7, spec.qty * w.prices[spec.good] * 0.8 / need / Object.keys(spec.inputs ?? {}).length)), { wholesale: true });
     frac = Math.min(frac, p.inv[g] / need);
+  }
+  if (advance > 0) {
+    const back = Math.min(advance, Math.max(0, p.money - 5));
+    if (back > 0.01 && transfer(w, p.id, "saray", Math.round(back * 100) / 100, "esnaf kredisi (kullan\u0131lmayan)")) p.kredi = Math.max(0, Math.round(((p.kredi ?? 0) - back) * 100) / 100);
   }
   if (frac <= 0) {
     p.lastAction = "ham madde bulamad\u0131";
@@ -7498,7 +7512,7 @@ function settleMarket(w) {
     const nm = natureMult(w, g);
     if (nm < 1) p *= 1 + Math.min(0.15, (1 - nm) * 0.3);
     else if (miss > 0) p *= 1 + Math.min(0.08, 0.01 + miss / Math.max(20, sold + miss) * 0.15);
-    else if (left < sold * 0.25) p *= 1.02;
+    else if (left < sold * 0.25) p *= p < BASE_PRICE[g] * seasonPremium(w, g) * 1.5 ? 1.02 : 0.99;
     else if (left > sold * 1.2 + 5) p *= 1 - Math.min(0.06, 0.01 + left / Math.max(20, sold + left) * 0.06);
     else p += (BASE_PRICE[g] * seasonPremium(w, g) - p) * 0.03;
     if (g === "ekmek" && natureMult(w, "bugday") < 1) {

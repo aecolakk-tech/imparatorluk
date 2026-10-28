@@ -8,7 +8,7 @@ import { GOODS } from '../sim/types';
 import { GOOD_LABEL, PLAYER_PROFS, PROF_LABEL, STATE_PROFS } from '../sim/constants';
 import { coupStatus, officeOf } from '../sim/actions';
 import { CRIME_LABEL } from '../sim/ai';
-import { BILL_LABEL, tally, budgetLeft, MP_ALLOWANCE, ANAYASA_YES } from '../sim/meclis';
+import { BILL_LABEL, tally, budgetLeft, MP_ALLOWANCE, ANAYASA_YES, hoursToCount, repealables, turnout, komisyonMembers } from '../sim/meclis';
 import type { Bill, BillKind, VoteChoice } from '../sim/types';
 import { findPerson } from '../sim/world';
 import { bar, fmt, h, select } from './dom';
@@ -249,6 +249,9 @@ function billCard(c: Ctx, b: Bill, open: boolean): HTMLElement {
   const w = c.w; const t = tally(b); const prop = findPerson(w, b.proposerId);
   const status: Record<Bill['status'], string> = { tartisma: `görüşmede (oylama ${b.debateUntil + 1}. gün)`, oylama: `OYLAMADA (sonuç ${b.voteUntil}. gün sonu)`, onay: 'Kayzer onayı bekliyor', kabul: 'KABUL – yürürlükte', ret: 'RET', veto: 'VETO (kesin)', zamanasimi: 'düştü' };
   const card = h('div', { class: 'card' }, h('b', {}, `${BILL_LABEL[b.kind]}: ${b.title}`), h('div', { class: 'muted' }, `Teklif: ${prop?.name ?? '?'} · ${status[b.status]} · ${t.evet}✅ ${t.hayir}❌ ${t.cekimser}➖`));
+  if (b.status === 'oylama') card.append(h('div', { class: 'pill warn' }, `⏳ Oylama sürüyor: sayıma ${hoursToCount(w, b)} oyun saati kaldı · yeter sayı ${Math.floor(w.meclis.seats.length / 2) + 1}/${w.meclis.seats.length}`));
+  if (b.komisyon) card.append(h('div', { class: `msg ${b.komisyon.ok ? '' : 'warn'}` }, `📊 ${b.komisyon.text}`));
+  if (b.kind === 'cumhuriyet' && ['tartisma', 'oylama'].includes(b.status)) card.append(h('div', { class: 'bar' }, h('div', { style: `width:${Math.min(100, t.evet / ANAYASA_YES * 100)}%;background:#c9a227;height:8px` })), h('small', { class: 'muted' }, `${t.evet}/${ANAYASA_YES} evet`));
   if (b.kind === 'cumhuriyet') card.append(h('div', { class: 'muted' }, `🏛 Anayasa oylaması: ${ANAYASA_YES}/16 evet gerekir · parti disiplini yok (vicdan oyu) · Kayzer veto edemez${b.defectors?.length ? ` · çizgiden ayrılan: ${b.defectors.map((id) => findPerson(w, id)?.name ?? '?').join(', ')}` : ''}.`));
   if (open || b.speeches.length) for (const sp of b.speeches.slice(-4)) card.append(h('div', { class: 'msg' }, h('b', {}, findPerson(w, sp.personId)?.name ?? '?'), ': ', sp.text));
   if (!open) {
@@ -275,13 +278,23 @@ export function electionCard(c: Ctx): HTMLElement {
   if (ph.phase === 'aday' && me) box.append(isCand ? h('span', { class: 'pill' }, 'Adaysınız') : eligible ? h('button', { class: 'primary', onclick: () => c.act({ t: 'runForMeclis' }) }, 'Aday ol') : h('div', { class: 'muted' }, 'Askerler, bekçiler ve Kayzer aday olamaz.'));
   if (ph.phase === 'propaganda' && isCand) box.append(h('button', { onclick: () => c.act({ t: 'poster' } as never) }, 'Afiş as (propaganda)'));
   const cands = w.election.candidates.map((id) => findPerson(w, id)).filter((p): p is NonNullable<typeof p> => !!p);
-  if (cands.length) box.append(h('div', { class: 'chips' }, ...cands.map((p) => h('span', { class: 'chip' }, `${p.name} · afiş ${w.election.posters?.[p.id] ?? 0}`, ph.phase === 'oylama' && me && w.election.votes[me.id] !== p.id ? h('button', { class: 'sm', onclick: () => c.act({ t: 'vote', candidateId: p.id }) }, 'Oy ver') : w.election.votes[me?.id ?? ''] === p.id ? ' (oyunuz)' : ''))));
+  if (cands.length) box.append(h('div', { class: 'chips' }, ...cands.map((p) => h('span', { class: 'chip' }, `${p.name} · afiş ${w.election.posters?.[p.id] ?? 0}`, ph.phase === 'oylama' && me && !w.election.votes[me.id] ? h('button', { class: 'sm', title: 'Meclis binasındaki sandıkta', onclick: () => c.act({ t: 'vote', candidateId: p.id }) }, '🗳 Oy ver') : ''))));
+  if (ph.phase === 'oylama') { const tu = turnout(w); box.append(h('div', { class: 'msg' }, `🗳 Sandık Meclis binasında açık (08–20). Katılım: ${tu.voted}/${tu.electorate} (%${tu.pct}). Oylar gizlidir.${me && w.election.votes[me.id] ? ' ✔ Oyunuz kaydedildi.' : ''}`)); }
+  box.append(h('div', { class: 'muted' }, 'Kim oy verebilir: 16 yaşını doldurmuş, zindanda olmayan herkes (dilenciler dahil). Oy, seçim günü Meclis’teki sandıkta verilir.'));
   const last = w.election.last;
   if (last) box.append(h('details', {}, h('summary', {}, `Son seçim sonuçları (gün ${last.day})`), h('table', {}, ...last.results.slice(0, 24).map((r, i) => h('tr', { class: r.won ? 'won' : '' }, h('td', {}, String(i + 1)), h('td', {}, findPerson(w, r.id)?.name ?? '?'), h('td', {}, `${r.votes} oy`), h('td', {}, r.won ? 'seçildi' : ''))))));
   return box;
 }
+let meclisTab = 'gundem';
 function meclisPanel(c: Ctx): HTMLElement {
-  const w = c.w; const box = h('div', {});
+  const w = c.w; const root = h('div', { class: 'meclis-full' });
+  const govt = (w.meclis.govt ?? []).map((id) => w.meclis.factions.find((f) => f.id === id)?.name).filter(Boolean).join(' + ') || '—';
+  root.append(h('div', { class: 'card row', style: 'flex-wrap:wrap;gap:10px' }, h('b', {}, '🏛 Meclis-i Mebusan'), h('span', {}, `💰 Hazine ${Math.round(w.treasury)} D${w.meclis.borc ? ` (borç ${Math.round(w.meclis.borc)})` : ''}`), h('span', {}, `Hükümet: ${govt}`), h('span', {}, `Seçim: ${w.election.nextDay}. gün`), h('span', {}, `Komisyon: ${komisyonMembers(w).map((id) => findPerson(w, id)?.name.split(' ').slice(-1)[0] ?? '?').join(', ')}`)));
+  const TABS: [string, string][] = [['gundem', 'Gündem'], ['teklif', 'Teklif Ver'], ['gecmis', 'Geçmiş'], ['uyeler', 'Üyeler'], ['partiler', 'Partiler'], ['secim', 'Seçim-Kampanya']];
+  const sec: Record<string, HTMLElement> = {}; for (const [k] of TABS) sec[k] = h('div', { class: 'stack', style: k === meclisTab ? '' : 'display:none' });
+  const bar = h('div', { class: 'tabs row', style: 'flex-wrap:wrap' }, ...TABS.map(([k, l]) => h('button', { class: k === meclisTab ? 'primary sm' : 'sm', onclick: (e: Event) => { meclisTab = k; for (const [kk] of TABS) sec[kk]!.style.display = kk === k ? '' : 'none'; for (const b of bar.querySelectorAll('button')) b.className = 'sm'; (e.currentTarget as HTMLElement).className = 'primary sm'; } }, l)));
+  root.append(bar, ...TABS.map(([k]) => sec[k]!));
+  const box = sec.gundem!;
   const fac = (id: string | null) => w.meclis.factions.find((f) => f.id === id);
   if (w.regime === 'cumhuriyet') {
     const b = findPerson(w, w.kayzerId);
@@ -289,39 +302,52 @@ function meclisPanel(c: Ctx): HTMLElement {
     for (const id of w.election.baskanCandidates) { const p = findPerson(w, id); if (p) box.append(personLine(c, p, h('button', { onclick: (e) => { e.stopPropagation(); c.act({ t: 'voteBaskan', candidateId: id }); } }, 'Başkanlığa oy'))); }
     if (c.me) box.append(h('button', { class: 'primary', onclick: () => c.act({ t: 'runForBaskan' }) }, 'Başkan adayı ol'));
   } else box.append(h('div', { class: 'muted' }, 'İmparatorlukta Meclis’in kabul ettiği kararlar Kayzer’in onayına gider. Kayzer’in vetosu kesindir, aşılamaz.'));
-  box.append(electionBlock(c));
-  box.append(electionCard(c));
+  sec.secim!.append(electionBlock(c), electionCard(c));
   // seat chart (16 milletvekili)
-  box.append(h('h3', {}, `Sandalyeler (${w.meclis.seats.filter((s) => s.holder).length}/${w.meclis.seats.length}) · üye maaşı ${w.meclis.salary} D/gün`));
-  box.append(h('div', { class: 'seats' }, ...w.meclis.seats.map((s) => { const p = findPerson(w, s.holder); const f = fac(p?.faction ?? null);
+  const uy = sec.uyeler!;
+  uy.append(h('h3', {}, `Sandalyeler (${w.meclis.seats.filter((s) => s.holder).length}/${w.meclis.seats.length}) · üye maaşı ${w.meclis.salary} D/gün`));
+  uy.append(h('div', { class: 'seats hemicycle' }, ...w.meclis.seats.map((s) => { const p = findPerson(w, s.holder); const f = fac(p?.faction ?? null);
     return h('div', { class: `seat${p ? '' : ' empty'}${p && p.id === c.me?.id ? ' me' : ''}`, style: `--fc:${f?.color ?? '#555'}`, title: p ? `${p.name} · ${f?.name ?? ''}` : 'boş', onclick: () => p && c.openPerson(p.id) }, h('b', {}, p?.name.split(' ').slice(-1)[0] ?? '—'), h('small', {}, f?.name.split(' ')[0] ?? '')); })));
   const mp = !!c.me?.meclis;
-  box.append(h('div', { class: 'muted' }, `💰 Milletvekili geliri: günlük ${w.meclis.salary} Dinar Meclis maaşı + ${MP_ALLOWANCE} Dinar milletvekili ödeneği (Hazine’den, hesap defterinde görünür).`));
-  box.append(h('h3', {}, 'Partiler'));
+  uy.append(h('div', { class: 'muted' }, `💰 Milletvekili geliri: günlük ${w.meclis.salary} Dinar Meclis maaşı + ${MP_ALLOWANCE} Dinar milletvekili ödeneği (Hazine’den, hesap defterinde görünür).`));
+  const pt = sec.partiler!; pt.append(h('h3', {}, 'Partiler'));
   for (const f of w.meclis.factions) {
     const n = w.people.filter((p) => p.meclis && p.faction === f.id).length;
-    box.append(h('div', { class: 'row card', style: `border-left:6px solid ${f.color}` }, h('b', { class: 'grow' }, f.name), h('span', { class: 'muted' }, `${n} sandalye · lider: ${findPerson(w, f.leaderId)?.name ?? '—'}`),
+    pt.append(h('div', { class: 'row card', style: `border-left:6px solid ${f.color}` }, h('b', { class: 'grow' }, f.name), h('span', { class: 'muted' }, `${n} sandalye · lider: ${findPerson(w, f.leaderId)?.name ?? '—'}`),
       mp && c.me!.faction !== f.id ? h('button', { class: 'sm', onclick: () => c.act({ t: 'joinFaction', factionId: f.id }) }, 'Katıl') : c.me?.faction === f.id ? h('span', { class: 'pill' }, 'üyesiniz') : ''));
   }
-  if (mp) { const nm = h('input', { placeholder: 'Yeni parti adı' }); box.append(h('div', { class: 'row' }, nm, h('button', { class: 'sm', onclick: () => c.act({ t: 'foundFaction', name: nm.value }) }, 'Parti kur'))); }
+  if (mp) { const nm = h('input', { placeholder: 'Yeni parti adı' }); pt.append(h('div', { class: 'row' }, nm, h('button', { class: 'sm', onclick: () => c.act({ t: 'foundFaction', name: nm.value }) }, 'Parti kur'))); }
   // agenda: public sessions for everyone; only MPs speak/vote/propose
   const active = w.meclis.bills.filter((b) => ['tartisma', 'oylama', 'onay'].includes(b.status));
   box.append(h('h3', {}, `Gündem (${active.length})${mp ? '' : ' · açık oturum (izleyici)'}`));
   if (!active.length) box.append(h('div', { class: 'muted' }, 'Görüşülen teklif yok.'));
   for (const b of active) box.append(billCard(c, b, mp && b.status !== 'onay'));
+  // halk dilekçeleri
+  const dil = (w.meclis.dilekceler ?? []).filter((d) => d.status === 'acik');
+  box.append(h('h3', {}, `✍ Halk dilekçeleri (${dil.length}) · 20 imza → doğrudan gündem`));
+  for (const d of dil) box.append(h('div', { class: 'row card' }, h('span', { class: 'grow' }, `${d.title} · ${findPerson(w, d.by)?.name ?? '?'} · ${d.signers.length}/20 imza · ${d.day + 10}. güne kadar`), c.me && !d.signers.includes(c.me.id) ? h('button', { class: 'sm', title: 'Meclis binasında imzalanır', onclick: () => c.act({ t: 'dilekceImza', id: d.id }) }, 'İmzala') : h('span', { class: 'pill' }, 'imzaladınız')));
+  const tk = sec.teklif!;
+  const rep = repealables(w);
+  tk.append(h('h3', {}, '📜 Yürürlükteki genelge ve kanunlar'), ...(rep.length ? rep.map((r) => h('div', { class: 'msg' }, `${r.name}${r.until ? ` · ${r.until}. güne kadar` : ' · süresiz'}`)) : [h('div', { class: 'muted' }, 'Yürürlükte süreli karar yok.')]));
+  { const dk = select((Object.keys(BILL_LABEL) as BillKind[]).filter((k) => k !== 'ozel' && k !== 'cumhuriyet').map((k): [string, string] => [k, BILL_LABEL[k]])); const dt = h('input', { placeholder: 'Hedef (genelge adı, g:… vb.)' }); const dv = numIn(0, 0, 50000);
+    tk.append(h('h3', {}, '✍ Halk dilekçesi başlat (herkes, Meclis binasında)'), h('div', { class: 'row' }, dk, dv, dt, h('button', { onclick: () => c.act({ t: 'dilekceAc', kind: dk.value as BillKind, value: Number(dv.value), target: dt.value }) }, 'Dilekçe aç'))); }
+  tk.append(h('details', {}, h('summary', {}, '❓ Meclis kuralları'), h('div', { class: 'muted' }, `Yeter sayı: bir kararın geçerli olması için en az ${Math.floor(w.meclis.seats.length / 2) + 1}/${w.meclis.seats.length} milletvekili oy kullanmalı (ör. 16 sandalyede 9). Oylama başlayınca bütün vekillere “Oylama başladı, X saat kaldı” bildirimi gider. 200 D ve üstü harcamalar 3 kişilik Bütçe Komisyonu’ndan (2 iktidar + 1 muhalefet) “Hazine karşılar mı?” raporu alır. Hazinenin karşılayamadığı harcama ancak “Borçlanma” etiketiyle önerilir (dış borç %10 faizle taksitle ödenir). Yürürlükteki genelge/kanun “Kanunu/genelgeyi kaldır” teklifiyle kaldırılır. Halk dilekçesi 20 imzayla doğrudan gündeme girer (10 gün süre). Seçimde oy: 16+ yaş, zindanda olmamak; dilenciler de oy verir.`)));
   if (mp) {
     const kind = select((Object.keys(BILL_LABEL) as BillKind[]).filter((k) => k !== 'ozel').map((k): [string, string] => [k, BILL_LABEL[k]]));
     const val = numIn(10, 0, 50000); const title = h('input', { placeholder: 'Başlık (genelge için metin)', maxlength: '60' });
     const target = select([['', '— hedef —'], ...w.laws.map((l): [string, string] => [l.id, `Kanun: ${l.name}`]), ...GOODS.map((g): [string, string] => [g, `Mal: ${GOOD_LABEL[g]}`]), ['meclis', 'Maaş: Meclis üyesi'], ...STATE_PROFS.map((p): [string, string] => [p, `Maaş: ${PROF_LABEL[p]}`]), ...w.people.filter((p) => STATE_PROFS.includes(p.prof) || p.rank || p.meclis).map((p): [string, string] => [p.id, `Kişi: ${p.rank ? p.rank + ' ' : ''}${p.name}`])]);
-    box.append(h('h3', {}, 'Teklif ver (genelge, vergi, bütçe, gensoru…)'), h('div', { class: 'row' }, kind, val, target, title, h('button', { class: 'primary', onclick: () => c.act({ t: 'propose', kind: kind.value as BillKind, value: Number(val.value), target: target.value, title: title.value || undefined } as never) }, 'Teklif et')),
+    for (const r of rep) target.append(h('option', { value: r.target }, `Kaldır: ${r.name}`));
+    const borc = h('input', { type: 'checkbox' }) as HTMLInputElement;
+    tk.append(h('h3', {}, 'Teklif ver (genelge, vergi, bütçe, gensoru, kaldır…)'), h('div', { class: 'row', style: 'flex-wrap:wrap' }, kind, val, target, title, h('label', { title: 'Hazine karşılamıyorsa dış borçla' }, borc, ' Borçlanma'), h('button', { class: 'primary', onclick: () => c.act({ t: 'propose', kind: kind.value as BillKind, value: Number(val.value), target: target.value, title: title.value || undefined, borc: borc.checked || undefined } as never) }, 'Teklif et')),
       h('div', { class: 'muted' }, 'Genelge: bağlayıcı olmayan Meclis bildirisi. Gensoru: bir memuru ya da vezir/paşayı görevden alır. Bütçe: Saray’ın harcama sınırı. Kabul edilen kararlar Kayzer’in onayına gider; veto kesindir. Cumhuriyet İlanı (anayasa): 2 gün görüşülür, 14/16 evet ister, parti disiplini uygulanmaz, Kayzer veto edemez; reddedilirse teklif sahibi Kayzer’in gözünden düşer ve 10 gün yeniden verilemez.'),
       h('h3', {}, 'Kanun teklifi (kanun yazıcı)'), lawBuilder(w, 'Meclise sun', (law) => c.act({ t: 'propose', kind: 'ozel', value: law.value, target: law.good ?? '', law })));
-  } else box.append(h('div', { class: 'card muted' }, h('b', {}, 'Meclis bölümü kilitli. '), 'Teklif vermek, kürsüde konuşmak, oy kullanmak ve parti kurmak için milletvekili seçilmelisiniz.'));
+  } else tk.append(h('div', { class: 'card muted' }, h('b', {}, 'Meclis bölümü kilitli. '), 'Teklif vermek, kürsüde konuşmak, oy kullanmak ve parti kurmak için milletvekili seçilmelisiniz.'));
   // history
   const done = w.meclis.bills.filter((b) => !['tartisma', 'oylama', 'onay'].includes(b.status)).slice(-8).reverse();
-  if (done.length) box.append(h('h3', {}, '🗳 Oylama geçmişi'), ...done.map((b) => billCard(c, b, false)));
-  box.append(h('h3', {}, '📰 Meclis gazetesi'), ...w.meclis.log.slice(-10).reverse().map((l) => h('div', { class: 'msg' }, `Gün ${l.day}: ${l.text}`)));
-  return box;
+  const gc = sec.gecmis!;
+  if (done.length) gc.append(h('h3', {}, '🗳 Oylama geçmişi'), ...done.map((b) => billCard(c, b, false)));
+  gc.append(h('h3', {}, '📰 Meclis gazetesi'), ...w.meclis.log.slice(-10).reverse().map((l) => h('div', { class: 'msg' }, `Gün ${l.day}: ${l.text}`)));
+  return root;
 }
 
 function santiyePanel(c: Ctx): HTMLElement {

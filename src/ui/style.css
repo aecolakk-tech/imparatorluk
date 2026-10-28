@@ -272,3 +272,7 @@ body.has-sheet .controls .hotbar { display:none; }
 .goal-row { margin:4px 0; } .goal-row .bar { width:100%; display:block; } .card.done { opacity:.6; } .small { font-size:12px; }
 .row.wrap { flex-wrap:wrap; }
 .person-label .trait { font-size:11px; color:#e8c14a; }
+/* v2.0.1 Meclis */
+.meclis-full .tabs { position: sticky; top: 0; z-index: 2; background: inherit; padding: 4px 0; gap: 4px; }
+.seats.hemicycle { display: flex; flex-wrap: wrap; justify-content: center; border-radius: 50% 50% 0 0 / 30% 30% 0 0; padding: 10px; }
+.meclis-full .bar { background: #333; border-radius: 4px; overflow: hidden; margin-top: 4px; }

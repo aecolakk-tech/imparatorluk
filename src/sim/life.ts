@@ -350,10 +350,12 @@ function switchJobs(w: World): void {
     const g = PRODUCES[p.prof]?.good;
     const best = (Object.entries(PRODUCES) as [Person['prof'], { good: Good }][])
       .filter(([prof]) => count(prof) < 14 && (!idleHamal || STAPLE_PROFS.includes(prof)))
-      .map(([prof, r]) => ({ prof, need: w.market.unmet[r.good] * BASE_PRICE[r.good] * (STAPLE_PROFS.includes(prof) ? 3 : 1) })).sort((a, b) => b.need - a.need)[0];
+      .map(([prof, r]) => ({ prof, need: (w.market.unmet[r.good] + (PRODUCES[prof]?.inputs ? 0 : Math.max(0, w.prices[r.good] / BASE_PRICE[r.good] - 1.6) * 30)) * BASE_PRICE[r.good] * (STAPLE_PROFS.includes(prof) ? 3 : 1) })).sort((a, b) => b.need - a.need)[0];
     // v2.0.1: chain-aware – bread is short because flour is short? the hands go to the mill; flour short because wheat is? to the fields
     const UP: Partial<Record<Person['prof'], [Person['prof'], Good]>> = { firinci: ['degirmenci', 'un' as Good], degirmenci: ['ciftci', 'bugday'] };
-    for (let i = 0; best && i < 2; i++) { const u = UP[best.prof]; if (!u) break; const [up, ug] = u; if ((w.market.unmet[ug] ?? 0) > 0 || (w.prices[ug] ?? 0) > BASE_PRICE[ug] * 2) best.prof = up; else break; }
+    for (let i = 0; best && i < 2; i++) { const u = UP[best.prof]; if (!u) break; const [up, ug] = u; const own = PRODUCES[best.prof]!.good; const ratio = (x: Good): number => (w.prices[x] ?? 0) / BASE_PRICE[x];
+      // go upstream only when the input is the scarcer link (dearer relative to normal than the product itself)
+      if (((w.market.unmet[ug] ?? 0) > 0 && (w.market.unmet[own] ?? 0) === 0) || (ratio(ug) > 2 && ratio(ug) > ratio(own))) best.prof = up; else break; }
     if (best && best.prof !== p.prof && best.need > 20 && (!g || w.market.unmet[g] === 0)) {
       const old = PROF_LABEL[p.prof]; p.prof = best.prof; p.work = WORKPLACE[best.prof]; p.xp = 0; p.unemployedDays = 0;
       log(w, `${p.name} ${old} işini bıraktı, ${PROF_LABEL[best.prof]} oldu (orada talep var).`, p.id);

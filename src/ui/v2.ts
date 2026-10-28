@@ -73,6 +73,7 @@ export function personExtras(c: Ctx, p: Person): HTMLElement | null {
   if (p.infected) out.append(h('span', { class: 'chip warn' }, '🦠 hasta'));
   if (m.prof === 'bekci' && m.jailedDays === 0) out.append(h('button', { onclick: () => c.act({ t: 'searchPerson', personId: p.id }) }, '🔎 Üstünü ara'));
   if (!p.playerId && PRODUCES[p.prof]) out.append(h('button', { class: 'primary', title: 'Esnaf itibarınıza ve rütbenize bakar; uygunsa sizi çırak alır.', onclick: () => c.act({ t: 'askJob', personId: p.id }) }, '💼 Bir iş var mı?'));
+  for (const d of (c.w.meclis.dilekceler ?? []).filter((x) => x.status === 'acik' && x.by === m.id && !x.signers.includes(p.id)).slice(0, 2)) out.append(h('button', { title: `${d.signers.length}/20 imza`, onclick: () => c.act({ t: 'dilekceIste', id: d.id, personId: p.id }) }, `✍ Dilekçemi imzalat (${d.signers.length}/20)`));
   return out.childNodes.length ? out : null;
 }
 
@@ -96,17 +97,15 @@ export function eventOptions(kind: string, env: PopupEnv, close: () => void): HT
 export function eventTitle(kind: string): string { return `${ICON[kind] ?? '⚠'} ${TITLE[kind] ?? 'OLAY'}`; }
 
 export const WHATS_NEW: string[] = [
-  '⚔ Gerçek zamanlı savaş: eşkıya ve düşman askerleri haritada dolaşan gerçek hedefler. Silahınızı seçip dokunun ya da “Saldır”a basın; kılıç/hançer yakından, yay uzaktan vurur (ok harcar), kalkan darbeyi azaltır.',
-  '⛵ Macar çıkarması artık görünür: gemiler nehirden yelken açıp Liman’a yanaşır, askerler karaya çıkıp şehre yürür; asker ve bekçilerimiz onlarla çarpışır. Hasar sayıları, can çubukları, kırmızı parlama.',
-  '🐢 Baskın ve savaş sırasında oyun otomatik 0,25x yavaşlar; bitince Kayzer’in hızına döner.',
-  '🎮 Yeni kontroller: yürümek için sol altta joystick (bilgisayarda WASD/oklar); sağ altta “Saldır” ve “Etkileşim”, altta 8 yuvalı hızlı çubuk (1–8 tuşları; Boşluk/F saldır, E etkileşim). Haritaya dokunmak artık yürütmez: kişiye dokununca adı ve canı, binaya dokununca bina seçilir; yanına gidip “Etkileşim” ile girersiniz.',
-  '🕰 Yeni saat: 1 oyun günü = 20 gerçek dakika. Gündüz (06–22) her oyun saati 1 dakika, gece (22–06) 30 saniye. Yürümek saat yakmaz; kısa bir yol birkaç saniye sürer. Günde 3 öğün ve 3 kez su yeter.',
-  '👤 Birine dokununca adı ve canı görünür; yanındayken “Etkileşim” ile konuşma penceresi açılır ve o kişi siz konuşurken bekler.',
-  '🎒 Fırın/Kuyu/Pazar’da “Çantaya al”; Ye/Su iç önce çantadan ücretsiz kullanır, yoksa fiyatı düğmede yazar. Sandık yalnız evde; her eşya sandığa konabilir.',
-  '💰 Kese geçmişi (keseye dokunun): her gelir/giderin sebebi; para kaybında bildirim. Kese kuruşuyla gösterilir.',
-  '📍 Yer bul: Fırın, Kuyu, Demirci… birine basınca karakteriniz oraya yürür, varınca açılır. Haritada dokunmak artık rastgele panel açmaz.',
-  '🆕 Yeni karakterler tok, susuz değil ve dinç başlar; çantada ekmek ve su var; tanıtım sırasında ihtiyaçlar durur. Pencereler sırayla açılır.',
-  '🔧 Su daha yavaş azalır; çubuklar “100 = iyi” gösterir; karakteriniz siz çevrimiçiyken arkanızdan yiyip içmez (yalnız çok acil durumda, bildirimle); menü donması, teklif kartı, sekme taşması, fare tekerleği ve diğer hatalar düzeltildi.',
+  '🏛 Yeni Meclis ekranı: üstte hazine, hükümet, sonraki seçim; sekmeler Gündem / Teklif Ver / Geçmiş / Üyeler / Partiler / Seçim-Kampanya.',
+  '📊 Bütçe Komisyonu: 200 D ve üstü harcamalara “Hazine karşılar mı?” raporu. Hazinenin karşılayamadığı harcama ancak “Borçlanma” etiketiyle önerilir.',
+  '✍ Halk dilekçesi: herkes Meclis’te dilekçe açabilir; 20 imza toplanınca konu doğrudan gündeme girer. Etkileşimde “Dilekçemi imzalat”.',
+  '🗳 Gerçek sandık: seçim günü Meclis binasına yürüyüp oy verin. “Oyunuz kaydedildi”, canlı katılım oranı, oylar gizli.',
+  '⏳ “Oylama başladı, X saat kaldı” bildirimi ve sayaç; yeter sayı (16’da 9) uygulanıyor. Boş sandalyeler ara seçimle hemen doluyor.',
+  '📜 Yürürlükteki genelge ve kanunların bitiş günü görünür; yeni “Kanunu/genelgeyi kaldır” teklifi.',
+  '🗽 Cumhuriyet İlanı (anayasa): 14/16 evet, vicdan oyu (parti disiplini yok), Kayzer veto edemez.',
+  '🤖 Tek başına oynanabilir: NPC’ler seçim kampanyası yapıyor, parti kuruyor, dilekçe imzalıyor, iş arıyor, terfi ediyor, camiye gidiyor; Kayzer yokken naip vergi, ambar ve narhı yönetiyor ve bekleyen kararları zamanında onaylıyor ya da reddediyor.',
+  '🌾 Ekonomi düzeltmeleri: ekmek zinciri (çiftçi→değirmen→fırın) artık kopmuyor, esnaf kredisi, gerçek doğumlar, kıtlıkta göç tamamen durmuyor.',
 ];
 export function whatsNewModal(onClose: () => void): HTMLElement {
   const el = h('div', { class: 'modal whatsnew' }, h('div', { class: 'box' }, h('h2', {}, `✨ Neler yeni? (${VERSION})`), h('div', { class: 'stack' }, ...WHATS_NEW.map((t) => h('div', { class: 'msg' }, t))), h('button', { class: 'primary', onclick: () => { el.remove(); onClose(); } }, 'Harika!')));

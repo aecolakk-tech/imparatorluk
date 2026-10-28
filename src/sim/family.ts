@@ -130,7 +130,7 @@ export function canHaveChild(w: World, a: Person, b: Person, npc = false): strin
   if (fertility(w, a, b) <= 0) return 'Bu yaşta çocuk olmaz (kadınlar 16–45 yaş arası; erkeklerde 60’tan sonra azalır).';
   const need = npc ? 100 + kids * 40 : PROSPERITY_MONEY + kids * 100; /* NPC households have smaller savings; the city must renew itself */
   if (a.money + b.money < need) return `Çocuk için hanede en az ${need} Dinar birikim gerekir.`;
-  if (a.hunger > 45 || b.hunger > 45) return 'Hane tok değil; önce karnınızı doyurun.';
+  if (a.hunger > (npc ? 70 : 45) || b.hunger > (npc ? 70 : 45)) return 'Hane tok değil; önce karnınızı doyurun.'; // NPCs are checked at night, before supper
   if (a.jailedDays > 0 || b.jailedDays > 0) return 'Zindandayken olmaz.';
   if (!foodSecure(w)) return 'Şehirde ekmek kıtlığı var; şimdi çocuk zor beslenir.';
   if (w.pregnancies.some((p) => p.parents.includes(a.id))) return 'Zaten bir bebek yolda.';
@@ -151,8 +151,8 @@ export function requestChild(w: World, me: Person, playerDecides: (p: Person) =>
   if (sp.mood < 35) return `${sp.name} şimdi hazır değil.`;
   return conceive(w, me, sp);
 }
-function conceive(w: World, a: Person, b: Person): string {
-  const err = canHaveChild(w, a, b); if (err) return err;
+function conceive(w: World, a: Person, b: Person, npc = false): string {
+  const err = canHaveChild(w, a, b, npc); if (err) return err; // v2.0.1 fix: NPC couples were re-checked with the player rule (300 D savings) → almost no births
   if (rand(w) > fertility(w, a, b)) return 'Bu sefer olmadı; bir süre sonra yeniden deneyin.';
   w.pregnancies.push({ parents: [a.id, b.id], due: w.day + PREGNANCY_DAYS });
   log(w, `${a.name} ile ${b.name} bir bebek bekliyor!`, a.id);
@@ -198,7 +198,7 @@ export function familyDay(w: World, npcDecides: (p: Person) => boolean, now: num
   for (const p of w.people) {
     const sp = findPerson(w, p.spouse);
     if (!sp || p.id > sp.id || !npcDecides(p) || !npcDecides(sp)) continue;
-    if (!canHaveChild(w, p, sp, true) && chance(w, 0.04)) conceive(w, p, sp);
+    if (!canHaveChild(w, p, sp, true) && chance(w, 0.04)) conceive(w, p, sp, true);
   }
   // children: upkeep, school, illness, growing up
   for (const c of [...w.children]) {
