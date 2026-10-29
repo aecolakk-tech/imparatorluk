@@ -17,7 +17,7 @@ import { assignSlot, hotbarSlots } from './controls';
 import { marketPrice } from '../sim/economy';
 
 export const APP_NAME = 'Medieval Empire';
-export const VERSION = 'v2.0.5';
+export const VERSION = 'v2.1.0';
 const EAT: Good[] = ['ekmek', 'et', 'balik', 'yumurta', 'sut', 'su'];
 
 /** 🎒 Çanta: carried weapons (draw / holster), food & water (use), and the house chest. */
@@ -100,6 +100,14 @@ export function eventOptions(kind: string, env: PopupEnv, close: () => void): HT
 export function eventTitle(kind: string): string { return `${ICON[kind] ?? '⚠'} ${TITLE[kind] ?? 'OLAY'}`; }
 
 export const WHATS_NEW: string[] = [
+  '👑 v2.1.0 – TEK KİŞİLİK OYUN: Oyun artık tamamen telefonunuzda/tarayıcınızda çalışır. Sunucu, hesap ve davet şifresi yok; ping, siyah ekran ve “bağlantı yavaş” uyarısı da yok. İnternetsiz oynanır.',
+  '🏰 Şehirdeki herkes (Kayzer, Meclis, partiler, tüccarlar, bekçiler) yapay zekâyla yaşar: seçimler, isyanlar, ekonomi ve olaylar sürer. Çalışıp Kayzer’e danışman olacak kadar yükselebilir; isyanla, evlilikle ya da cumhuriyette seçimle tahta siz de çıkabilirsiniz.',
+  '🧑‍🌾👑 Yeni Oyun’da iki başlangıç: “Halktan biri olarak başla” – tahtta rastgele bir Kayzer oturur (adil, zalim, cimri, cömert ya da dindar; vergisi, ambarı, sadakası buna göre değişir), devletin adı da rastgele gelir; isyanla, Kayzer ailesine evlenerek ya da cumhuriyette Başkan seçilerek tahta çıkabilirsiniz. “Kayzer olarak başla” – tahtta siz oturursunuz ve devletin adını siz koyarsınız (🎲 Rastgele tarihî isim önerir); halk mutsuzsa NPC’ler isyanla sizi devirebilir.',
+  '⏸ Dünya sadece oyun açıkken akar: uygulamadan çıkınca ya da telefonu kilitleyince zaman durur, döndüğünüzde kaldığınız yerden devam eder.',
+  '💾 Otomatik kayıt: her oyun günü, her dakika ve çıkarken kaydedilir; son 3 kayıt saklanır (biri bozulsa bile öncekiyle devam edilir). Açılışta “Devam Et” ya da “Yeni Oyun”.',
+  '⬇ Ayarlar → Kayıt: “Kaydı dışa aktar” ile kaydınızı dosya olarak indirin, “Kaydı içe aktar” ile başka bir telefonda/tarayıcıda yükleyin. İsterseniz “Buluta yedekle / Buluttan yükle” (e-posta + şifreli hesapla).',
+  '⏩ Oyun hızını (½x, 1x, 2x) artık her zaman siz seçersiniz (sağ üst).',
+  '🔄 Android uygulaması kendini günceller: yeni sürüm çıkınca açılışta otomatik gelir (“Güncellendi” yazısı çıkar), APK’yı yeniden kurmanız gerekmez. Kayıtlarınız silinmez.',
   '⚡ v2.0.5 – Daha az takılma: sunucu artık her 6 saniyede bütün dünyayı (~300 KB) değil, yalnızca değişenleri gönderir (çoğu zaman ~8 KB). Bir işlem yaptığınızda yeni durum işlemin cevabıyla gelir; ayrıca beklemezsiniz.',
   '🐢 Zayıf telefonlarda harita çizimi hafifledi (insanların konumu daha seyrek hesaplanır, yazılar ve konuşma balonları önbellekten çizilir).',
   '🛠 YENİ – İş görevi: işiniz varsa iş yerinize gidin, binaya girip “İş görevi yap”a basın. 3 kısa adım (ör. meyhane: sipariş al → içki doldur → servis). Günde 3 görev = günlük ücret + 1 itibar hemen ödenir; hızlı bitirene bahşiş. Artık bütün vardiya iş yerinde beklemek gerekmiyor. Menü → İşin: “Bugün 1/3 görev”.',

@@ -6,7 +6,7 @@ export interface Snapshot { id: string; at: number; day: number; }
 export interface Session { playerId: string; founder: boolean; }
 
 export interface Backend {
-  readonly mode: 'mock' | 'supabase';
+  readonly mode: 'mock' | 'supabase' | 'solo';
   session(): Session | null;
   restore(): Promise<Session | null>;
   register(access: string, email: string, password: string, name: string, prof: Profession, takeOverId?: string | null): Promise<string | null>;

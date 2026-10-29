@@ -1,0 +1,22 @@
+// v2.1.0: solo smoothness on a slow phone (CPU 4x throttled): long tasks while the whole simulation runs in the page.
+import puppeteer from 'puppeteer-core';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const b = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox'] });
+const p = await b.newPage(); await p.setViewport({ width: 844, height: 390, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+const I = (f, ...a) => p.evaluate(f, ...a);
+await p.evaluateOnNewDocument(() => { window.__lt = []; new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }).observe({ type: 'longtask', buffered: true }); });
+await p.goto('http://localhost:4173/?debug', { waitUntil: 'networkidle0' });
+await I(async () => { localStorage.clear(); localStorage.setItem('imp-guide-done', '1'); localStorage.setItem('imp-music', '0'); await new Promise((r) => { const q = indexedDB.deleteDatabase('imparatorluk-solo'); q.onsuccess = q.onerror = q.onblocked = r; }); });
+await p.reload({ waitUntil: 'networkidle0' }); await sleep(500);
+await I(() => [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Yeni Oyun')).click()); await sleep(300);
+await (await p.$('.solo-menu input')).type('Perf Testoğlu'); await I(() => [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Başla')).click()); await sleep(2500);
+await I(() => { const be = window.__solo; const w = be.st.world; const me = w.people.find((q) => q.id === w.players.solo.personId); me.lookSet = true; me.genderSet = true; me.profile = { ...(me.profile || {}), set: true, surname: 'T', age: 'genc', origin: 'koylu', temper: 'sakin' }; me.onboardUntil = 0; document.querySelectorAll('.modal').forEach((m) => m.remove()); });
+await I(() => window.__imp().act({ t: 'setSpeed', speed: 2 }));
+const cdp = await p.target().createCDPSession(); await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+await I(() => { window.__lt = []; }); const secs = Number(process.env.SECS ?? 120);
+const d0 = await I(() => window.__solo.st.world.day * 24 + window.__solo.st.world.hour);
+await sleep(secs * 1000);
+const r = await I(() => ({ lt: window.__lt, prof: window.__imp().profile(), hb: (window.__tickMs ?? []), gh: window.__solo.st.world.day * 24 + window.__solo.st.world.hour, kb: Math.round(JSON.stringify(window.__solo.st.world).length / 1024) }));
+const lt = r.lt.sort((a, c) => c - a);
+console.log(`CPU 4x, ${secs}s at 2x speed: game hours ${r.gh - d0}, long tasks ${lt.length} (>50ms), worst ${lt.slice(0, 8).join(',')} ms; frame cpu ${JSON.stringify(r.prof)}; world ${r.kb} KB`);
+await b.close();

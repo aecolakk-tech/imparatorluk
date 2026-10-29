@@ -2168,6 +2168,68 @@ function campaignDay(w, now) {
   (w.gnews ??= []).push({ day: w.day, text: e.nabiz });
 }
 
+// src/sim/solostart.ts
+function rulerTraitDay(w) {
+  const t = w.rulerTrait;
+  const k = findPerson(w, w.kayzerId);
+  if (!t || !k || k.playerId && !k.npc || w.regime === "cumhuriyet") return "";
+  const folk = w.people.filter((p) => p.id !== k.id);
+  switch (t) {
+    case "zalim": {
+      for (const p of folk) {
+        p.mood = clamp(p.mood - 0.6);
+        p.loyalty = clamp(p.loyalty - 0.4);
+      }
+      const tax = Math.min(40, folk.length * 0.3);
+      w.treasury += tax;
+      return "zalim kayzer halk\u0131 s\u0131kt\u0131";
+    }
+    case "comert": {
+      const poor = [...folk].sort((a, b2) => a.money - b2.money).slice(0, 5);
+      let n2 = 0;
+      for (const p of poor) {
+        if (w.treasury < 30) break;
+        w.treasury -= 2;
+        p.money += 2;
+        p.mood = clamp(p.mood + 2);
+        n2++;
+      }
+      for (const p of folk) p.loyalty = clamp(p.loyalty + 0.2);
+      return n2 ? `${n2} yoksula hazineden sadaka` : "";
+    }
+    case "dindar": {
+      for (const p of folk) {
+        p.din = clamp((p.din ?? 50) + 0.3);
+        if ((p.din ?? 50) >= 60) p.mood = clamp(p.mood + 0.3);
+      }
+      return "dindar kayzer camiye ba\u011F\u0131\u015F yapt\u0131";
+    }
+    case "cimri": {
+      for (const p of folk) p.mood = clamp(p.mood - 0.15);
+      return "";
+    }
+    case "adil": {
+      for (const p of folk) p.loyalty = clamp(p.loyalty + 0.1);
+      return "";
+    }
+  }
+  return "";
+}
+function traitPolicy(w) {
+  const k = findPerson(w, w.kayzerId);
+  const t = k && !(k.playerId && !k.npc) ? w.rulerTrait : void 0;
+  switch (t) {
+    case "zalim":
+      return { taxMin: 14, taxMax: 24, distAt: 2.6, buyGranary: true };
+    case "cimri":
+      return { taxMin: 12, taxMax: 18, distAt: 2.4, buyGranary: false };
+    case "comert":
+      return { taxMin: 5, taxMax: 11, distAt: 1.4, buyGranary: true };
+    default:
+      return { taxMin: 8, taxMax: 16, distAt: 1.8, buyGranary: true };
+  }
+}
+
 // src/sim/solo.ts
 var isNpc = (p) => !p.playerId || !!p.npc;
 var adult = (w, p) => yearsOf(w, p) >= 16 && p.jailedDays <= 0 && p.prof !== "naip" && p.prof !== "kayzer";
@@ -2336,27 +2398,36 @@ function naipPolicy(w) {
   const bread = w.prices.ekmek ?? BASE_PRICE.ekmek;
   const b0 = BASE_PRICE.ekmek;
   const mood = w.people.reduce((a, p) => a + p.mood, 0) / Math.max(1, w.people.length);
+  const tp = traitPolicy(w);
   const vergiG = (w.genelgeler ?? []).some((g) => g.until >= w.day && (g.kind === "vergiArtirim" || g.kind === "vergiIndirim"));
   const passive = w.meclis.bills.some((b2) => b2.kind === "vergi" && ["tartisma", "oylama", "onay"].includes(b2.status));
   if (!vergiG && !passive) {
     const tr = hazineTrend(w);
-    if (w.taxRate < 16 && (w.treasury < R * 1.5 || tr < -15 && w.treasury < R * 6)) {
+    if (w.rulerTrait && w.taxRate < tp.taxMin) {
+      w.taxRate += 1;
+      done.push(`vergi %${w.taxRate}`);
+      use(w, "naip_vergi");
+    } else if (w.rulerTrait && w.taxRate > tp.taxMax) {
+      w.taxRate -= 1;
+      done.push(`vergi %${w.taxRate}`);
+      use(w, "naip_vergi");
+    } else if (w.taxRate < tp.taxMax && (w.treasury < R * 1.5 || tr < -15 && w.treasury < R * 6 || w.rulerTrait === "zalim" && w.taxRate < tp.taxMax)) {
       w.taxRate += 1;
       done.push(`vergi %${w.taxRate} (hazine g\xFCnde ${Math.round(tr)} D)`);
       use(w, "naip_vergi");
-    } else if (w.taxRate > 8 && tr > 40 && w.treasury > R * 4 && mood < 85) {
+    } else if (w.taxRate > tp.taxMin && tr > 40 && w.treasury > R * 4 && mood < 85) {
       w.taxRate -= 1;
       done.push(`vergi %${w.taxRate} (hazine dolu)`);
       use(w, "naip_vergi");
     }
   }
-  if (bread > b0 * 1.8 && w.granary >= 20) {
+  if (bread > b0 * tp.distAt && w.granary >= 20) {
     const n2 = granaryDistribute(w, 40);
     if (n2) {
       done.push(`ambardan ${n2} bu\u011Fday da\u011F\u0131t\u0131ld\u0131`);
       use(w, "naip_ambar");
     }
-  } else if (bread < b0 * 1.05 && w.granary < 150 && w.treasury > R * 3) {
+  } else if (tp.buyGranary && bread < b0 * 1.05 && w.granary < 150 && w.treasury > R * 3) {
     const n2 = granaryBuy(w, 20);
     if (n2) {
       done.push(`ambara ${n2} bu\u011Fday al\u0131nd\u0131`);
@@ -2376,6 +2447,10 @@ function naipPolicy(w) {
     w.imports = true;
     done.push("ithalat izni verildi");
     use(w, "naip_ithalat");
+  }
+  {
+    const t = rulerTraitDay(w);
+    if (t) done.push(t);
   }
   for (const p of w.people) if (p.prof === "naip") p.mood = clamp(p.mood);
   if (done.length) log(w, `\u{1F3DB} Naip: ${done.join("; ")}.`);
@@ -11968,7 +12043,7 @@ function applyAction(w, playerId, a, now) {
     case "missionPay":
       return ok2(missionPay(w, me, a.id, !!a.pay));
     case "setSpeed": {
-      if (w.kayzerId !== me.id) return no("Oyun h\u0131z\u0131n\u0131 sadece h\xFCk\xFCmdar de\u011Fi\u015Ftirir.");
+      if (w.kayzerId !== me.id && !w.solo) return no("Oyun h\u0131z\u0131n\u0131 sadece h\xFCk\xFCmdar de\u011Fi\u015Ftirir.");
       if (![0.5, 1, 2].includes(a.speed)) return no("0.5x, 1x ya da 2x.");
       if (w.combat) {
         w.speedBefore = a.speed;

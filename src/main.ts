@@ -12,6 +12,8 @@ import { GOODS } from './sim/types';
 import { GOOD_LABEL, MAP_H, MAP_W, PLAYER_PROFS, PROF_LABEL } from './sim/constants';
 import { findPerson } from './sim/world';
 import { makeBackend } from './backend';
+import { SoloBackend } from './backend/solo';
+import { soloMenu, saveSection, updateNotice, checkUpdate } from './ui/solo';
 import type { Backend } from './backend/api';
 import { MOCK_FOUNDER_EMAIL } from './backend/mock';
 import { aim, markSwing } from './ui/v2';
@@ -55,6 +57,7 @@ import { DAYS_PER_YEAR, DEATH_START_AGE, DEATH_CERTAIN_AGE } from './sim/constan
 
 const app = document.getElementById('app')!;
 const be: Backend = makeBackend();
+const solo: SoloBackend | null = be instanceof SoloBackend ? be : null; // v2.1.0 tek kişilik (default)
 let world: World | null = null;
 let stat: HTMLCanvasElement | null = null;
 const cam: Camera = { x: 22, y: 8, z: 2.5 };
@@ -391,7 +394,7 @@ function renderHud(): void {
       w.empireName ? chip('crown', w.empireName, 'Devletin adı') : '',
       ...events.slice(0, 1)),
     h('div', { class: 'hud-r' },
-      ruler ? h('span', { class: 'speed seg', title: 'Oyun hızı (Kayzer, her yerden)' }, ...[0.5, 1, 2].map((s) => h('button', { class: `mini${w.speed === s ? ' on' : ''}`, onclick: () => { void send({ t: 'setSpeed', speed: s }); } }, `${s === 0.5 ? '½' : s}x`))) : '',
+      ruler || solo ? h('span', { class: 'speed seg', title: 'Oyun hızı' }, ...[0.5, 1, 2].map((s) => h('button', { class: `mini${w.speed === s ? ' on' : ''}`, onclick: () => { void send({ t: 'setSpeed', speed: s }); } }, `${s === 0.5 ? '½' : s}x`))) : '',
       h('button', { class: `mini icon${musicOn() ? ' on' : ''}`, title: musicOn() ? 'Müziği kapat' : 'Müziği aç', onclick: () => { setMusic(!musicOn()); renderHud(); } }, ic('music')),
       h('button', { class: 'mini icon', title: isMuted() ? 'Sesi aç' : 'Sesi kapat', onclick: () => { setMuted(!isMuted()); renderHud(); } }, ic(isMuted() ? 'mute' : 'sound'))),
   );
@@ -475,7 +478,8 @@ function openMenu(sec: Section): void {
         h('div', { class: 'row' }, h('button', { onclick: () => app.append(whatsNewModal(() => undefined)) }, `✨ Neler yeni? (${VERSION})`), be.session()?.founder || world?.kayzerId === me()?.id ? h('button', { onclick: () => app.append(empireNameModal(nameSend, world?.empireName)) }, '👑 Devletin adını değiştir') : ''),
         h('h3', {}, 'Kurallar ve kullanım'), ...RULES.map(([t, ls]) => h('details', {}, h('summary', {}, t), ...ls.map((l) => h('div', { class: 'msg' }, l)))),
         h('h3', {}, 'Emeği geçenler'), h('div', { class: 'muted' }, CREDITS),
-        h('div', {}, h('button', { class: 'danger', onclick: () => { void be.logout().then(() => location.reload()); /* v2.0.3: a clean page for the next login — no stale panel/listeners/timers from this session */ } }, 'Çıkış')));
+        solo ? saveSection(solo, toast, () => { sessionStorage.setItem('imp-continue', '1'); location.reload(); }, () => rerenderSheet(true), soloNewGame) : '',
+        solo ? '' : h('div', {}, h('button', { class: 'danger', onclick: () => { void be.logout().then(() => location.reload()); /* v2.0.3: a clean page for the next login — no stale panel/listeners/timers from this session */ } }, 'Çıkış')));
     }
     return h('div', {}, bar_, body);
   });
@@ -1016,7 +1020,8 @@ let ticking = false; let tickAt = 0; let lastWorldAt = 0; let started = false; l
 /** v2.0.2: a heartbeat can never hang the client (the live battle froze when one request never returned: the world stopped updating). */
 const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('zaman aşımı')), ms))]);
 async function tick(): Promise<void> {
-  if ((ticking && performance.now() - tickAt < 20_000) || !be.session()) return; ticking = true; tickAt = performance.now();
+  if ((ticking && performance.now() - tickAt < 20_000) || !be.session()) return;
+  if (solo && document.visibilityState === 'hidden') return; // v2.1.0: the world pauses while the game is not on screen ticking = true; tickAt = performance.now();
   try {
     const fw = be.takeFresh(); // v2.0.5: an action already brought the new world back: no extra round trip
     const r = fw ? { world: fw, summary: null } : await withTimeout(be.heartbeat(), 15_000); if (!fw) ((window as unknown as { __hb?: number[] }).__hb ??= []).push(Math.round(performance.now()));
@@ -1036,7 +1041,8 @@ async function start(): Promise<void> {
   app.replaceChildren(canvas); hudEl = h('div', { class: 'hud' }); dockEl = h('div', { class: 'dock' }); app.append(hudEl, dockEl); installClickSounds(app);
   setupInput(); setupControls(); addEventListener('imp-refresh', () => { rerenderSheet(true); ctl?.refresh(); });
   await tick();
-  setInterval(() => void tick(), be.mode === 'mock' && !location.search.includes('poll6') ? 2500 : 6000);
+  setInterval(() => void tick(), solo ? 3000 : be.mode === 'mock' && !location.search.includes('poll6') ? 2500 : 6000);
+  if (solo) soloLifecycle();
   setInterval(() => { void be.messages().then((m) => { msgs = m; renderDock(); }); }, 5000);
   setInterval(() => rerenderSheet(), 4000);
   requestAnimationFrame(frame);
@@ -1212,7 +1218,27 @@ function trialPopup(): void {
 void ({} as Corpse);
 
 installIconify();
-void be.restore().then((s) => (s ? start() : loginScreen()));
+if (solo) {
+  if (/[?&]debug\b/.test(location.search)) (window as unknown as { __solo?: SoloBackend }).__solo = solo; // headless tests only
+  solo.game = VERSION; solo.onSaveError = (e) => { console.warn('save', e); toast('⚠ Oyun kaydedilemedi (depolama dolu olabilir). Ayarlar → Kayıt → dışa aktarın.', 6000); };
+  soloMenu(app, solo, () => void start(), toast);
+  updateNotice(VERSION, toast); // after the menu replaced the page (the toast must survive)
+  void checkUpdate(VERSION, false, async () => undefined, toast);
+} else void be.restore().then((s) => (s ? start() : loginScreen()));
+/** v2.1.0: save + pause when hidden/closed (also the Android app's pause/resume), check for a newer build when back. */
+function soloLifecycle(): void {
+  const s = solo!; let lastCheck = Date.now();
+  const hide = (): void => { void s.pause(); };
+  const show = (): void => { void tick(); if (Date.now() - lastCheck > 10 * 60_000) { lastCheck = Date.now(); void checkUpdate(VERSION, true, () => s.saveNow(), toast); } };
+  document.addEventListener('visibilitychange', () => (document.visibilityState === 'hidden' ? hide() : show()));
+  addEventListener('pagehide', hide); addEventListener('freeze', hide);
+  document.addEventListener('pause', hide); document.addEventListener('resume', show); // Capacitor/Cordova app events
+  setInterval(() => { if (document.visibilityState === 'visible') show(); }, 30 * 60_000);
+}
+async function soloNewGame(): Promise<void> {
+  if (!(await askConfirm('Yeni oyun: bu dünya kapanır ve yeni bir şehir kurulur. Şu anki oyunu saklamak isterseniz önce “Kaydı dışa aktar” ya da “Buluta yedekle” yapın.', 'Yeni oyuna geç'))) return;
+  await solo!.saveNow(); sessionStorage.setItem('imp-newgame', '1'); location.reload();
+}
 // expose for headless smoke tests
 (window as unknown as { __imp: () => unknown }).__imp = () => ({ profile: () => ({ frameCpuAvgMs: +(profAcc.sum / Math.max(1, profAcc.n)).toFixed(2), frameCpuMaxMs: +profAcc.max.toFixed(1) }), mood: musicMood, mute: setMuted, sel: () => ({ b: selB, p: selPerson }), look: (x: number, y: number) => { followCam = false; cam.x = x - canvas.width / (cam.z * T) / 2; cam.y = y - canvas.height / (cam.z * T) / 2; }, act: doAct, openB: (id: string) => { const b = world!.buildings.find((x) => x.id === id); if (b) openSheet(() => bPanel(b)); }, menu: openMenu, admin: openAdmin, openP: openPersonSheet, gosterge: openGosterge, purse: openPurse, places: openPlaces, world, me: me()?.name, goods: GOODS.map((g) => GOOD_LABEL[g]), avatar: !!avatar, placed: placed.map((q) => [q.p.id, q.x, q.y, q.visible]), toScreen: (x: number, y: number) => { const r = canvas.getBoundingClientRect(); return [r.left + (x - cam.x) * cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1)), r.top + (y - cam.y) * cam.z * T / (lowGfx ? 1 : Math.min(2, window.devicePixelRatio || 1))]; } });
 

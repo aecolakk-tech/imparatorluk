@@ -309,3 +309,10 @@ body.has-sheet .a2hs, body:has(.modal) .a2hs { display:none !important; }
 @media (orientation: landscape) and (max-height: 520px) {
   body.has-sheet .alert-pop { left: calc((100vw - min(500px, 56vw)) / 2); max-width: calc(100vw - min(500px, 56vw) - 16px); }
 }
+/* v2.1.0 tek kişilik menu + kayıt */
+.solo-menu button.big { font-size:18px; padding:12px 22px; width:100%; }
+.solo-menu .row { flex-wrap:wrap; gap:6px; }
+.save-set .row { flex-wrap:wrap; gap:6px; align-items:center; }
+.login-cloud input { width:100%; margin:4px 0; }
+.update-bar { z-index: 60; }
+.solo-menu .empire-name { flex:1; min-width:160px; }

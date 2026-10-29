@@ -268,6 +268,10 @@ export interface World {
   schema: number;
   speed: number; // 0.5 | 1 | 2 (Kayzer only); 0.25 automatically during a raid/landing (v2.0.1)
   speedBefore?: number | null;
+  /** v2.1.0 tek kişilik: the only human may set the speed (no Kayzer requirement) */
+  solo?: boolean;
+  /** v2.1.0: temperament of an NPC Kayzer (tek kişilik 'Halktan biri' start) */
+  rulerTrait?: 'adil' | 'zalim' | 'cimri' | 'comert' | 'dindar';
   nature: Nature | null; nextDrought: number;
   festivalUntil: number; // game day (inclusive) the festival ground is open
   granary: number; // state wheat store (tahıl ambarı)

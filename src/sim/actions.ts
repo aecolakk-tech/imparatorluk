@@ -443,7 +443,7 @@ export function applyAction(w: World, playerId: string, a: Action, now: number):
     case 'missionClaim': return ok(missionClaim(w, me, a.id));
     case 'missionPay': return ok(missionPay(w, me, a.id, !!a.pay));
     case 'setSpeed': {
-      if (w.kayzerId !== me.id) return no('Oyun hızını sadece hükümdar değiştirir.');
+      if (w.kayzerId !== me.id && !w.solo) return no('Oyun hızını sadece hükümdar değiştirir.');
       if (![0.5, 1, 2].includes(a.speed)) return no('0.5x, 1x ya da 2x.');
       if (w.combat) { w.speedBefore = a.speed; log(w, `Ferman: saldırı bitince zaman ${a.speed}x akacak.`); return ok(`Saldırı sürerken oyun 0.25x; bitince ${a.speed}x olacak.`); }
       const f = Math.min(0.999, Math.max(0, (now - w.lastTickAt) / hourMs(w)));

@@ -18,6 +18,7 @@ import { electionPhase } from './tick';
 import { granaryDistribute, fulfillOrder } from './market2';
 import { granaryBuy } from './life';
 import { hazineReserve, hazineTrend, members } from './meclis';
+import { rulerTraitDay, traitPolicy } from './solostart';
 
 const isNpc = (p: Person): boolean => !p.playerId || !!p.npc;
 const adult = (w: World, p: Person): boolean => yearsOf(w, p) >= 16 && p.jailedDays <= 0 && p.prof !== 'naip' && p.prof !== 'kayzer';
@@ -119,18 +120,22 @@ export function npcPartyDay(w: World): void {
 export function naipPolicy(w: World): string[] {
   const done: string[] = []; const R = hazineReserve(w); const bread = w.prices.ekmek ?? BASE_PRICE.ekmek; const b0 = BASE_PRICE.ekmek;
   const mood = w.people.reduce((a, p) => a + p.mood, 0) / Math.max(1, w.people.length);
+  const tp = traitPolicy(w);
   const vergiG = (w.genelgeler ?? []).some((g) => g.until >= w.day && (g.kind === 'vergiArtirim' || g.kind === 'vergiIndirim'));
   const passive = w.meclis.bills.some((b) => b.kind === 'vergi' && ['tartisma', 'oylama', 'onay'].includes(b.status));
   if (!vergiG && !passive) {
     const tr = hazineTrend(w); // a sensible ruler steers by the daily balance, gently, between %8 and %16
-    if (w.taxRate < 16 && (w.treasury < R * 1.5 || (tr < -15 && w.treasury < R * 6))) { w.taxRate += 1; done.push(`vergi %${w.taxRate} (hazine günde ${Math.round(tr)} D)`); use(w, 'naip_vergi'); }
-    else if (w.taxRate > 8 && tr > 40 && w.treasury > R * 4 && mood < 85) { w.taxRate -= 1; done.push(`vergi %${w.taxRate} (hazine dolu)`); use(w, 'naip_vergi'); }
+    if (w.rulerTrait && w.taxRate < tp.taxMin) { w.taxRate += 1; done.push(`vergi %${w.taxRate}`); use(w, 'naip_vergi'); }
+    else if (w.rulerTrait && w.taxRate > tp.taxMax) { w.taxRate -= 1; done.push(`vergi %${w.taxRate}`); use(w, 'naip_vergi'); }
+    else if (w.taxRate < tp.taxMax && (w.treasury < R * 1.5 || (tr < -15 && w.treasury < R * 6) || (w.rulerTrait === 'zalim' && w.taxRate < tp.taxMax))) { w.taxRate += 1; done.push(`vergi %${w.taxRate} (hazine günde ${Math.round(tr)} D)`); use(w, 'naip_vergi'); }
+    else if (w.taxRate > tp.taxMin && tr > 40 && w.treasury > R * 4 && mood < 85) { w.taxRate -= 1; done.push(`vergi %${w.taxRate} (hazine dolu)`); use(w, 'naip_vergi'); }
   }
-  if (bread > b0 * 1.8 && w.granary >= 20) { const n = granaryDistribute(w, 40); if (n) { done.push(`ambardan ${n} buğday dağıtıldı`); use(w, 'naip_ambar'); } }
-  else if (bread < b0 * 1.05 && w.granary < 150 && w.treasury > R * 3) { const n = granaryBuy(w, 20); if (n) { done.push(`ambara ${n} buğday alındı`); use(w, 'naip_ambar'); } }
+  if (bread > b0 * tp.distAt && w.granary >= 20) { const n = granaryDistribute(w, 40); if (n) { done.push(`ambardan ${n} buğday dağıtıldı`); use(w, 'naip_ambar'); } }
+  else if (tp.buyGranary && bread < b0 * 1.05 && w.granary < 150 && w.treasury > R * 3) { const n = granaryBuy(w, 20); if (n) { done.push(`ambara ${n} buğday alındı`); use(w, 'naip_ambar'); } }
   if (bread > b0 * 3 && !w.priceCaps.ekmek) { w.priceCaps.ekmek = Math.round(b0 * 2.2 * 100) / 100; done.push(`ekmeğe narh ${w.priceCaps.ekmek} D`); use(w, 'naip_narh'); }
   else if (w.priceCaps.ekmek && bread < b0 * 2 && !(w.genelgeler ?? []).some((g) => g.kind === 'fiyatTavani' && g.until >= w.day)) { delete w.priceCaps.ekmek; done.push('ekmek narhı kaldırıldı'); use(w, 'naip_narh'); }
   if (w.imports === false && bread > b0 * 2 && !w.raid) { w.imports = true; done.push('ithalat izni verildi'); use(w, 'naip_ithalat'); }
+  { const t = rulerTraitDay(w); if (t) done.push(t); }
   for (const p of w.people) if (p.prof === 'naip') p.mood = clamp(p.mood);
   if (done.length) log(w, `🏛 Naip: ${done.join('; ')}.`);
   return done;
