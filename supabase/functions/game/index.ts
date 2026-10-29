@@ -70,15 +70,17 @@ async function storeNpcChat(msgs: any[]) {
   await db.from('messages').insert(msgs.map((m) => ({ from_user: null, from_person: m.fromPersonId, from_name: m.fromName, to_person: m.toPersonId, text: String(m.text).slice(0, 280), created_at: new Date(m.at).toISOString() })));
 }
 /** commit info of the last successful mutate (per request: set right before mutate returns) */
-interface Committed { state: any; ver: number }
+interface Committed { state: any; ver: number; thr?: boolean }
 /**
  * read → mutate → compare-and-swap commit, retried on conflict.
  * v2.0.5: `skipIfSame` (heartbeats): when the change is only the caller's own "last seen" clock (fresh < 20 s) and the
  * server clock field, nothing is written – the world is identical, so the version check stays correct and no row is rewritten.
  */
-async function mutate<T>(f: (w: any) => T, tries = 5, out?: Committed, skipIfSame?: string): Promise<T> {
+const HB_COMMIT_MS = Number(Deno.env.get('HB_COMMIT_MS') ?? 4000);
+async function mutate<T>(f: (w: any) => T, tries = 5, out?: Committed, skipIfSame?: string, throttle = false): Promise<T> {
   for (let i = 0; i < tries; i++) {
     const { state, version } = await loadWorld();
+    const lastCommit0 = Number(state._commitAt ?? 0);
     const sig = skipIfSame ? quietSig(state, skipIfSame) : null; const seen0 = skipIfSame ? state.players?.[skipIfSame]?.lastSeen ?? 0 : 0;
     const r = f(state);
     const npc = core.drainChat(state);
@@ -86,6 +88,13 @@ async function mutate<T>(f: (w: any) => T, tries = 5, out?: Committed, skipIfSam
       state.players[skipIfSame!].lastSeen = seen0; // what is stored
       if (out) { out.state = state; out.ver = version; } return r;
     }
+    // v2.0.6: heartbeats commit the world at most every HB_COMMIT_MS (each commit rewrites ~270 KB; too many writes slowed the DB = ping).
+    // The tick is time-based, so the next commit catches up; actions always commit.
+    if (throttle && !npc.length && Date.now() - lastCommit0 < HB_COMMIT_MS && Date.now() - seen0 < 20_000) {
+      state.players[skipIfSame!].lastSeen = seen0; state._commitAt = lastCommit0;
+      if (out) { out.state = state; out.ver = version; out.thr = true; } return r;
+    }
+    state._commitAt = Date.now();
     const { data: ok } = await db.rpc('commit_world', { new_state: state, expected: version });
     if (ok) { await storeNpcChat(npc); if (out) { out.state = state; out.ver = version + 1; } return r; }
     await new Promise((res) => setTimeout(res, (40 + Math.random() * 160) * (1 + Math.min(i, 4) * 0.5))); // v2.0.2: jittered back-off (attack spam starved heartbeats)
@@ -157,7 +166,7 @@ Deno.serve(async (req) => {
           if (LLM_KEY && now - (w.llm?.talkAt ?? 0) > TALK_EVERY_MS && core.llmBudget(w, today(), Math.floor(PER_DAY * 0.15))) { const b = core.talkBatch(w, now); if (b) { batch = b; w.llm!.talkAt = now; core.llmSpend(w, today()); } }
           if (LLM_KEY && now - (w.llm?.speechAt ?? 0) > 10 * 60_000 && core.llmBudget(w, today(), Math.floor(PER_DAY * 0.2))) { const b = core.speechBatch(w); if (b) { sbatch = b; w.llm!.speechAt = now; core.llmSpend(w, today()); } }
           return { world: w, summary: r.summary };
-        }, 5, cm, uid); } catch { const { state, version } = await loadWorld(); core.heartbeat(state, uid, now); out = { world: state, summary: null }; cm.state = state; cm.ver = version; batch = null; sbatch = null; due = false; } // v2.0.2: busy world → still answer with a fresh (uncommitted) view so the client never freezes
+        }, 5, cm, uid, true); if (cm.thr) { batch = null; sbatch = null; due = false; } } catch { const { state, version } = await loadWorld(); core.heartbeat(state, uid, now); out = { world: state, summary: null }; cm.state = state; cm.ver = version; batch = null; sbatch = null; due = false; } // v2.0.2: busy world → still answer with a fresh (uncommitted) view so the client never freezes
         if (vw) out = { view: viewOf(cm, uid, body.have), summary: out.summary };
         const sb = sbatch as { refs: [string, number][]; prompt: { system: string; user: string } } | null;
         if (due) await db.rpc('snapshot_world', { force: false });
